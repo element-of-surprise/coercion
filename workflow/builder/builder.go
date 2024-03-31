@@ -41,6 +41,7 @@ import (
 	"time"
 
 	"github.com/element-of-surprise/workstream/workflow"
+	"github.com/google/uuid"
 )
 
 // BuildPlan is a builder for creating a workflow Plan. It is not safe for concurrent use.
@@ -53,6 +54,22 @@ type BuildPlan struct {
 // Option provides optional arguments to the New() constructor.
 type Option func(*BuildPlan) error
 
+// WithGroupID sets the group ID for the Plan.
+func WithGroupID(id uuid.UUID) Option {
+	return func(b *BuildPlan) error {
+		if b.emitted {
+			return errors.New("cannot call WithGroupID() after Plan() has been called")
+		}
+
+		if id == uuid.Nil {
+			return errors.New("group ID must not be nil")
+		}
+
+		b.current().(*workflow.Plan).GroupID = id
+		return nil
+	}
+}
+
 // New creates a new BuildPlan with the internal Plan object having the given
 // name and description.
 func New(name, descr string, options ...Option) (*BuildPlan, error) {
@@ -60,6 +77,13 @@ func New(name, descr string, options ...Option) (*BuildPlan, error) {
 	if err := b.Reset(name, descr, options...); err != nil {
 		return nil, err
 	}
+
+	for _, o := range options {
+		if err := o(b); err != nil {
+			return nil, err
+		}
+	}
+
 	return b, nil
 }
 
