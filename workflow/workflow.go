@@ -68,6 +68,8 @@ type Internal struct {
 	// This will be set to FRUnknown if not in a failed state.
 	Reason FailureReason
 
+	// SubmitTime is the time that the object was submitted.
+	SubmitTime time.Time
 	// Start is the time that the object was started.
 	Start time.Time
 	// End is the time that the object was completed.
@@ -79,11 +81,6 @@ type Internal struct {
 // This allows tests to be more modular instead of a super test of the entire object tree.
 type validator interface {
 	validate() ([]validator, error)
-}
-
-// defaulter is a type that sets default values for its fields.
-type defaulter interface {
-	defaults()
 }
 
 // ObjectType is the type of object.
@@ -121,24 +118,27 @@ type Object interface {
 // Plan represents a workflow plan that can be executed. This is the main struct that is
 // used to define the workflow.
 type Plan struct {
-	// Name is the name of the workflow.
+	// Name is the name of the workflow. Required.
 	Name string
-	// Descr is a human-readable description of the workflow.
+	// Descr is a human-readable description of the workflow. Required.
 	Descr string
+	// A GroupID is a unique identifier for a group of workflows. This is used to group
+	// workflows together for informational purposes. This is not required.
+	GroupID uuid.UUID
 
 	// PreChecks are actions that are executed before the workflow starts.
-	// Any error will cause the workflow to fail.
+	// Any error will cause the workflow to fail. Optional.
 	PreChecks *PreChecks
 	// PostChecks are actions that are executed after the workflow has completed.
-	// Any error will cause the workflow to fail.
+	// Any error will cause the workflow to fail. Optional.
 	PostChecks *PostChecks
 	// ContChecks are actions that are executed while the workflow is running.
-	// Any error will cause the workflow to fail.
+	// Any error will cause the workflow to fail. Optional.
 	ContChecks *ContChecks
 
 	// Blocks is a list of blocks that are executed in sequence.
 	// If a block fails, the workflow will fail.
-	// Only one block can be executed at a time.
+	// Only one block can be executed at a time. Required.
 	Blocks []*Block
 
 	// Internal represents settings that should not be set by the user, but users can query.
@@ -152,6 +152,16 @@ func (p *Plan) Type() ObjectType {
 
 // object implements the Object interface.
 func (p *Plan) object() {}
+
+func (p *Plan) defaults() {
+	if p == nil {
+		return
+	}
+	p.Internal = &Internal{
+		ID:     uuid.New(),
+		Status: NotStarted,
+	}
+}
 
 func (p *Plan) validate() ([]validator, error) {
 	if p == nil {
@@ -183,7 +193,7 @@ func (p *Plan) validate() ([]validator, error) {
 // PreChecks represents a set of actions that are executed before the workflow starts.
 type PreChecks struct {
 	// Actions is a list of actions that are executed in parallel. Any error will
-	// cause the workflow to fail.
+	// cause the workflow to fail. Required.
 	Actions []*Action
 
 	// Internal represents settings that should not be set by the user, but users can query.
@@ -197,6 +207,17 @@ func (p *PreChecks) Type() ObjectType {
 
 // object implements the Object interface.
 func (p *PreChecks) object() {}
+
+func (p *PreChecks) defaults() {
+	if p == nil {
+		return
+	}
+	p.Internal = &Internal{
+		ID:     uuid.New(),
+		Status: NotStarted,
+	}
+}
+
 
 func (p *PreChecks) validate() ([]validator, error) {
 	if p == nil {
@@ -220,7 +241,7 @@ func (p *PreChecks) validate() ([]validator, error) {
 // PostChecks represents a set of actions that are executed after the workflow has completed.
 type PostChecks struct {
 	// Actions is a list of actions that are executed in parallel. Any error will
-	// cause the workflow to fail.
+	// cause the workflow to fail. Required.
 	Actions []*Action
 
 	// Internal represents settings that should not be set by the user, but users can query.
@@ -233,6 +254,17 @@ func (p *PostChecks) object() {}
 // Type implements the Object.Type().
 func (p *PostChecks) Type() ObjectType {
 	return OTPostCheck
+}
+
+func (p *PostChecks) defaults() {
+	if p == nil {
+		return
+	}
+
+	p.Internal = &Internal{
+		ID:     uuid.New(),
+		Status: NotStarted,
+	}
 }
 
 func (p *PostChecks) validate() ([]validator, error) {
@@ -258,10 +290,10 @@ func (p *PostChecks) validate() ([]validator, error) {
 // They will automatically be run during the PreCheck sequence.
 type ContChecks struct {
 	// Actions is a list of actions that are executed in parallel. Any error will
-	// cause the workflow to fail.
+	// cause the workflow to fail. Required.
 	Actions []*Action
 	// Delay is the amount of time to wait between ContCheck runs. This defaults to 30 seconds. If
-	// you want no delay, set this to < 0.
+	// you want no delay, set this to < 0. Optional.
 	Delay time.Duration
 
 	// Internal represents settings that should not be set by the user, but users can query.
@@ -310,9 +342,9 @@ func (c *ContChecks) validate() ([]validator, error) {
 // a configurable amount of concurrency. If a block fails, the workflow will fail. Only one block
 // can be executed at a time.
 type Block struct {
-	// Name is the name of the block.
+	// Name is the name of the block. Required.
 	Name string
-	// Descr is a description of the block.
+	// Descr is a description of the block. Required.
 	Descr string
 
 	// EntranceDelay is the amount of time to wait before the block starts. This defaults to 0.
@@ -321,15 +353,15 @@ type Block struct {
 	ExitDelay time.Duration
 
 	// PreChecks are actions that are executed before the block starts.
-	// Any error will cause the block to fail.
+	// Any error will cause the block to fail. Optional.
 	PreChecks *PreChecks
 	// PostChecks are actions that are executed after the block has completed.
-	// Any error will cause the block to fail.
+	// Any error will cause the block to fail. Optional.
 	PostChecks *PostChecks
-	// ContChecks are actions that are executed while the block is running.
+	// ContChecks are actions that are executed while the block is running. Optional.
 	ContChecks *ContChecks
 
-	// Sequences is a list of sequences that are executed.
+	// Sequences is a list of sequences that are executed. Required..
 	Sequences []*Sequence
 
 	// Concurrency is the number of sequences that are executed in parallel. This defaults to 1.
@@ -356,6 +388,10 @@ func (b *Block) defaults() *Block {
 	}
 	if b.Concurrency < 1 {
 		b.Concurrency = 1
+	}
+	b.Internal = &Internal{
+		ID:     uuid.New(),
+		Status: NotStarted,
 	}
 	return b
 }
@@ -394,11 +430,11 @@ func (b *Block) validate() ([]validator, error) {
 
 // Sequence represents a set of Jobs that are executed in sequence. Any error will cause the workflow to fail.
 type Sequence struct {
-	// Name is the name of the sequence.
+	// Name is the name of the sequence. Required.
 	Name string
-	// Descr is a description of the sequence.
+	// Descr is a description of the sequence. Required.
 	Descr string
-	// Jobs is a list of jobs that are executed in sequence. Any error will cause the workflow to fail.
+	// Jobs is a list of jobs that are executed in sequence. Any error will cause the workflow to fail. Required.
 	Jobs []*Job
 
 	// Internal represents settings that should not be set by the user, but users can query.
@@ -412,6 +448,16 @@ func (s *Sequence) Type() ObjectType {
 
 // object implements the Object interface.
 func (s *Sequence) object() {}
+
+func (s *Sequence) defaults() {
+	if s == nil {
+		return
+	}
+	s.Internal = &Internal{
+		ID:     uuid.New(),
+		Status: NotStarted,
+	}
+}
 
 func (s *Sequence) validate() ([]validator, error) {
 	if s == nil {
@@ -441,12 +487,12 @@ func (s *Sequence) validate() ([]validator, error) {
 }
 
 type Job struct {
-	// Name is the name of the job.
+	// Name is the name of the job. Required.
 	Name string
-	// Descr is a description of the job.
+	// Descr is a description of the job. Required.
 	Descr string
 	// Actions is a list of actions that are executed in sequence. Any error will
-	// cause the workflow to fail.
+	// cause the workflow to fail. Required.
 	Action *Action
 	// Timeout is the amount of time to wait for the Action to complete. This defaults to 30 seconds and
 	// must be at least 5 seconds.
@@ -474,6 +520,10 @@ func (j *Job) defaults() *Job {
 	}
 	if j.Retries < 0 {
 		j.Retries = 0
+	}
+	j.Internal = &Internal{
+		ID:     uuid.New(),
+		Status: NotStarted,
 	}
 
 	return j
@@ -519,12 +569,12 @@ type register interface {
 
 // Action represents a single action that is executed by a plugin.
 type Action struct {
-	// Name is the name of the action.
+	// Name is the name of the action. Required.
 	Name string
-	// Descr is a description of the action.
+	// Descr is a description of the action. Required.
 	Descr string
 
-	// Plugin is the name of the plugin that is executed.
+	// Plugin is the name of the plugin that is executed. Required.
 	Plugin string
 	// Req is the request object that is passed to the plugin.
 	Req any
@@ -546,6 +596,16 @@ func (a *Action) Type() ObjectType {
 
 // object implements the Object interface.
 func (a *Action) object() {}
+
+func (a *Action) defaults() {
+	if a == nil {
+		return
+	}
+	a.Internal = &Internal{
+		ID:     uuid.New(),
+		Status: NotStarted,
+	}
+}
 
 func (a *Action) isCheck() bool {
 	if a.plugin == nil {

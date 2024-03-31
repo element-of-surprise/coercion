@@ -2,23 +2,29 @@
 
 ## Introduction
 
-Workstream is a progromatic workflow framework that allows you to define a complex series of prechecks, postchecks, continuous checks, blocks of actions, a plugin system, etc... with a simple and easy to read methdology.
+Workstream is a progromatic workflow framework that allows you to define a complex series of prechecks, postchecks, continuous checks, blocks of actions, a plugin system, etc... with a simple and easy to read methodology.
 
 This system is based on a distributed Workflow system that I created at Google, that handled the deployment of various configurations and upgrades to the B2 router backbone. At the time of this writing, I believe the system is still in use. It should be noted that at least while I was there, 0 outages were caused by the system.
 
-This system is significatly simpler, for use in CLI applications or to accomplish simple tasks. It is not designed to be a full replacement for a distributed workflow system.
+This framework is significatly simpler, for use in CLI applications or to accomplish simple tasks. It is not designed to be used in the manner that the forementioned system was. That was a much more robust system that was horitzonatally scalable, field upgradable without downtime, mutli-language support, support for policy systems, etc...
 
-Also of note, I developed a simliar system that is not open source between employers and another version for my book, `Go For DevOps`. So there is some prior art, and apparently I like writing the same thing over and over again.
+I developed a simliar system to the forementioned system that is not open source between employers.
+
+I also have an open source framework similar to this that lacks the testing and utilities of this version for the book, `Go For DevOps`. It shows how to develope a policy system, which this lacks.
+
+So there is some prior art, and apparently I like writing the same thing over and over again.
 
 ## Why?
 
 I created this package because I needed a way to define a complex series of actions in a simple and easy to read way. I also wanted to be able to define a series of actions that could be executed in parallel, but also have a series of actions that could be executed in sequence.
 
-While everyone seems to want to configure systems using YAML, this is really a bad idea. YAML is not a programming language, and it is not designed to be a programming language. It is a configuration language. And something has to execute that anyways and most of the time they aren't great at it.
+While everyone seems to want to configure systems using YAML, I have found that it generally leads to nasty failures. YAML is not a programming language, and it is not designed to be a programming language. It is a configuration language. And something has to execute that anyways and most of the time the underlying systems aren't great at it, because they take their cues from the YAML. If you see a regex in a YAML file, you know you are in trouble.
 
-I want access to the tools that a programming language provides. I also want to be able to test my workflows in a simple way, which is hard to do with YAML.
+Even when the configuration language is tailor made and not some generic thing that wasn't suited for that purpose, it is still a configuration language. Its hard to test a configuration language will do what you want. Usually this means the only tests are in a real environment, which is not ideal (even if it is dev).
 
-Scripting languages like `Bash` or `Python` are not much better. Yes, you can use `Bash` to do anything, but it is not a good language for defining complex workflows. `Python` is better, but it is not a good language for defining complex workflows either. You generally know your `Bash` script works when you run it. I want tests.
+I want access to the tools that a programming language provides. I also want to be able to test my workflows in a simple way, which is hard to do with any configuration language.
+
+Scripting languages like `Bash` or `Python` are not much better. Yes, you can use `Bash` to do anything, but it is not a good language for defining complex workflows. `Python` is better, but it is not a good language for defining complex workflows either. You generally know your `Bash` script works when you run it. I want unit tests even if I still need integration tests.
 
 And `Python` still suffers from type safety issues. I want type safety. And I need to have `Python` installed on a system to use it, and I don't want to have to install `Python` on a system to use it. No, I don't want to bundle the interpreter with my script or in my container. I've done that, nothing like shipping hundreds of MiB across the network when 10 MiB would do.
 
@@ -57,17 +63,17 @@ type Plugin interface {
 	// to ensure that it is ready to be used. If the plugin is not ready, it should return an error.
 	// This is useful for plugins that require local resources like a command line application to
 	// be installed.
-	Init() erro
+	Init() error
 }
 ```
 
-- Name - The name of the plugin, only a single plugin may have a name. To avoid name collisions, the plugin name should include the package path.
+- Name - The name of the plugin, only a single plugin may have a specific name. To avoid name collisions, the plugin name should include the package path.
 - Execute - The main function of the plugin, this is where the work is done.
 - ValidateReq - Validates the request object, since they are passed in as `any`.
 - Request - Returns an empty request object.
-- Response - Returns an empty response object.
-- IsCheck - Returns true if the plugin is a check plugin. A check plugin should not have side effects and can only be used in one of the check actions.
-- RetryPlan - Returns the retry plan for the plugin. This is the plan for how the plugin should be retried. The number of retries is set in the `Job` object.
+- Response - Returns an empty response object. If a plugin returns a response that isn't the same as this, the plugin is considered to have failed.
+- IsCheck - Returns true if the plugin is a check plugin. A check plugin should not have side effects and can only be used in one of the check actions. A check plugin cannot be used in a Job.
+- RetryPlan - Returns the retry plan for the plugin. This is the plan for how the plugin should be retried. The number of retries is set in the `Job` object. This RetryPlan uses exponential backoff that you define for SRE best practices.
 
 ### Workflow Heirarchy
 
@@ -100,8 +106,10 @@ The workflow is defined in a hierarchy of objects:
   - Holds the request object for the `Plugin`.
   - Holds the response object for the `Plugin`.
 
-All objects have a field called `Internal` that holds the internal state of the object. This is used by the system to track the state of the object.
+All objects have a field called `Internal` that holds the internal state of the object. This is used by the system to track the state of the object. It cannot be set by the user.
 
 ### Builder Package
 
 The `builder` package is used to build a `Plan` using a builder pattern. Use this if you want to build a `Plan` from information gleaned from various sources.
+
+See documentation in that package for more information.
