@@ -20,6 +20,11 @@ type Item struct {
 	Value workflow.Object
 }
 
+// IsZero returns true if the Item is the zero value.
+func (i Item) IsZero() bool {
+	return i.Value == nil && i.Chain == nil
+}
+
 // Plan returns the Value as a *workflow.Plan. If the object is not a Plan, this
 // will panic.
 func (i Item) Plan() *workflow.Plan {
@@ -229,6 +234,8 @@ func walkJob(ctx context.Context, ch chan Item, chain []workflow.Object, job *wo
 	return true
 }
 
+// emit emits an Item to the channel unless the channel is blocke and the Context is canceled.
+// If the Context is canceled, emit returns false.
 func emit(ctx context.Context, ch chan Item, i Item) (ok bool) {
 	select {
 	case <-ctx.Done():

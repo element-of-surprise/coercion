@@ -617,7 +617,8 @@ func (q *queue[T]) pop() T {
 	defer q.mu.Unlock()
 
 	if len(q.items) == 0 {
-		return nil
+		var zero T
+		return zero
 	}
 
 	item := q.items[0]
