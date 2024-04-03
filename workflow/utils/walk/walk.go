@@ -61,12 +61,6 @@ func (i Item) Sequence() *workflow.Sequence {
 	return i.Value.(*workflow.Sequence)
 }
 
-// Job returns the Value as a *workflow.Job. If the object is not a Job, this
-// will panic.
-func (i Item) Job() *workflow.Job {
-	return i.Value.(*workflow.Job)
-}
-
 // Action returns the Value as a *workflow.Action. If the object is not an
 // Action, this will panic.
 func (i Item) Action() *workflow.Action {
@@ -209,26 +203,11 @@ func walkSequence(ctx context.Context, ch chan Item, chain []workflow.Object, se
 	}
 
 	chain = append(chain, sequence)
-	if sequence.Jobs != nil {
-		for _, job := range sequence.Jobs {
-			if ok := walkJob(ctx, ch, chain, job); !ok {
+	if sequence.Actions != nil {
+		for _, action := range sequence.Actions {
+			if ok := emit(ctx, ch, Item{Chain: chain, Value: action}); !ok {
 				return false
 			}
-		}
-	}
-	return true
-}
-
-func walkJob(ctx context.Context, ch chan Item, chain []workflow.Object, job *workflow.Job) (ok bool) {
-	i := Item{Chain: chain, Value: job}
-	if ok := emit(ctx, ch, i); !ok {
-		return false
-	}
-
-	chain = append(chain, job)
-	if job.Action != nil {
-		if ok := emit(ctx, ch, Item{Chain: chain, Value: job.Action}); !ok {
-			return false
 		}
 	}
 	return true

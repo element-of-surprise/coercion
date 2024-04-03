@@ -27,12 +27,12 @@ type Plugin interface {
 	// can be used as a PreCheck, PostCheck or ContCheck Action. It cannot be used
 	// in a Sequeunce. A non-check plugin is the opposite.
 	IsCheck() bool
-	// RetryPlan returns the retry plan for the plugin so that when an Action wants to
+	// RetryPolicy returns the retry plan for the plugin so that when an Action wants to
 	// retry a plugin, it can use the retry plan to determine how to retry the plugin.
 	// You can build this easily in a few ways:
 	// 1. Use exponential.Policy for a custom retry timetable.
-	// 2. Use one of the pre-built retry plans like FastRetryPlan(), SecondsRetryPlan(), etc.
-	RetryPlan(retries int) exponential.Policy
+	// 2. Use one of the pre-built retry plans like FastRetryPolicy(), SecondsRetryPolicy(), etc.
+	RetryPolicy() exponential.Policy
 	// InitCheck is run after the registery is loaded. The plugin should do any necessary checks
 	// to ensure that it is ready to be used. If the plugin is not ready, it should return an error.
 	// This is useful for plugins that require local resources like a command line application to
@@ -40,12 +40,12 @@ type Plugin interface {
 	Init() error
 }
 
-// FastRetryPlan returns a retry plan that is fast at first and then slows down.
+// FastRetryPolicy returns a retry plan that is fast at first and then slows down.
 //
 // progression will be:
 // 100ms, 200ms, 400ms, 800ms, 1.6s, 3.2s, 6.4s, 12.8s, 25.6s, 51.2s, 60s
 // Not counting a randomization factor which will be +/- up to 50% of the interval.
-func FastRetryPlan() exponential.Policy {
+func FastRetryPolicy() exponential.Policy {
 	return exponential.Policy{
 		InitialInterval:     100 * time.Millisecond,
 		Multiplier:          2,
@@ -54,12 +54,12 @@ func FastRetryPlan() exponential.Policy {
 	}
 }
 
-// SecondsRetryPlan returns a retry plan that  moves in 1 second intervals up to 60 seconds.
+// SecondsRetryPolicy returns a retry plan that  moves in 1 second intervals up to 60 seconds.
 //
 // progression will be:
 // 1s, 2s, 4s, 8s, 16s, 32s, 60s
 // Not counting a randomization factor which will be +/- up to 50% of the interval.
-func SecondsRetryPlan() exponential.Policy {
+func SecondsRetryPolicy() exponential.Policy {
 	return exponential.Policy{
 		InitialInterval:     1 * time.Second,
 		Multiplier:          2,
@@ -68,13 +68,13 @@ func SecondsRetryPlan() exponential.Policy {
 	}
 }
 
-// ThirtySecondsRetryPlan returns a retry plan that moves in 30 second intervals up to 5 minutes.
+// ThirtySecondsRetryPolicy returns a retry plan that moves in 30 second intervals up to 5 minutes.
 //
 // progression will be:
 // 30s, 33s, 36s, 40s, 44s, 48s, 53s, 58s, 64s, 70s, 77s, 85s, 94s, 103s, 113s, 124s, 136s, 150s,
 // 165s, 181s, 199s, 219s, 241s, 265s, 292s, 300s
 // Not counting a randomization factor which will be +/- up to 20% of the interval.
-func ThirtySecondsRetryPlan() exponential.Policy {
+func ThirtySecondsRetryPolicy() exponential.Policy {
 	return exponential.Policy{
 		InitialInterval:     30 * time.Second,
 		Multiplier:          1.1,
@@ -106,7 +106,7 @@ func validatePolicy(p exponential.Policy) error {
 
 // Registry is the global registry of plugins. It is only intended to be used
 // during initialization, any other use can result in undefined behavior.
-var Registry = registry{
+var Registry = &registry{
 	m: map[string]Plugin{},
 }
 
@@ -134,11 +134,26 @@ func (r *registry) Register(p Plugin) {
 		panic(fmt.Sprintf("plugin(%s) already registered", p.Name()))
 	}
 
+	if err := validatePolicy(p.RetryPolicy()); err != nil {
+		panic(fmt.Sprintf("plugin(%s) has invalid retry plan: %v", p.Name(), err))
+	}
+
 	r.m[p.Name()] = p
 }
 
-// Get returns a plugin by name. It returns nil if the plugin is not found.
-func (r *registry) Get(name string) Plugin {
+func (r *registry) Plugins() chan Plugin {
+	ch := make(chan Plugin, 1)
+	go func() {
+		for _, p := range r.m {
+			ch <- p
+		}
+		close(ch)
+	}()
+	return ch
+}
+
+// Plugin returns a plugin by name. It returns nil if the plugin is not found.
+func (r *registry) Plugin(name string) Plugin {
 	if r == nil || r.m == nil {
 		return nil
 	}
