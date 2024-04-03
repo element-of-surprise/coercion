@@ -5,22 +5,33 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/element-of-surprise/workstream/internal/execute"
 	"github.com/element-of-surprise/workstream/workflow"
+	"github.com/element-of-surprise/workstream/workflow/storage"
 	"github.com/element-of-surprise/workstream/workflow/utils/walk"
 	"github.com/google/uuid"
 )
 
+// This makes UUUID generation much faster.
 func init() {
 	uuid.EnableRandPool()
 }
 
 type Workstream struct {
-	running map[uuid.UUID]*workflow.Plan
-	storage func(plan *workflow.Plan) error
+	exec  *execute.Plans
+	store storage.ReadWriter
 }
 
-func New() *Workstream {
-	return &Workstream{}
+func New(ctx context.Context, store storage.ReadWriter) (*Workstream, error) {
+	if store == nil {
+		return nil, fmt.Errorf("storage is required")
+	}
+	exec, err := execute.New(ctx, store)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create executor: %w", err)
+	}
+
+	return &Workstream{exec: exec}, nil
 }
 
 type defaulter interface {
@@ -40,17 +51,18 @@ func (w *Workstream) Submit(ctx context.Context, plan *workflow.Plan) (uuid.UUID
 			def.defaults()
 		}
 	}
-	plan.Internal.SubmitTime = w.now()
+	plan.Internals.SubmitTime = w.now()
 
-	if err := w.storage(plan); err != nil {
+	if err := w.store.Write(ctx, plan); err != nil {
 		return uuid.Nil, fmt.Errorf("Failed to write plan to storage: %w", err)
 	}
 
-	return plan.Internal.ID, nil
+	return plan.Internals.Internal.ID, nil
 }
 
+// Start begins execution of a plan with the given id. The plan must have been submitted to the workstream.
 func (w *Workstream) Start(ctx context.Context, id uuid.UUID) error {
-	return nil
+	return w.exec.Start(ctx, id)
 }
 
 func (w *Workstream) now() time.Time {

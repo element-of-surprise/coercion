@@ -9,55 +9,76 @@ import (
 	"github.com/google/uuid"
 )
 
-// Storage is the interface that must be implemented by all storage packages.
-type Storage interface {
-	Plans
-	Blocks
-	Sequences
-	Checks
-	Actions
+type SearchFilter struct{}
 
-	private.Storage
+type ReadWriter interface {
+	PlanReader
+	PlanWriter
 }
 
-// TODO(element-of-surprise): Need to add something about metadata only loading.
-
-type Plans interface {
+type PlanReader interface {
 	// IDExists returns true if the Plan ID exists in the storage.
 	IDExists(ctx context.Context, id uuid.UUID) (bool, error)
 	// ReadPlan returns a Plan from the storage.
 	ReadPlan(ctx context.Context, id uuid.UUID) (*workflow.Plan, error)
-	// WritePlan writes a Plan to the storage.
-	WritePlan(ctx context.Context, plan *workflow.Plan) error
 	// SearchPlans returns a list of Plan IDs that match the filter.
 	SearchPlans(ctx context.Context, filter SearchFilter) ([]uuid.UUID, error)
 	// ListPlans returns a list of all Plan IDs in the storage. This should
 	// return with most recent submiited first.
 	ListPlans(ctx context.Context, limit int) ([]uuid.UUID, error)
+
+	private.Storage
 }
 
-type Blocks interface {
-	ReadBlock(ctx context.Context, id uuid.UUID) (*workflow.Block, error)
-	WriteBlock(ctx context.Context, id uuid.UUID, block *workflow.Block) error
+type PlanWriter interface {
+	// Write writes Plan data to storage, and all underlying data.
+	Write(context.Context, *workflow.Plan) error
+
+	// Checks returns a PlanChecksWriter.
+	Checks() ChecksWriter
+	// Block returns a BlockWriter for the given Block ID. If the Block ID does not exist,
+	// this will panic.
+	Block(id uuid.UUID) BlockWriter
+
+	private.Storage
 }
 
-type Sequences interface {
-	ReadSequence(ctx context.Context, id uuid.UUID) (*workflow.Sequence, error)
-	WriteSequence(ctx context.Context, id uuid.UUID, sequence *workflow.Sequence) error
+type BlockWriter interface {
+	// Write writes Block data to storage, but not underlying data.
+	Write(context.Context, *workflow.Block) error
+
+	// Checks returns a ChecksWriter for Checks in this Block.
+	Checks() ChecksWriter
+	// Sequence returns a SequenceWriter for Sequence in this Block.
+	Sequence(uuid.UUID) SequenceWriter
+
+	private.Storage
 }
 
-type Checks interface {
-	ReadPreCheck(ctx context.Context, id uuid.UUID) (*workflow.PreCheck, error)
-	WritePreCheck(ctx context.Context, id uuid.UUID, preCheck *workflow.PreCheck) error
-	ReadPostCheck(ctx context.Context, id uuid.UUID) (*workflow.PostCheck, error)
-	WritePostCheck(ctx context.Context, id uuid.UUID, postCheck *workflow.PostCheck) error
-	ReadContCheck(ctx context.Context, id uuid.UUID) (*workflow.ContCheck, error)
-	WriteContCheck(ctx context.Context, id uuid.UUID, contCheck *workflow.ContCheck) error
+type ChecksWriter interface {
+	PreChecks(context.Context, *workflow.PreChecks) error
+	ContChecks(context.Context, *workflow.ContChecks) error
+	PostChecks(context.Context, *workflow.PostChecks) error
+
+	// Action returns an ActionWriter for Actions in either PreChecks, ContChecks or PostChecks.
+	// The type of the Action is determined by the workflow.ObjectType. This must be:
+	// workflow.OTPreCheck, workflow.OTContCheck or workflow.OTPostCheck or this will panic.
+	Action(t workflow.ObjectType) ActionWriter
 }
 
-type Actions interface {
-	ReadAction(ctx context.Context, id uuid.UUID) (*workflow.Action, error)
-	WriteAction(ctx context.Context, id uuid.UUID, action *workflow.Action) error
+type SequenceWriter interface {
+	// Write writes Sequence data to storage for Sequences in the specific Block, but not underlying data.
+	Write(context.Context, *workflow.Sequence) error
+
+	// Action returns an ActionWriter for Actions in this Sequence.
+	Action() ActionWriter
+
+	private.Storage
 }
 
-type SearchFilter struct{}
+// ActionWriter is a storage writer for Actions in a specific Sequence, PreChecks, PostChecks or ContChecks.
+type ActionWriter interface {
+	Write(context.Context, *workflow.Action) error
+
+	private.Storage
+}

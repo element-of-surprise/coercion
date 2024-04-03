@@ -64,16 +64,28 @@ type Internal struct {
 	ID uuid.UUID
 	// Status is the status of the object.
 	Status Status
-	// Reason is the reason that the object failed.
-	// This will be set to FRUnknown if not in a failed state.
-	Reason FailureReason
-
-	// SubmitTime is the time that the object was submitted.
-	SubmitTime time.Time
 	// Start is the time that the object was started.
 	Start time.Time
 	// End is the time that the object was completed.
 	End time.Time
+}
+
+// Reset resets the running state of the object. Not for use by users.
+func (i *Internal) Reset() {
+	i.Status = NotStarted
+	i.Start = time.Time{}
+	i.End = time.Time{}
+}
+
+type PlanInternal struct {
+	// SubmitTime is the time that the object was submitted. This is only
+	// set for the Plan object
+	SubmitTime time.Time
+	// Reason is the reason that the object failed.
+	// This will be set to FRUnknown if not in a failed state.
+	Reason FailureReason
+
+	Internal *Internal
 }
 
 // validator is a type that validates its own fields. If the validator has sub-types that
@@ -102,10 +114,8 @@ const (
 	OTBlock ObjectType = 5
 	// OTSequence represents a Sequence.
 	OTSequence ObjectType = 6
-	// OTJob represents a Job.
-	OTJob ObjectType = 7
 	// OTAction represents an Action.
-	OTAction ObjectType = 8
+	OTAction ObjectType = 7
 )
 
 // Object is an interface that all workflow objects must implement.
@@ -125,24 +135,27 @@ type Plan struct {
 	// A GroupID is a unique identifier for a group of workflows. This is used to group
 	// workflows together for informational purposes. This is not required.
 	GroupID uuid.UUID
+	// Meta is any type of metadata that the user wants to store with the workflow.
+	// Must be JSON serializable. This is not used by the workflow engine. Optional.
+	Meta any
 
 	// PreChecks are actions that are executed before the workflow starts.
 	// Any error will cause the workflow to fail. Optional.
 	PreChecks *PreChecks
-	// PostChecks are actions that are executed after the workflow has completed.
-	// Any error will cause the workflow to fail. Optional.
-	PostChecks *PostChecks
 	// ContChecks are actions that are executed while the workflow is running.
 	// Any error will cause the workflow to fail. Optional.
 	ContChecks *ContChecks
+	// PostChecks are actions that are executed after the workflow has completed.
+	// Any error will cause the workflow to fail. Optional.
+	PostChecks *PostChecks
 
 	// Blocks is a list of blocks that are executed in sequence.
 	// If a block fails, the workflow will fail.
 	// Only one block can be executed at a time. Required.
 	Blocks []*Block
 
-	// Internal represents settings that should not be set by the user, but users can query.
-	Internal *Internal
+	// Internals are settings that should not be set by the user, but users can query.
+	Internals *PlanInternal
 }
 
 // Type implements the Object.Type().
@@ -157,9 +170,11 @@ func (p *Plan) defaults() {
 	if p == nil {
 		return
 	}
-	p.Internal = &Internal{
+	p.Internals = &PlanInternal{
+		Internal: &Internal{
 		ID:     uuid.New(),
 		Status: NotStarted,
+		},
 	}
 }
 
@@ -178,7 +193,7 @@ func (p *Plan) validate() ([]validator, error) {
 		return nil, fmt.Errorf("at least one block is required")
 	}
 
-	if p.Internal != nil {
+	if p.Internals != nil {
 		return nil, fmt.Errorf("internal settings should not be set by the user")
 	}
 
@@ -190,11 +205,26 @@ func (p *Plan) validate() ([]validator, error) {
 	return vals, nil
 }
 
+// GetInternals is a getter for the Internal settings.
+// This violates Go naming for getters, but this is because we expose Internal on most objects by the
+// Internal name (unlike most getter/setters). This is here to enable an interface for getting Internal on
+// all objects.
+func (p *Plan) GetInternal() *Internal {
+	if p == nil || p.Internals == nil {
+		return nil
+	}
+	return p.Internals.Internal
+}
+
 // PreChecks represents a set of actions that are executed before the workflow starts.
 type PreChecks struct {
 	// Actions is a list of actions that are executed in parallel. Any error will
 	// cause the workflow to fail. Required.
 	Actions []*Action
+
+	// Timeout is the amount of time that the pre-checks are allowed to run before
+	// they are considered failed. Optional.
+	Timeout time.Duration
 
 	// Internal represents settings that should not be set by the user, but users can query.
 	Internal *Internal
@@ -218,7 +248,6 @@ func (p *PreChecks) defaults() {
 	}
 }
 
-
 func (p *PreChecks) validate() ([]validator, error) {
 	if p == nil {
 		return nil, nil
@@ -238,11 +267,23 @@ func (p *PreChecks) validate() ([]validator, error) {
 	return vals, nil
 }
 
+// GetInternal is a getter for the Internal settings.
+func (p *PreChecks) GetInternal() *Internal {
+	if p == nil {
+		return nil
+	}
+	return p.Internal
+}
+
 // PostChecks represents a set of actions that are executed after the workflow has completed.
 type PostChecks struct {
 	// Actions is a list of actions that are executed in parallel. Any error will
 	// cause the workflow to fail. Required.
 	Actions []*Action
+
+	// Timeout is the amount of time that the pre-checks are allowed to run before
+	// they are considered failed. Optional.
+	Timeout time.Duration
 
 	// Internal represents settings that should not be set by the user, but users can query.
 	Internal *Internal
@@ -286,12 +327,25 @@ func (p *PostChecks) validate() ([]validator, error) {
 	return vals, nil
 }
 
+// GetInternal is a getter for the Internal settings.
+func (p *PostChecks) GetInternal() *Internal {
+	if p == nil {
+		return nil
+	}
+	return p.Internal
+}
+
 // ContChecks represents a set of actions that are executed while the workflow is running.
 // They will automatically be run during the PreCheck sequence.
 type ContChecks struct {
 	// Actions is a list of actions that are executed in parallel. Any error will
 	// cause the workflow to fail. Required.
 	Actions []*Action
+
+	// Timeout is the amount of time that the pre-checks are allowed to run before
+	// they are considered failed. Optional.
+	Timeout time.Duration
+
 	// Delay is the amount of time to wait between ContCheck runs. This defaults to 30 seconds. If
 	// you want no delay, set this to < 0. Optional.
 	Delay time.Duration
@@ -336,6 +390,14 @@ func (c *ContChecks) validate() ([]validator, error) {
 	}
 
 	return vals, nil
+}
+
+// GetInternal is a getter for the Internal settings.
+func (c *ContChecks) GetInternal() *Internal {
+	if c == nil {
+		return nil
+	}
+	return c.Internal
 }
 
 // Block represents a set of replated work. It contains a list of sequences that are executed with
@@ -428,14 +490,22 @@ func (b *Block) validate() ([]validator, error) {
 	return vals, nil
 }
 
-// Sequence represents a set of Jobs that are executed in sequence. Any error will cause the workflow to fail.
+// GetInternal is a getter for the Internal settings.
+func (b *Block) GetInternal() *Internal {
+	if b == nil {
+		return nil
+	}
+	return b.Internal
+}
+
+// Sequence represents a set of Actions that are executed in sequence. Any error will cause the workflow to fail.
 type Sequence struct {
 	// Name is the name of the sequence. Required.
 	Name string
 	// Descr is a description of the sequence. Required.
 	Descr string
-	// Jobs is a list of jobs that are executed in sequence. Any error will cause the workflow to fail. Required.
-	Jobs []*Job
+	// Actions is a list of actions that are executed in sequence. Any error will cause the workflow to fail. Required.
+	Actions []*Action
 
 	// Internal represents settings that should not be set by the user, but users can query.
 	Internal *Internal
@@ -475,90 +545,23 @@ func (s *Sequence) validate() ([]validator, error) {
 		return nil, fmt.Errorf("internal settings should not be set by the user")
 	}
 
-	if len(s.Jobs) == 0 {
-		return nil, fmt.Errorf("at least one job is required")
+	if len(s.Actions) == 0 {
+		return nil, fmt.Errorf("at least one Action is required")
 	}
 
-	vals := make([]validator, 0, len(s.Jobs))
-	for _, j := range s.Jobs {
-		vals = append(vals, j)
+	vals := make([]validator, 0, len(s.Actions))
+	for _, a := range s.Actions {
+		vals = append(vals, a)
 	}
 	return vals, nil
 }
 
-type Job struct {
-	// Name is the name of the job. Required.
-	Name string
-	// Descr is a description of the job. Required.
-	Descr string
-	// Actions is a list of actions that are executed in sequence. Any error will
-	// cause the workflow to fail. Required.
-	Action *Action
-	// Timeout is the amount of time to wait for the Action to complete. This defaults to 30 seconds and
-	// must be at least 5 seconds.
-	Timeout time.Duration
-	// Retries is the number of times to retry the Action if it fails. This defaults to 0.
-	Retries int
-	// Internal represents settings that should not be set by the user, but users can query.
-	Internal *Internal
-}
-
-// Type implements the Object.Type().
-func (j *Job) Type() ObjectType {
-	return OTJob
-}
-
-// object implements the Object interface.
-func (j *Job) object() {}
-
-func (j *Job) defaults() *Job {
-	if j == nil {
-		return j
+// GetInternal is a getter for the Internal settings.
+func (s *Sequence) GetInternal() *Internal {
+	if s == nil {
+		return nil
 	}
-	if j.Timeout == 0 {
-		j.Timeout = 30 * time.Second
-	}
-	if j.Retries < 0 {
-		j.Retries = 0
-	}
-	j.Internal = &Internal{
-		ID:     uuid.New(),
-		Status: NotStarted,
-	}
-
-	return j
-}
-
-func (j *Job) validate() ([]validator, error) {
-	if j == nil {
-		return nil, fmt.Errorf("cannot have a nil Job")
-	}
-
-	if strings.TrimSpace(j.Name) == "" {
-		return nil, fmt.Errorf("name is required")
-	}
-	if strings.TrimSpace(j.Descr) == "" {
-		return nil, fmt.Errorf("description is required")
-	}
-
-	if j.Timeout < 5*time.Second {
-		return nil, fmt.Errorf("timeout must be at least 5 seconds")
-	}
-
-	if j.Internal != nil {
-		return nil, fmt.Errorf("internal settings should not be set by the user")
-	}
-
-	if j.Action == nil {
-		return nil, fmt.Errorf("action is required")
-	}
-
-	if j.Action.isCheck() {
-		return nil, fmt.Errorf("job(%s) %s: check actions are not allowed in jobs", j.Name, j.Action.Name)
-	}
-
-	vals := []validator{j.Action}
-	return vals, nil
+	return s.Internal
 }
 
 // register is an interface that is used to get a plugin by name.
@@ -567,26 +570,43 @@ type register interface {
 	Get(name string) plugins.Plugin
 }
 
-// Action represents a single action that is executed by a plugin.
-type Action struct {
-	// Name is the name of the action. Required.
-	Name string
-	// Descr is a description of the action. Required.
-	Descr string
-
-	// Plugin is the name of the plugin that is executed. Required.
-	Plugin string
-	// Req is the request object that is passed to the plugin.
-	Req any
+// Attempt is the result of an action that is executed by a plugin.
+type Attempt struct {
 	// Resp is the response object that is returned by the plugin.
 	// This should not be set by the user.
 	Resp any
+	// Err is the error that is returned by the plugin.
+	// This should not be set by the user.
+	Err error
 
+	// Start is the time the attempt started.
+	Start time.Time
+	// End is the time the attempt ended.
+	End   time.Time
+}
+
+// Action represents a single action that is executed by a plugin.
+type Action struct {
+	// Name is the name of the Action. Required.
+	Name string
+	// Descr is a description of the Action. Required.
+	Descr string
+	// Plugin is the name of the plugin that is executed. Required.
+	Plugin string
+	// Timeout is the amount of time to wait for the Action to complete. This defaults to 30 seconds and
+	// must be at least 5 seconds.
+	Timeout time.Duration
+	// Retries is the number of times to retry the Action if it fails. This defaults to 0.
+	Retries int
+	// Req is the request object that is passed to the plugin.
+	Req any
+
+	// Attempts is the attempts of the action. This should not be set by the user.
+	Attempts []Attempt
 	// Internal represents settings that should not be set by the user, but users can query.
 	Internal *Internal
 
 	register register
-	plugin   plugins.Plugin
 }
 
 // Type implements the Object.Type().
@@ -607,17 +627,20 @@ func (a *Action) defaults() {
 	}
 }
 
-func (a *Action) isCheck() bool {
-	if a.plugin == nil {
-		panic("bug: plugin not set")
-	}
-
-	return a.plugin.IsCheck()
-}
-
 func (a *Action) validate() ([]validator, error) {
 	if a == nil {
 		return nil, fmt.Errorf("cannot have a nil Action")
+	}
+
+	if a.Internal != nil {
+		return nil, fmt.Errorf("internal settings should not be set by the user")
+	}
+
+	if a.Timeout == 0 {
+		a.Timeout = 30 * time.Second
+	}
+	if a.Timeout < 5*time.Second {
+		return nil, fmt.Errorf("timeout must be at least 5 seconds")
 	}
 
 	if strings.TrimSpace(a.Name) == "" {
@@ -626,38 +649,41 @@ func (a *Action) validate() ([]validator, error) {
 	if strings.TrimSpace(a.Descr) == "" {
 		return nil, fmt.Errorf("description is required")
 	}
-	if a.Resp != nil {
-		return nil, fmt.Errorf("response should not be set by the user")
-	}
-
-	if a.Internal != nil {
-		return nil, fmt.Errorf("internal settings should not be set by the user")
-	}
 
 	if strings.TrimSpace(a.Plugin) == "" {
 		return nil, fmt.Errorf("plugin is required")
 	}
-
-	if a.register == nil {
-		plug := plugins.Registry.Get(a.Plugin)
-		if plug != nil {
-			a.plugin = plug
-		}
-	} else {
-		plug := a.register.Get(a.Plugin)
-		if plug != nil {
-			a.plugin = plug
-		}
+	if a.Attempts != nil {
+		return nil, fmt.Errorf("attempts should not be set by the user")
 	}
-	if a.plugin == nil {
+
+	if a.Retries < 0 {
+		a.Retries = 0
+	}
+
+	var plug  plugins.Plugin
+	if a.register == nil {
+		plug = plugins.Registry.Plugin(a.Plugin)
+	} else {
+		plug = a.register.Get(a.Plugin)
+	}
+	if plug == nil {
 		return nil, fmt.Errorf("plugin %q not found", a.Plugin)
 	}
 
-	if err := a.plugin.ValidateReq(a.Req); err != nil {
+	if err := plug.ValidateReq(a.Req); err != nil {
 		return nil, fmt.Errorf("plugin %q: %w", a.Plugin, err)
 	}
 
 	return nil, nil
+}
+
+// GetInternal is a getter for the Internal settings.
+func (a *Action) GetInternal() *Internal {
+	if a == nil {
+		return nil
+	}
+	return a.Internal
 }
 
 type queue[T any] struct {
