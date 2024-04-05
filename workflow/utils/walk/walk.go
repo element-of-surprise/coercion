@@ -33,20 +33,8 @@ func (i Item) Plan() *workflow.Plan {
 
 // PreCheck returns the Value as a *workflow.PreCheck. If the object is not a
 // PreCheck, this will panic.
-func (i Item) PreChecks() *workflow.PreChecks {
-	return i.Value.(*workflow.PreChecks)
-}
-
-// PostCheck returns the Value as a *workflow.PostCheck. If the object is not a
-// PostCheck, this will panic.
-func (i Item) PostChecks() *workflow.PostChecks {
-	return i.Value.(*workflow.PostChecks)
-}
-
-// ContCheck returns the Value as a *workflow.ContCheck. If the object is not a
-// ContCheck, this will panic.
-func (i Item) ContChecks() *workflow.ContChecks {
-	return i.Value.(*workflow.ContChecks)
+func (i Item) Checks() *workflow.Checks {
+	return i.Value.(*workflow.Checks)
 }
 
 // Block returns the Value as a *workflow.Block. If the object is not a Block,
@@ -87,12 +75,12 @@ func Plan(ctx context.Context, p *workflow.Plan) chan Item {
 
 		chain := []workflow.Object{p}
 		if p.PreChecks != nil {
-			if ok := walkPreChecks(ctx, ch, chain, p.PreChecks); !ok {
+			if ok := walkChecks(ctx, ch, chain, p.PreChecks); !ok {
 				return
 			}
 		}
 		if p.ContChecks != nil {
-			if ok := walkContChecks(ctx, ch, chain, p.ContChecks); !ok {
+			if ok := walkChecks(ctx, ch, chain, p.ContChecks); !ok {
 				return
 			}
 		}
@@ -104,7 +92,7 @@ func Plan(ctx context.Context, p *workflow.Plan) chan Item {
 			}
 		}
 		if p.PostChecks != nil {
-			if ok := walkPostChecks(ctx, ch, chain, p.PostChecks); !ok {
+			if ok := walkChecks(ctx, ch, chain, p.PostChecks); !ok {
 				return
 			}
 		}
@@ -112,49 +100,15 @@ func Plan(ctx context.Context, p *workflow.Plan) chan Item {
 	return ch
 }
 
-func walkPreChecks(ctx context.Context, ch chan Item, chain []workflow.Object, preChecks *workflow.PreChecks) (ok bool) {
-	i := Item{Chain: chain, Value: preChecks}
+func walkChecks(ctx context.Context, ch chan Item, chain []workflow.Object, checks *workflow.Checks) (ok bool) {
+	i := Item{Chain: chain, Value: checks}
 	if ok := emit(ctx, ch, i); !ok {
 		return false
 	}
 
-	chain = append(chain, preChecks)
-	if preChecks.Actions != nil {
-		for _, action := range preChecks.Actions {
-			if ok := emit(ctx, ch, Item{Chain: chain, Value: action}); !ok {
-				return false
-			}
-		}
-	}
-	return true
-}
-
-func walkPostChecks(ctx context.Context, ch chan Item, chain []workflow.Object, postChecks *workflow.PostChecks) (ok bool) {
-	i := Item{Chain: chain, Value: postChecks}
-	if ok := emit(ctx, ch, i); !ok {
-		return false
-	}
-
-	chain = append(chain, postChecks)
-	if postChecks.Actions != nil {
-		for _, action := range postChecks.Actions {
-			if ok := emit(ctx, ch, Item{Chain: chain, Value: action}); !ok {
-				return false
-			}
-		}
-	}
-	return true
-}
-
-func walkContChecks(ctx context.Context, ch chan Item, chain []workflow.Object, contChecks *workflow.ContChecks) (ok bool) {
-	i := Item{Chain: chain, Value: contChecks}
-	if ok := emit(ctx, ch, i); !ok {
-		return false
-	}
-
-	chain = append(chain, contChecks)
-	if contChecks.Actions != nil {
-		for _, action := range contChecks.Actions {
+	chain = append(chain, checks)
+	if checks.Actions != nil {
+		for _, action := range checks.Actions {
 			if ok := emit(ctx, ch, Item{Chain: chain, Value: action}); !ok {
 				return false
 			}
@@ -171,12 +125,12 @@ func walkBlock(ctx context.Context, ch chan Item, chain []workflow.Object, block
 
 	chain = append(chain, block)
 	if block.PreChecks != nil {
-		if ok := walkPreChecks(ctx, ch, chain, block.PreChecks); !ok {
+		if ok := walkChecks(ctx, ch, chain, block.PreChecks); !ok {
 			return false
 		}
 	}
 	if block.ContChecks != nil {
-		if ok := walkContChecks(ctx, ch, chain, block.ContChecks); !ok {
+		if ok := walkChecks(ctx, ch, chain, block.ContChecks); !ok {
 			return false
 		}
 	}
@@ -189,7 +143,7 @@ func walkBlock(ctx context.Context, ch chan Item, chain []workflow.Object, block
 		}
 	}
 	if block.PostChecks != nil {
-		if ok := walkPostChecks(ctx, ch, chain, block.PostChecks); !ok {
+		if ok := walkChecks(ctx, ch, chain, block.PostChecks); !ok {
 			return false
 		}
 	}
