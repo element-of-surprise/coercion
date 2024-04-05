@@ -83,7 +83,7 @@ func TestPlanValidate(t *testing.T) {
 			name: "Error: Internal != nil",
 			plan: func() *Plan {
 				p := goodPlan()
-				p.Internal = &Internal{}
+				p.Internal = &State{}
 				return p
 			},
 			err: true,
@@ -156,7 +156,7 @@ func TestPreCheckValidate(t *testing.T) {
 			name: "Error: Internal != nil",
 			preCheck: func() *PreChecks {
 				p := goodPreChecks()
-				p.Internal = &Internal{}
+				p.Internal = &State{}
 				return p
 			},
 			err: true,
@@ -229,7 +229,7 @@ func TestPostCheckValidate(t *testing.T) {
 			name: "Error: Internal != nil",
 			postCheck: func() *PostChecks {
 				p := goodPostChecks()
-				p.Internal = &Internal{}
+				p.Internal = &State{}
 				return p
 			},
 			err: true,
@@ -302,7 +302,7 @@ func TestContCheckValidate(t *testing.T) {
 			name: "Error: Internal != nil",
 			contCheck: func() *ContChecks {
 				p := goodContChecks()
-				p.Internal = &Internal{}
+				p.Internal = &State{}
 				return p
 			},
 			err: true,
@@ -400,7 +400,7 @@ func TestBlockValidate(t *testing.T) {
 			name: "Error: Internal is non-nil",
 			block: func() *Block {
 				b := goodBlock()
-				b.Internal = &Internal{}
+				b.Internal = &State{}
 				return b
 			},
 			err: true,
@@ -499,7 +499,7 @@ func TestSequenceValidate(t *testing.T) {
 			name: "Error: Internal is non-nil",
 			sequence: func() *Sequence {
 				s := goodSequence()
-				s.Internal = &Internal{}
+				s.Internal = &State{}
 				return s
 			},
 			err: true,
@@ -604,7 +604,7 @@ func TestJobValidate(t *testing.T) {
 			name: "Error: Internal is non-nil",
 			job: func() *Job {
 				j := goodJob()
-				j.Internal = &Internal{}
+				j.Internal = &State{}
 				return j
 			},
 			err: true,
@@ -743,7 +743,7 @@ func TestActionValidate(t *testing.T) {
 			name: "Error: Internal is not nil",
 			action: func() *Action {
 				a := goodAction()
-				a.Internal = &Internal{}
+				a.Internal = &State{}
 				return a
 			},
 			err: true,

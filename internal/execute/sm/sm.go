@@ -12,6 +12,7 @@ import (
 	"github.com/element-of-surprise/workstream/plugins"
 	"github.com/element-of-surprise/workstream/workflow"
 	"github.com/element-of-surprise/workstream/workflow/storage"
+	"github.com/google/uuid"
 	"github.com/gostdlib/concurrency/goroutines/pooled"
 	"github.com/gostdlib/concurrency/prim/wait"
 	"github.com/gostdlib/ops/retry/exponential"
@@ -66,14 +67,20 @@ func (d Data) contChecks() (workflow.ObjectType, error) {
 	return workflow.OTUnknown, nil
 }
 
+var _ planWriterer = storage.ReadWriter(nil)
+
+type planWriterer interface {
+	PlanWriter(context.Context, uuid.UUID) (storage.PlanWriter, error)
+}
+
 // States is the statemachine that handles the execution of a Plan.
 type States struct {
-	store storage.PlanWriter
+	store planWriterer
 	registry registry
 }
 
 // New creates a new States statemachine.
-func New(store storage.PlanWriter, registry registry) *States {
+func New(store planWriterer, registry registry) *States {
 	return &States{
 		store: store,
 		registry: registry,
@@ -82,16 +89,25 @@ func New(store storage.PlanWriter, registry registry) *States {
 
 // Start starts execution of the Plan. This is the first state of the statemachine.
 func (s *States) Start(req statemachine.Request[Data]) statemachine.Request[Data] {
+	plan := req.Data.Plan
+	writer, err := s.store.PlanWriter(req.Ctx, plan.ID)
+	if err != nil {
+		log.Fatalf("failed to get Plan(%s) from storage: ", err)
+	}
+
 	for _, b := range req.Data.Plan.Blocks {
 		req.Data.blocks = append(req.Data.blocks, block{block: b, contCheckResult: make(chan error, 1)})
 	}
 	req.Data.contCheckResult = make(chan error, 1)
 
-	internals := req.Data.Plan.GetInternal()
-	internals.Status = workflow.Started
-	internals.Start = s.now()
+	plan.State.Status = workflow.Running
+	plan.State.Start = s.now()
 
-	if err := s.store.Write(req.Ctx, req.Data.Plan); err != nil {
+	if err := writer.Write(req.Ctx, plan); err != nil {
+		log.Fatalf("failed to write Plan: %v", err)
+	}
+
+	if err := writer.Write(req.Ctx, req.Data.Plan); err != nil {
 		log.Fatalf("failed to write Plan: %v", err)
 		return req
 	}

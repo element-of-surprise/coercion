@@ -70,7 +70,7 @@ func (e *Plans) initPlugins(ctx context.Context) error {
 // Start stats a previously Submitted Plan by its ID. Cancelling the Context will not Stop execution.
 // Please use Stop to stop execution of a Plan.
 func (e *Plans) Start(ctx context.Context, id uuid.UUID) error {
-	plan, err := e.store.ReadPlan(ctx, id)
+	plan, err := e.store.Read(ctx, id)
 	if err != nil {
 		return err
 	}
@@ -84,11 +84,11 @@ func (e *Plans) Start(ctx context.Context, id uuid.UUID) error {
 		defer cancel()
 
 		e.mu.Lock()
-		e.stoppers[plan.Internals.Internal.ID] = cancel
+		e.stoppers[plan.ID] = cancel
 		e.mu.Unlock()
 		defer func() {
 			e.mu.Lock()
-			delete(e.stoppers, plan.Internals.Internal.ID)
+			delete(e.stoppers, plan.ID)
 			e.mu.Unlock()
 		}()
 
@@ -116,29 +116,40 @@ func (e *Plans) now() time.Time {
 
 // getInternal provides an interface for grabbing the Internal struct from workflow objects.
 // This is used to validate that the starting state of the plan is correct before starting it.
-type getInternal interface {
-	GetInternal() *workflow.Internal
+type getStater interface {
+	GetState() *workflow.State
+}
+
+type ider interface {
+	GetID() uuid.UUID
+	SetID(uuid.UUID)
 }
 
 // validateStartState validates that the plan is in a valid state to be started.
 // TODO(element-of-surprise): Add validation for check vs non-check actions.
-func (e *Plans) validateStartState(ctx context.Context, p *workflow.Plan) error {
-	for item := range walk.Plan(context.WithoutCancel(ctx), p) {
-		if get, ok := item.Value.(getInternal); ok {
-			internal := get.GetInternal()
-			if internal == nil {
-				return fmt.Errorf("internal is nil")
+// TODO(element-of-surprise): Add validation for no-delays on non-ContChecks.
+func (e *Plans) validateStartState(ctx context.Context, plan *workflow.Plan) error {
+	for item := range walk.Plan(context.WithoutCancel(ctx), plan) {
+		if hasID, ok := item.Value.(ider); ok {
+			if hasID.GetID() == uuid.Nil {
+				return fmt.Errorf("Object(%T): ID is nil", item.Value)
 			}
-			if internal.ID == uuid.Nil {
-				return fmt.Errorf("internal ID is nil")
+		}else{
+			return fmt.Errorf("Object(%T): does not implement ider", item.Value)
+		}
+
+		if get, ok := item.Value.(getStater); ok {
+			state := get.GetState()
+			if state == nil {
+				return fmt.Errorf("Object(%T).State is nil")
 			}
-			if internal.Status != workflow.NotStarted {
+			if state.Status != workflow.NotStarted {
 				return fmt.Errorf("internal status is not NotStarted")
 			}
-			if !internal.Start.IsZero() {
+			if !state.Start.IsZero() {
 				return fmt.Errorf("internal start is not zero")
 			}
-			if !internal.End.IsZero() {
+			if !state.End.IsZero() {
 				return fmt.Errorf("internal end is not zero")
 			}
 		}
@@ -147,8 +158,8 @@ func (e *Plans) validateStartState(ctx context.Context, p *workflow.Plan) error 
 				return fmt.Errorf("action(%s).Attempts was non-nil", action.Name)
 			}
 
-			p := e.registry.Plugin(action.Plugin)
-			if p == nil {
+			plug := e.registry.Plugin(action.Plugin)
+			if plug == nil {
 				return fmt.Errorf("plugin(%s) not found", action.Plugin)
 			}
 		}
