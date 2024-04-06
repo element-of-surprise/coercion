@@ -10,14 +10,14 @@ var tables = []string{
 
 var planSchema = `
 CREATE Table If Not Exists plans (
-	id BLOB PRIMARY KEY,
-	group_id BLOB NOT NULL,
+	id TEXT PRIMARY KEY,
+	group_id TEXT NOT NULL,
 	name TEXT NOT NULL,
 	descr TEXT NOT NULL,
 	meta BLOB,
-	prechecks BLOB,
-	postchecks BLOB,
-	contchecks BLOB,
+	prechecks TEXT,
+	postchecks TEXT,
+	contchecks TEXT,
 	blocks BLOB NOT NULL,
 	state_status INTEGER NOT NULL,
 	state_start INTEGER NOT NULL,
@@ -28,13 +28,14 @@ CREATE Table If Not Exists plans (
 
 var blocksSchema = `
 CREATE Table If Not Exists blocks (
-    id BLOB PRIMARY KEY,
+    id TEXT PRIMARY KEY,
     plan_id BLOB NOT NULL,
     name TEXT NOT NULL,
     descr TEXT NOT NULL,
-    prechecks BLOB,
-    postchecks BLOB,
-    contchecks BLOB,
+    pos INTEGER NOT NULL,
+    prechecks TEXT,
+    postchecks TEXT,
+    contchecks TEXT,
     sequences BLOB NOT NULL,
     state_status INTEGER NOT NULL,
     state_start INTEGER NOT NULL,
@@ -43,8 +44,8 @@ CREATE Table If Not Exists blocks (
 
 var checksSchema = `
 CREATE Table If Not Exists checks (
-    id BLOB PRIMARY KEY,
-    plan_id BLOB NOT NULL,
+    id TEXT PRIMARY KEY,
+    plan_id TEXT NOT NULL,
     actions BLOB NOT NULL,
     delay INTEGER NOT NULL,
     state_status INTEGER NOT NULL,
@@ -54,10 +55,11 @@ CREATE Table If Not Exists checks (
 
 var sequencesSchema = `
 CREATE Table If Not Exists sequences (
-    id BLOB PRIMARY KEY,
-    plan_id BLOB NOT NULL,
+    id TEXT PRIMARY KEY,
+    plan_id TEXT NOT NULL,
     name TEXT NOT NULL,
     descr TEXT NOT NULL,
+    pos INTEGER NOT NULL,
     actions BLOB NOT NULL,
     state_status INTEGER NOT NULL,
     state_start INTEGER NOT NULL,
@@ -66,10 +68,11 @@ CREATE Table If Not Exists sequences (
 
 var actionsSchema = `
 CREATE Table If Not Exists actions (
-    id BLOB PRIMARY KEY,
-    plan_id BLOB NOT NULL,
+    id TEXT PRIMARY KEY,
+    plan_id TEXT NOT NULL,
     name TEXT NOT NULL,
     descr TEXT NOT NULL,
+    pos INTEGER NOT NULL,
     plugin TEXT NOT NULL,
     timeout INTEGER NOT NULL,
     retries INTEGER NOT NULL,

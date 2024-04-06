@@ -118,8 +118,8 @@ type Plan struct {
 	// workflows together for informational purposes. This is not required.
 	GroupID uuid.UUID
 	// Meta is any type of metadata that the user wants to store with the workflow.
-	// Must be JSON serializable. This is not used by the workflow engine. Optional.
-	Meta any
+	// This is not used by the workflow engine. Optional.
+	Meta []byte
 
 	// PreChecks are actions that are executed before the workflow starts.
 	// Any error will cause the workflow to fail. Optional.

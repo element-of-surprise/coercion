@@ -1,11 +1,8 @@
-// Package plugins provides a plugin registry and definition for Workflows.
+// Package plugins provides the Plugin interface that must be implemented by all plugins.
 package plugins
 
 import (
 	"context"
-	"errors"
-	"fmt"
-	"strings"
 	"time"
 
 	"github.com/gostdlib/ops/retry/exponential"
@@ -81,81 +78,4 @@ func ThirtySecondsRetryPolicy() exponential.Policy {
 		RandomizationFactor: 0.2,
 		MaxInterval:         5 * time.Minute,
 	}
-}
-
-// validatePolicy validates the exponential policy. This is a copy of the exponential.Policy.validate method.
-// TODO(element-of-surprise): Remove this when the exponential package is updated to export the validate method.
-func validatePolicy(p exponential.Policy) error {
-	if p.InitialInterval <= 0 {
-		return errors.New("Policy.InitialInterval must be greater than 0")
-	}
-	if p.Multiplier <= 1 {
-		return errors.New("Policy.Multiplier must be greater than 1")
-	}
-	if p.RandomizationFactor < 0 || p.RandomizationFactor > 1 {
-		return errors.New("Policy.RandomizationFactor must be between 0 and 1")
-	}
-	if p.MaxInterval <= 0 {
-		return errors.New("Policy.MaxInterval must be greater than 0")
-	}
-	if p.InitialInterval > p.MaxInterval {
-		return errors.New("Policy.InitialInterval must be less than or equal to Policy.MaxInterval")
-	}
-	return nil
-}
-
-// Registry is the global registry of plugins. It is only intended to be used
-// during initialization, any other use can result in undefined behavior.
-var Registry = &registry{
-	m: map[string]Plugin{},
-}
-
-type registry struct {
-	m map[string]Plugin
-}
-
-// Register registers a plugin by name. It panics if the name is empty, the plugin is nil,
-// or a plugin is already registered with the same name. This can only be called during
-// init, otherwise the behavior is undefined. Not safe for concurrent use.
-func (r *registry) Register(p Plugin) {
-	if p == nil {
-		panic("plugin is nil")
-	}
-
-	if strings.TrimSpace(p.Name()) == "" {
-		panic("name is empty")
-	}
-
-	if r.m == nil {
-		panic("bug: Registry not initialized")
-	}
-
-	if _, ok := r.m[p.Name()]; ok {
-		panic(fmt.Sprintf("plugin(%s) already registered", p.Name()))
-	}
-
-	if err := validatePolicy(p.RetryPolicy()); err != nil {
-		panic(fmt.Sprintf("plugin(%s) has invalid retry plan: %v", p.Name(), err))
-	}
-
-	r.m[p.Name()] = p
-}
-
-func (r *registry) Plugins() chan Plugin {
-	ch := make(chan Plugin, 1)
-	go func() {
-		for _, p := range r.m {
-			ch <- p
-		}
-		close(ch)
-	}()
-	return ch
-}
-
-// Plugin returns a plugin by name. It returns nil if the plugin is not found.
-func (r *registry) Plugin(name string) Plugin {
-	if r == nil || r.m == nil {
-		return nil
-	}
-	return r.m[name]
 }

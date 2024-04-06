@@ -49,14 +49,14 @@ func commitPlan(conn *sqlite.Conn, p *workflow.Plan) error {
 			return fmt.Errorf("planToSQL(json.Marshal): %w", err)
 		}
 
-		stmt.SetBytes("$id", p.ID[:])
-		stmt.SetBytes("$group_id", p.GroupID[:])
+		stmt.SetText("$id", p.ID.String())
+		stmt.SetText("$group_id", p.GroupID.String())
 		stmt.SetText("$name", p.Name)
 		stmt.SetText("$descr", p.Descr)
 		stmt.SetBytes("$meta", meta)
-		stmt.SetBytes("$prechecks", p.PreChecks.ID[:])
-		stmt.SetBytes("$postchecks", p.PostChecks.ID[:])
-		stmt.SetBytes("$contchecks", p.ContChecks.ID[:])
+		stmt.SetText("$prechecks", p.PreChecks.ID.String())
+		stmt.SetText("$postchecks", p.PostChecks.ID.String())
+		stmt.SetText("$contchecks", p.ContChecks.ID.String())
 
 		blocks, err := idsToJSON(p.Blocks)
 		if err != nil {
@@ -84,8 +84,8 @@ func commitPlan(conn *sqlite.Conn, p *workflow.Plan) error {
 		if err := commitChecks(conn, p.ID, p.ContChecks); err != nil {
 			return fmt.Errorf("planToSQL(commitChecks(contchecks)): %w", err)
 		}
-		for _, b := range p.Blocks {
-			if err := commitBlock(conn, p.ID, b); err != nil {
+		for i, b := range p.Blocks {
+			if err := commitBlock(conn, p.ID, i, b); err != nil {
 				return fmt.Errorf("planToSQL(commitBlocks): %w", err)
 			}
 		}
@@ -96,7 +96,7 @@ func commitPlan(conn *sqlite.Conn, p *workflow.Plan) error {
 	return do(conn)
 }
 
-const insertCheck = `
+const insertChecks = `
 	INSERT INTO checks (
 		id,
 		plan_id,
@@ -109,7 +109,7 @@ const insertCheck = `
 	$state_status, $state_start, $state_end)`
 
 func commitChecks(conn *sqlite.Conn, planID uuid.UUID, checks *workflow.Checks) error {
-	stmt, err := conn.Prepare(insertCheck)
+	stmt, err := conn.Prepare(insertChecks)
 	if err != nil {
 		return fmt.Errorf("conn.Prepare(insertCheck): %w", err)
 	}
@@ -119,8 +119,8 @@ func commitChecks(conn *sqlite.Conn, planID uuid.UUID, checks *workflow.Checks) 
 		return fmt.Errorf("idsToJSON(checks.Actions): %w", err)
 	}
 
-	stmt.SetBytes("$id", checks.ID[:])
-	stmt.SetBytes("$plan_id", planID[:])
+	stmt.SetText("$id", checks.ID.String())
+	stmt.SetText("$plan_id", planID.String())
 	stmt.SetBytes("$actions", actions)
 	stmt.SetInt64("$delay", int64(checks.Delay))
 	stmt.SetInt64("$state_status", int64(checks.State.Status))
@@ -132,8 +132,8 @@ func commitChecks(conn *sqlite.Conn, planID uuid.UUID, checks *workflow.Checks) 
 		return fmt.Errorf("commitChecks: %w", err)
 	}
 
-	for _, a := range checks.Actions {
-		if err := commitAction(conn, planID, a); err != nil {
+	for i, a := range checks.Actions {
+		if err := commitAction(conn, planID, i, a); err != nil {
 			return fmt.Errorf("commitAction: %w", err)
 		}
 	}
@@ -147,6 +147,7 @@ const insertBlock = `
 		plan_id,
 		name,
 		descr,
+		pos,
 		prechecks,
 		postchecks,
 		contchecks,
@@ -154,10 +155,10 @@ const insertBlock = `
 		state_status,
 		state_start,
 		state_end
-	) VALUES ($id, $plan_id, $name, $descr, $prechecks, $postchecks, $contchecks, $sequences,
+	) VALUES ($id, $plan_id, $name, $descr, $pos, $prechecks, $postchecks, $contchecks, $sequences,
 	$state_status, $state_start, $state_end)`
 
-func commitBlock(conn *sqlite.Conn, planID uuid.UUID, block *workflow.Block) error {
+func commitBlock(conn *sqlite.Conn, planID uuid.UUID, pos int, block *workflow.Block) error {
 	stmt, err := conn.Prepare(insertBlock)
 	if err != nil {
 		return fmt.Errorf("conn.Prepate(insertBlock): %w", err)
@@ -174,13 +175,14 @@ func commitBlock(conn *sqlite.Conn, planID uuid.UUID, block *workflow.Block) err
 		return fmt.Errorf("idsToJSON(sequences): %w", err)
 	}
 
-	stmt.SetBytes("$id", block.ID[:])
-	stmt.SetBytes("$plan_id", planID[:])
+	stmt.SetText("$id", block.ID.String())
+	stmt.SetText("$plan_id", planID.String())
 	stmt.SetText("$name", block.Name)
 	stmt.SetText("$descr", block.Descr)
-	stmt.SetBytes("$prechecks", block.PreChecks.ID[:])
-	stmt.SetBytes("$postchecks", block.PostChecks.ID[:])
-	stmt.SetBytes("$contchecks", block.ContChecks.ID[:])
+	stmt.SetInt64("$pos", int64(pos))
+	stmt.SetText("$prechecks", block.PreChecks.ID.String())
+	stmt.SetText("$postchecks", block.PostChecks.ID.String())
+	stmt.SetText("$contchecks", block.ContChecks.ID.String())
 	stmt.SetBytes("$sequences", sequences)
 	stmt.SetInt64("$state_status", int64(block.State.Status))
 	stmt.SetInt64("$state_start", block.State.Start.UnixNano())
@@ -191,8 +193,8 @@ func commitBlock(conn *sqlite.Conn, planID uuid.UUID, block *workflow.Block) err
 		return err
 	}
 
-	for _, seq := range block.Sequences {
-		if err := commitSequence(conn, planID, seq); err != nil {
+	for i, seq := range block.Sequences {
+		if err := commitSequence(conn, planID, i, seq); err != nil {
 			return fmt.Errorf("(commitSequence: %w", err)
 		}
 	}
@@ -205,13 +207,14 @@ const insertSequence = `
 		plan_id,
 		name,
 		descr,
+		pos,
 		actions,
 		state_status,
 		state_start,
 		state_end
-	) VALUES ($id, $plan_id, $name, $descr, $actions, $state_status, $state_start, $state_end)`
+	) VALUES ($id, $plan_id, $name, $descr, $pos, $actions, $state_status, $state_start, $state_end)`
 
-func commitSequence(conn *sqlite.Conn, planID uuid.UUID, seq *workflow.Sequence) error {
+func commitSequence(conn *sqlite.Conn, planID uuid.UUID, pos int, seq *workflow.Sequence) error {
 	stmt, err := conn.Prepare(insertSequence)
 	if err != nil {
 		return fmt.Errorf("conn.Prepare(insertSequence): %w", err)
@@ -222,10 +225,11 @@ func commitSequence(conn *sqlite.Conn, planID uuid.UUID, seq *workflow.Sequence)
 		return fmt.Errorf("idsToJSON(actions): %w", err)
 	}
 
-	stmt.SetBytes("$id", seq.ID[:])
-	stmt.SetBytes("$plan_id", planID[:])
+	stmt.SetText("$id", seq.ID.String())
+	stmt.SetText("$plan_id", planID.String())
 	stmt.SetText("$name", seq.Name)
 	stmt.SetText("$descr", seq.Descr)
+	stmt.SetInt64("$pos", int64(pos))
 	stmt.SetBytes("$actions", actions)
 	stmt.SetInt64("$state_status", int64(seq.State.Status))
 	stmt.SetInt64("$state_start", seq.State.Start.UnixNano())
@@ -236,8 +240,8 @@ func commitSequence(conn *sqlite.Conn, planID uuid.UUID, seq *workflow.Sequence)
 		return fmt.Errorf("commitSequence: %w", err)
 	}
 
-	for _, a := range seq.Actions {
-		if err := commitAction(conn, planID, a); err != nil {
+	for i, a := range seq.Actions {
+		if err := commitAction(conn, planID, i, a); err != nil {
 			return fmt.Errorf("planToSQL(commitAction): %w", err)
 		}
 	}
@@ -250,6 +254,7 @@ const insertAction = `
 		plan_id,
 		name,
 		descr,
+		pos,
 		plugin,
 		timeout,
 		retries,
@@ -261,7 +266,7 @@ const insertAction = `
 	) VALUES ($id, $plan_id, $name, $descr, $plugin, $timeout, $retries, $req, $attempts,
 	$state_status, $state_start, $state_end)`
 
-func commitAction(conn *sqlite.Conn, planID uuid.UUID, action *workflow.Action) error {
+func commitAction(conn *sqlite.Conn, planID uuid.UUID, pos int, action *workflow.Action) error {
 	stmt, err := conn.Prepare(insertAction)
 	if err != nil {
 		return err
@@ -276,10 +281,11 @@ func commitAction(conn *sqlite.Conn, planID uuid.UUID, action *workflow.Action) 
 		return fmt.Errorf("json.Marshal(attempts): %w", err)
 	}
 
-	stmt.SetBytes("$id", action.ID[:])
-	stmt.SetBytes("$plan_id", planID[:])
+	stmt.SetText("$id", action.ID.String())
+	stmt.SetText("$plan_id", planID.String())
 	stmt.SetText("$name", action.Name)
 	stmt.SetText("$descr", action.Descr)
+	stmt.SetInt64("$pos", int64(pos))
 	stmt.SetText("$plugin", action.Plugin)
 	stmt.SetInt64("$timeout", int64(action.Timeout))
 	stmt.SetInt64("$retries", int64(action.Retries))
