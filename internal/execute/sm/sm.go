@@ -12,7 +12,6 @@ import (
 	"github.com/element-of-surprise/workstream/plugins"
 	"github.com/element-of-surprise/workstream/workflow"
 	"github.com/element-of-surprise/workstream/workflow/storage"
-	"github.com/google/uuid"
 	"github.com/gostdlib/concurrency/goroutines/pooled"
 	"github.com/gostdlib/concurrency/prim/wait"
 	"github.com/gostdlib/ops/retry/exponential"
@@ -67,33 +66,26 @@ func (d Data) contChecks() (workflow.ObjectType, error) {
 	return workflow.OTUnknown, nil
 }
 
-var _ planWriterer = storage.ReadWriter(nil)
-
-type planWriterer interface {
-	PlanWriter(context.Context, uuid.UUID) (storage.PlanWriter, error)
-}
-
 // States is the statemachine that handles the execution of a Plan.
 type States struct {
-	store planWriterer
+	store storage.PlanWriter
 	registry registry
 }
 
 // New creates a new States statemachine.
-func New(store planWriterer, registry registry) *States {
+func New(store storage.PlanWriter, registry registry) (*States, error) {
+	if store == nil {
+		return nil, fmt.Errorf("store is required")
+	}
 	return &States{
 		store: store,
 		registry: registry,
-	}
+	}, nil
 }
 
 // Start starts execution of the Plan. This is the first state of the statemachine.
 func (s *States) Start(req statemachine.Request[Data]) statemachine.Request[Data] {
 	plan := req.Data.Plan
-	writer, err := s.store.PlanWriter(req.Ctx, plan.ID)
-	if err != nil {
-		log.Fatalf("failed to get Plan(%s) from storage: ", err)
-	}
 
 	for _, b := range req.Data.Plan.Blocks {
 		req.Data.blocks = append(req.Data.blocks, block{block: b, contCheckResult: make(chan error, 1)})
@@ -103,22 +95,17 @@ func (s *States) Start(req statemachine.Request[Data]) statemachine.Request[Data
 	plan.State.Status = workflow.Running
 	plan.State.Start = s.now()
 
-	if err := writer.Write(req.Ctx, plan); err != nil {
+	if err := s.store.Write(req.Ctx, plan); err != nil {
 		log.Fatalf("failed to write Plan: %v", err)
 	}
 
-	if err := writer.Write(req.Ctx, req.Data.Plan); err != nil {
-		log.Fatalf("failed to write Plan: %v", err)
-		return req
-	}
 	req.Next = s.PlanPreChecks
 	return req
 }
 
 // PlanPreChecks runs all PreChecks and ContChecks on the Plan before proceeding.
 func (s *States) PlanPreChecks(req statemachine.Request[Data]) statemachine.Request[Data] {
-	writer := s.store.Checks()
-	_, err := s.runPreChecks(req.Ctx, req.Data.Plan.PreChecks, req.Data.Plan.ContChecks, writer)
+	_, err := s.runPreChecks(req.Ctx, req.Data.Plan.PreChecks, req.Data.Plan.ContChecks)
 	if err != nil {
 		return req
 	}
@@ -135,7 +122,7 @@ func (s *States) PlanStartContChecks(req statemachine.Request[Data]) statemachin
 		ctx, req.Data.contCancel = context.WithCancel(req.Ctx)
 
 		go func() {
-			s.runContChecks(ctx, req.Data.Plan.ContChecks, req.Data.contCheckResult, s.store.Checks())
+			s.runContChecks(ctx, req.Data.Plan.ContChecks, req.Data.contCheckResult)
 		}()
 	}
 
@@ -153,8 +140,8 @@ func (s *States) ExecuteBlock(req statemachine.Request[Data]) statemachine.Reque
 
 	h := req.Data.blocks[0]
 
-	h.block.Internal.Status = workflow.Running
-	if err := s.store.Block(h.block.Internal.ID).Write(req.Ctx, h.block); err != nil {
+	h.block.State.Status = workflow.Running
+	if err := s.store.Block().Write(req.Ctx, h.block); err != nil {
 		log.Printf("failed to write Block: %v", err)
 		return req
 	}
@@ -166,11 +153,10 @@ func (s *States) ExecuteBlock(req statemachine.Request[Data]) statemachine.Reque
 func (s *States) BlockPreChecks(req statemachine.Request[Data]) statemachine.Request[Data] {
 	h := req.Data.blocks[0]
 
-	writer := s.store.Block(h.block.Internal.ID).Checks()
 	if h.block.ContChecks != nil {
-		_, err := s.runPreChecks(req.Ctx, h.block.PreChecks, h.block.ContChecks, writer)
+		_, err := s.runPreChecks(req.Ctx, h.block.PreChecks, h.block.ContChecks)
 		if err != nil {
-			h.block.Internal.Status = workflow.Failed
+			h.block.State.Status = workflow.Failed
 			return req
 		}
 	}
@@ -188,10 +174,8 @@ func (s *States) BlockStartContChecks(req statemachine.Request[Data]) statemachi
 		var ctx context.Context
 		ctx, h.contCancel = context.WithCancel(context.WithoutCancel(req.Ctx))
 
-		writer := s.store.Block(h.block.Internal.ID).Checks()
-
 		go func() {
-			s.runContChecks(ctx, h.block.ContChecks, h.contCheckResult, writer)
+			s.runContChecks(ctx, h.block.ContChecks, h.contCheckResult)
 		}()
 	}
 
@@ -215,21 +199,19 @@ func (s *States) ExecuteSequences(req statemachine.Request[Data]) statemachine.R
 	for i := 0; i < len(h.block.Sequences); i++ {
 		seq := h.block.Sequences[i]
 		if h.block.ToleratedFailures >= 0 && failures > h.block.ToleratedFailures {
-			h.block.Internal.Status = workflow.Failed
+			h.block.State.Status = workflow.Failed
 			return req
 		}
 
 		if _, err := req.Data.contChecks(); err != nil {
-			h.block.Internal.Status = workflow.Failed
+			h.block.State.Status = workflow.Failed
 			return req
 		}
-
-		writer := s.store.Block(h.block.Internal.ID).Sequence(seq.Internal.ID)
 
 		err := pool.Submit(
 			req.Ctx,
 			func(ctx context.Context) {
-				if err := s.execSeq(ctx, seq, writer); err != nil {
+				if err := s.execSeq(ctx, seq); err != nil {
 					failures++
 				}
 			},
@@ -250,16 +232,14 @@ func (s *States) BlockPostChecks(req statemachine.Request[Data]) statemachine.Re
 		// Cancel the ContChecks if they are still running and wait for the final result.
 		h.contCancel()
 		if err := <-h.contCheckResult; err != nil {
-			h.block.Internal.Status = workflow.Failed
+			h.block.State.Status = workflow.Failed
 			return req
 		}
 	}
 
-	writer := s.store.Block(h.block.Internal.ID).Checks().Action(workflow.OTPostCheck)
-
-	err := s.runChecks(req.Ctx, h.block.PostChecks.Actions, writer)
+	err := s.runChecks(req.Ctx, h.block.PostChecks.Actions)
 	if err != nil {
-		h.block.Internal.Status = workflow.Failed
+		h.block.State.Status = workflow.Failed
 		return req
 	}
 
@@ -274,12 +254,12 @@ func (s *States) BlockEnd(req statemachine.Request[Data]) statemachine.Request[D
 	// Stop our cont checks if they are still running, get the final result.
 	h.contCancel()
 	if err := <-h.contCheckResult; err == nil {
-		h.block.Internal.Status = workflow.Completed
+		h.block.State.Status = workflow.Completed
 	}else{
-		h.block.Internal.Status = workflow.Failed
+		h.block.State.Status = workflow.Failed
 	}
 
-	if err := s.store.Block(req.Data.blocks[0].block.Internal.ID).Write(req.Ctx, h.block); err != nil {
+	if err := s.store.Block().Write(req.Ctx, h.block); err != nil {
 		log.Printf("failed to write Block: %v", err)
 		return req
 	}
@@ -297,16 +277,14 @@ func (s *States) PlanPostChecks(req statemachine.Request[Data]) statemachine.Req
 		}
 	}
 
-	writer := s.store.Checks().Action(workflow.OTPostCheck)
-
-	if err := s.runChecks(req.Ctx, req.Data.Plan.PostChecks.Actions, writer); err != nil {
+	if err := s.runChecks(req.Ctx, req.Data.Plan.PostChecks.Actions); err != nil {
 		return req
 	}
 	return req
 }
 
 // runPreChecks runs all PreChecks and ContChecks. This is a helper function for PlanPreChecks and BlockPreChecks.
-func (s *States) runPreChecks(ctx context.Context, preChecks *workflow.PreChecks, contChecks *workflow.ContChecks, writer storage.ChecksWriter) (preFail bool, err error) {
+func (s *States) runPreChecks(ctx context.Context, preChecks *workflow.Checks, contChecks *workflow.Checks) (preFail bool, err error) {
 	if preChecks == nil && contChecks == nil {
 		return false, nil
 	}
@@ -316,8 +294,7 @@ func (s *States) runPreChecks(ctx context.Context, preChecks *workflow.PreChecks
 	preCheckFail := false
 	if preChecks != nil {
 		g.Go(ctx, func(ctx context.Context) error{
-			writer := writer.Action(workflow.OTPreCheck)
-			if err := s.runChecks(ctx, preChecks.Actions, writer); err != nil {
+			if err := s.runChecks(ctx, preChecks.Actions); err != nil {
 				preCheckFail = true
 				return err
 			}
@@ -327,8 +304,7 @@ func (s *States) runPreChecks(ctx context.Context, preChecks *workflow.PreChecks
 
 	if contChecks != nil {
 		g.Go(ctx, func(ctx context.Context) error{
-			writer := writer.Action(workflow.OTContCheck)
-			return s.runChecks(ctx, contChecks.Actions, writer)
+			return s.runChecks(ctx, contChecks.Actions)
 		})
 	}
 
@@ -344,7 +320,7 @@ func (s *States) runPreChecks(ctx context.Context, preChecks *workflow.PreChecks
 // runContChecks runs the ContChecks in a loop with a delay between each run until the Context is cancelled.
 // It writes the final result to the given channel. If a check fails before the Context is cancelled, the
 // error is written to the channel and the function returns.
-func (s *States) runContChecks(ctx context.Context, checks *workflow.ContChecks, resultCh chan error, writer storage.ChecksWriter) {
+func (s *States) runContChecks(ctx context.Context, checks *workflow.Checks, resultCh chan error) {
 	defer close(resultCh)
 
 	for {
@@ -353,18 +329,15 @@ func (s *States) runContChecks(ctx context.Context, checks *workflow.ContChecks,
 			return
 		case <-time.After(checks.Delay):
 			resetActions(checks.Actions)
-			if err := writer.ContChecks(ctx, checks); err != nil {
+			if err := s.store.Checks().Write(ctx, checks); err != nil {
 				log.Fatalf("failed to write ContChecks: %v", err)
 			}
 
-			runCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), checks.Timeout)
-			if err := s.runChecks(runCtx, checks.Actions, writer.Action(workflow.OTContCheck)); err != nil {
-				cancel()
+			if err := s.runChecks(ctx, checks.Actions); err != nil {
 				resultCh <- err
 				return
 			}
-			cancel()
-			if err := writer.ContChecks(ctx, checks); err != nil {
+			if err := s.store.Checks().Write(ctx, checks); err != nil {
 				log.Fatalf("failed to write ContChecks: %v", err)
 			}
 		}
@@ -372,12 +345,12 @@ func (s *States) runContChecks(ctx context.Context, checks *workflow.ContChecks,
 }
 
 // runChecks runs the given actions in parallel and waits for all of them to finish.
-func (s *States) runChecks(ctx context.Context, actions []*workflow.Action, writer storage.ActionWriter) error {
+func (s *States) runChecks(ctx context.Context, actions []*workflow.Action) error {
 	// Yes, we loop twice, but actions is small and we only want to write to the store once.
 	for _, action := range actions {
-		action.Internal.Status = workflow.Running
-		action.Internal.Start = s.now()
-		if err := writer.Write(ctx, action); err != nil {
+		action.State.Status = workflow.Running
+		action.State.Start = s.now()
+		if err := s.store.Action().Write(ctx, action); err != nil {
 			log.Fatalf("failed to write Action: %v", err)
 		}
 	}
@@ -389,7 +362,7 @@ func (s *States) runChecks(ctx context.Context, actions []*workflow.Action, writ
 		action := action
 
 		g.Go(ctx, func(ctx context.Context) (err error) {
-			return s.runAction(ctx, action, writer)
+			return s.runAction(ctx, action)
 		})
 	}
 	return g.Wait(ctx)
@@ -397,31 +370,43 @@ func (s *States) runChecks(ctx context.Context, actions []*workflow.Action, writ
 
 // execSeq executes a sequence of actions. Any Job failures fail the Sequnence. The Job may retry
 // based on the retry policy.
-func (s *States) execSeq(ctx context.Context, seq *workflow.Sequence, writer storage.SequenceWriter) error {
-	seq.Internal.Status = workflow.Running
-	writer.Write(ctx, seq)
-	defer writer.Write(ctx, seq)
+func (s *States) execSeq(ctx context.Context, seq *workflow.Sequence) error {
+	seq.State.Status = workflow.Running
+	if err := s.store.Sequence().Write(ctx, seq); err != nil {
+		log.Fatalf("failed to write Sequence: %v", err)
+	}
+	defer func() {
+		if err := s.store.Sequence().Write(ctx, seq); err != nil {
+			log.Fatalf("failed to write Sequence: %v", err)
+		}
+	}()
 
 	for _, action := range seq.Actions {
-		if err := s.runAction(ctx, action, writer.Action()); err != nil {
-			seq.Internal.Status = workflow.Failed
+		if err := s.runAction(ctx, action); err != nil {
+			seq.State.Status = workflow.Failed
 			return err
 		}
 	}
 
-	seq.Internal.Status = workflow.Completed
+	seq.State.Status = workflow.Completed
 	return nil
 }
 
 // runAction runs an action and returns the response or an error. If the response is not the expected
 // type, it returns a permanent error that prevents retries.
-func (s *States) runAction(ctx context.Context, action *workflow.Action, writer storage.ActionWriter) error {
-	action.Internal.Start = s.now()
-	action.Internal.Status = workflow.Running
-	writer.Write(ctx, action)
-	defer writer.Write(ctx, action)
+func (s *States) runAction(ctx context.Context, action *workflow.Action) error {
+	action.State.Start = s.now()
+	action.State.Status = workflow.Running
+	if err := s.store.Action().Write(ctx, action); err != nil {
+		log.Fatalf("failed to write Action: %v", err)
+	}
 	defer func() {
-		action.Internal.End = s.now()
+		if err := s.store.Action().Write(ctx, action); err != nil {
+			log.Fatalf("failed to write Action: %v", err)
+		}
+	}()
+	defer func() {
+		action.State.End = s.now()
 	}()
 
 
@@ -437,7 +422,11 @@ func (s *States) runAction(ctx context.Context, action *workflow.Action, writer 
 				return exponential.ErrPermanent
 			}
 
-			defer writer.Write(ctx, action)
+			defer func() {
+				if err := s.store.Action().Write(ctx, action); err != nil {
+					log.Fatalf("failed to write Action: %v", err)
+				}
+			}()
 
 			attempt := workflow.Attempt{
 				Start: s.now(),
@@ -469,11 +458,11 @@ func (s *States) runAction(ctx context.Context, action *workflow.Action, writer 
 	)
 
 	if err != nil {
-		action.Internal.Status = workflow.Failed
+		action.State.Status = workflow.Failed
 		return err
 	}
 
-	action.Internal.Status = workflow.Completed
+	action.State.Status = workflow.Completed
 	return nil
 }
 
@@ -485,9 +474,9 @@ func (s *States) now() time.Time {
 // This is used by the ContChecks to reset the actions before each run.
 func resetActions(actions []*workflow.Action) {
 	for _, action := range actions {
-		action.Internal.Status = workflow.NotStarted
-		action.Internal.Start = time.Time{}
-		action.Internal.End = time.Time{}
+		action.State.Status = workflow.NotStarted
+		action.State.Start = time.Time{}
+		action.State.End = time.Time{}
 		action.Attempts = nil
 	}
 }
