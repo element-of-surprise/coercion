@@ -122,7 +122,7 @@ func (r *ReadWriter) Writer(ctx context.Context, id uuid.UUID) (storage.PlanWrit
 		return nil, fmt.Errorf("plan with ID(%s) does not exist", id)
 	}
 
-	return &planWriter{conn: r.conn, id: id}, nil
+	return &PlanWriter{conn: r.conn, id: id}, nil
 }
 
 // Close closes the ReadWriter and releases all resources.
