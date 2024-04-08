@@ -18,7 +18,7 @@ func (p *planReader) fieldToCheck(ctx context.Context, field string, conn *sqlit
 	if strID == "" {
 		return nil, nil
 	}
-	id, err := uuid.FromBytes(strToBytes(strID))
+	id, err := uuid.Parse(strID)
 	if err != nil {
 		return nil, fmt.Errorf("couldn't convert ID to UUID: %w", err)
 	}
@@ -34,7 +34,7 @@ func (p *planReader) fetchChecksByID(ctx context.Context, conn *sqlite.Conn, id 
 			fetchChecksByID,
 			&sqlitex.ExecOptions{
 				Named: map[string]any{
-					"$ids": id.String(),
+					"$id": id.String(),
 				},
 				ResultFunc: func(stmt *sqlite.Stmt) error {
 					c, err := p.checksRowToChecks(ctx, conn, stmt)
@@ -62,15 +62,17 @@ func (p *planReader) fetchChecksByID(ctx context.Context, conn *sqlite.Conn, id 
 
 // checksRowToChecks converts a sqlite row to a workflow.Checks.
 func (p *planReader) checksRowToChecks(ctx context.Context, conn *sqlite.Conn, stmt *sqlite.Stmt) (*workflow.Checks, error) {
-	c := &workflow.Checks{}
-	c.ID = uuid.UUID(fieldToBytes("$id", stmt)[:16])
-	c.Delay = time.Duration(stmt.GetInt64("$delay"))
-	c.State = &workflow.State{
-		Status: workflow.Status(stmt.GetInt64("$state_status")),
-		Start:  time.Unix(0, stmt.GetInt64("$state_start")),
-		End:    time.Unix(0, stmt.GetInt64("$state_end")),
-	}
 	var err error
+	c := &workflow.Checks{}
+	c.ID, err = uuid.Parse(stmt.GetText("id"))
+	if err != nil {
+		return nil, fmt.Errorf("checksRowToChecks: couldn't convert ID to UUID: %w", err)
+	}
+	c.Delay = time.Duration(stmt.GetInt64("delay"))
+	c.State, err = fieldToState(stmt)
+	if err != nil {
+		return nil, fmt.Errorf("checksRowToChecks: %w", err)
+	}
 	c.Actions, err = p.fieldToActions(ctx, conn, stmt)
 	if err != nil {
 		return nil, fmt.Errorf("couldn't get actions ids: %w", err)

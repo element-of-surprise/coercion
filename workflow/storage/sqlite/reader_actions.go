@@ -14,11 +14,11 @@ import (
 	"zombiezen.com/go/sqlite/sqlitex"
 )
 
-// fieldToActions converts the "$actions" field in a sqlite row to a list of workflow.Actions.
+// fieldToActions converts the "actions" field in a sqlite row to a list of workflow.Actions.
 func (p *planReader) fieldToActions(ctx context.Context, conn *sqlite.Conn, stmt *sqlite.Stmt) ([]*workflow.Action, error) {
-	ids, err := fieldToIDs("$actions", stmt)
+	ids, err := fieldToIDs("actions", stmt)
 	if err != nil {
-		return nil, fmt.Errorf("couldn't read plan action ids: %w", err)
+		return nil, fmt.Errorf("couldn't read action ids: %w", err)
 	}
 
 	actions, err := p.fetchActionsByIDs(ctx, conn, ids)
@@ -68,43 +68,52 @@ func (p *planReader) fetchActionsByIDs(ctx context.Context, conn *sqlite.Conn, i
 	return actions, nil
 }
 
+var emptyAttemptsJSON = []byte(`[]`)
+
 // actionRowToAction converts a sqlite row to a workflow.Action.
 func (p *planReader) actionRowToAction(ctx context.Context, stmt *sqlite.Stmt) (*workflow.Action, error) {
+	var err error
 	a := &workflow.Action{}
-	a.ID = uuid.UUID(fieldToBytes("$id", stmt)[:16])
-	a.Name = stmt.GetText("$name")
-	a.Descr = stmt.GetText("$descr")
-	a.Plugin = stmt.GetText("$plugin")
-	a.Timeout = time.Duration(stmt.GetInt64("$timeout"))
-	a.Retries = int(stmt.GetInt64("$retries"))
-	a.State = &workflow.State{
-		Status: workflow.Status(stmt.GetInt64("$state_status")),
-		Start:  time.Unix(0, stmt.GetInt64("$state_start")),
-		End:    time.Unix(0, stmt.GetInt64("$state_end")),
+	a.ID, err = uuid.Parse(stmt.GetText("id"))
+	if err != nil {
+		return nil, fmt.Errorf("couldn't parse action id: %w", err)
+	}
+	a.Name = stmt.GetText("name")
+	a.Descr = stmt.GetText("descr")
+	a.Plugin = stmt.GetText("plugin")
+	a.Timeout = time.Duration(stmt.GetInt64("timeout"))
+	a.Retries = int(stmt.GetInt64("retries"))
+	a.State, err = fieldToState(stmt)
+	if err != nil {
+		return nil, fmt.Errorf("actionRowToAction: %w", err)
 	}
 
-	b := fieldToBytes("$req", stmt)
-	if len(b) > 0 {
-		plug := p.reg.Plugin(a.Plugin)
-		if plug == nil {
-			return nil, fmt.Errorf("couldn't find plugin %s", a.Plugin)
-		}
-		req := plug.Request()
-		if reflect.TypeOf(req).Kind() != reflect.Pointer {
-			if err := json.Unmarshal(b, &req); err != nil {
-				return nil, fmt.Errorf("couldn't unmarshal request: %w", err)
-			}
-		} else {
-			if err := json.Unmarshal(b, req); err != nil {
-				return nil, fmt.Errorf("couldn't unmarshal request: %w", err)
-			}
-		}
-		a.Req = req
+	plug := p.reg.Plugin(a.Plugin)
+	if plug == nil {
+		return nil, fmt.Errorf("couldn't find plugin %s", a.Plugin)
 	}
-	b = fieldToBytes("$attempts", stmt)
+
+	b := fieldToBytes("req", stmt)
 	if len(b) > 0 {
-		if err := json.Unmarshal(b, &a.Attempts); err != nil {
-			return nil, fmt.Errorf("couldn't unmarshal attempts: %w", err)
+		req := plug.Request()
+		if req != nil {
+			if reflect.TypeOf(req).Kind() != reflect.Pointer {
+				if err := json.Unmarshal(b, &req); err != nil {
+					return nil, fmt.Errorf("couldn't unmarshal request: %w", err)
+				}
+			} else {
+				if err := json.Unmarshal(b, req); err != nil {
+					return nil, fmt.Errorf("couldn't unmarshal request: %w", err)
+				}
+			}
+			a.Req = req
+		}
+	}
+	b = fieldToBytes("attempts", stmt)
+	if len(b) > 0 {
+		a.Attempts, err = decodeAttempts(b, plug)
+		if err != nil {
+			return nil, fmt.Errorf("couldn't decode attempts: %w", err)
 		}
 	}
 	return a, nil

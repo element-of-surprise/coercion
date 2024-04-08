@@ -7,18 +7,19 @@ import (
 	"testing"
 	"time"
 
+	pluglib "github.com/element-of-surprise/workstream/plugins"
+	"github.com/element-of-surprise/workstream/plugins/registry"
 	"github.com/element-of-surprise/workstream/workflow"
 	"github.com/element-of-surprise/workstream/workflow/builder"
+	"github.com/element-of-surprise/workstream/workflow/storage/sqlite/testing/plugins"
 	"github.com/element-of-surprise/workstream/workflow/utils/walk"
+
+	"github.com/google/go-cmp/cmp"
 	"github.com/google/uuid"
 	"zombiezen.com/go/sqlite"
 )
 
 var plan *workflow.Plan
-
-type fakeReq struct {
-	Say string
-}
 
 type setters interface {
 	SetID(uuid.UUID)
@@ -31,10 +32,27 @@ func init() {
 		panic(err)
 	}
 
-	checkAction1 := &workflow.Action{Name: "action", Descr: "action", Plugin: "plugin", Req: fakeReq{Say: "Hello"}}
-	checkAction2 := &workflow.Action{Name: "action", Descr: "action", Plugin: "plugin", Req: fakeReq{Say: "You"}}
-	checkAction3 := &workflow.Action{Name: "action", Descr: "action", Plugin: "plugin", Req: fakeReq{Say: "World"}}
-	seqAction1 := &workflow.Action{Name: "action", Descr: "action", Plugin: "plugin", Req: fakeReq{Say: "Action!"}}
+	checkAction1 := &workflow.Action{Name: "action", Descr: "action", Plugin: plugins.CheckPluginName, Req: nil}
+	checkAction2 := &workflow.Action{Name: "action", Descr: "action", Plugin: plugins.CheckPluginName, Req: nil}
+	checkAction3 := &workflow.Action{Name: "action", Descr: "action", Plugin: plugins.CheckPluginName, Req: nil}
+	seqAction1 := &workflow.Action{
+		Name:   "action",
+		Descr:  "action",
+		Plugin: plugins.HelloPluginName,
+		Req:    plugins.HelloReq{Say: "hello"},
+		Attempts: []*workflow.Attempt{
+			{
+				Err:   &pluglib.Error{Message: "internal error"},
+				Start: time.Now().Add(-1 * time.Minute),
+				End:   time.Now(),
+			},
+			{
+				Resp:  plugins.HelloResp{Said: "hello"},
+				Start: time.Now().Add(-1 * time.Second),
+				End:   time.Now(),
+			},
+		},
+	}
 
 	build.AddCheck(builder.PreCheck, &workflow.Checks{})
 	build.AddAction(checkAction1.Clone())
@@ -58,19 +76,19 @@ func init() {
 	})
 
 	build.AddCheck(builder.PreCheck, &workflow.Checks{})
-	build.AddAction(checkAction1.Clone())
+	build.AddAction(checkAction1)
 	build.Up()
 
 	build.AddCheck(builder.ContCheck, &workflow.Checks{Delay: 1 * time.Minute})
-	build.AddAction(checkAction2.Clone())
+	build.AddAction(checkAction2)
 	build.Up()
 
 	build.AddCheck(builder.PostCheck, &workflow.Checks{})
-	build.AddAction(checkAction3.Clone())
+	build.AddAction(checkAction3)
 	build.Up()
 
 	build.AddSequence(&workflow.Sequence{Name: "sequence", Descr: "sequence"})
-	build.AddAction(seqAction1.Clone())
+	build.AddAction(seqAction1)
 	build.Up()
 
 	plan, err = build.Plan()
@@ -128,9 +146,26 @@ func TestCommitPlan(t *testing.T) {
 	defer os.RemoveAll(path)
 	defer conn.Close()
 
-	if err := commitPlan(conn, plan); err != nil {
+	if err := commitPlan(context.Background(), conn, plan); err != nil {
 		t.Fatal(err)
 	}
 
+	reg := registry.New()
+	reg.Register(&plugins.CheckPlugin{})
+	reg.Register(&plugins.HelloPlugin{})
+
 	// TODO(element-of-surprise): Add checks to verify the data in the database
+	reader := &planReader{
+		conn: conn,
+		reg:  reg,
+	}
+
+	storedPlan, err := reader.Read(context.Background(), plan.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if diff := cmp.Diff(plan, storedPlan, cmp.AllowUnexported(workflow.Action{})); diff != "" {
+		t.Fatalf("Read plan does not match the original plan: -want/+got:\n%s", diff)
+	}
 }

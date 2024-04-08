@@ -35,15 +35,20 @@ import (
 )
 
 // Plugins is the global registry of plugins. It is only intended to be used
-// during initialization, any other use can result in undefined behavior.
-var Plugins = &Register{
-	m: map[string]plugins.Plugin{},
-}
+// during initialization by the user (aka inside an init() for the plugin), any other use can result in undefined behavior.
+var Plugins = New()
 
 // Register provides a Register for plugins. This should not be used directly by the user,
 // but instead via the Registry variable. Use of this type directly is not supported.
 type Register struct {
 	m map[string]plugins.Plugin
+}
+
+// New creates a new Register. Not for use by the user.
+func New() *Register {
+	return &Register{
+		m: map[string]plugins.Plugin{},
+	}
 }
 
 // Register registers a plugin by name. It panics if the name is empty, the plugin is nil,

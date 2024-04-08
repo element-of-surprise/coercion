@@ -3,16 +3,16 @@ package sqlite
 import (
 	"context"
 	"fmt"
-	"time"
 
 	"github.com/element-of-surprise/workstream/workflow"
+	"github.com/google/uuid"
 	"zombiezen.com/go/sqlite"
 	"zombiezen.com/go/sqlite/sqlitex"
 )
 
-// fieldToSequences converts the "$sequences" field in a sqlite row to a list of workflow.Sequences.
+// fieldToSequences converts the "sequences" field in a sqlite row to a list of workflow.Sequences.
 func (p *planReader) fieldToSequences(ctx context.Context, conn *sqlite.Conn, stmt *sqlite.Stmt) ([]*workflow.Sequence, error) {
-	ids, err := fieldToIDs("$sequences", stmt)
+	ids, err := fieldToIDs("sequences", stmt)
 	if err != nil {
 		return nil, fmt.Errorf("couldn't read plan sequence ids: %w", err)
 	}
@@ -29,7 +29,7 @@ func (p *planReader) fieldToSequences(ctx context.Context, conn *sqlite.Conn, st
 }
 
 // fetchSequenceByID fetches a sequence by its id.
-func (p *planReader) fetchSequenceByID(ctx context.Context, conn *sqlite.Conn, id string) (*workflow.Sequence, error) {
+func (p *planReader) fetchSequenceByID(ctx context.Context, conn *sqlite.Conn, id uuid.UUID) (*workflow.Sequence, error) {
 	sequence := &workflow.Sequence{}
 	do := func(conn *sqlite.Conn) (err error) {
 		err = sqlitex.Execute(
@@ -37,7 +37,7 @@ func (p *planReader) fetchSequenceByID(ctx context.Context, conn *sqlite.Conn, i
 			fetchSequencesByID,
 			&sqlitex.ExecOptions{
 				Named: map[string]interface{}{
-					"$id": id,
+					"$id": id.String(),
 				},
 				ResultFunc: func(stmt *sqlite.Stmt) error {
 					sequence, err = p.sequenceRowToSequence(ctx, conn, stmt)
@@ -64,16 +64,15 @@ func (p *planReader) fetchSequenceByID(ctx context.Context, conn *sqlite.Conn, i
 func (p *planReader) sequenceRowToSequence(ctx context.Context, conn *sqlite.Conn, stmt *sqlite.Stmt) (*workflow.Sequence, error) {
 	var err error
 	s := &workflow.Sequence{}
-	s.ID, err = fieldToID("$id", stmt)
+	s.ID, err = fieldToID("id", stmt)
 	if err != nil {
 		return nil, fmt.Errorf("couldn't read block id: %w", err)
 	}
-	s.Name = stmt.GetText("$name")
-	s.Descr = stmt.GetText("$descr")
-	s.State = &workflow.State{
-		Status: workflow.Status(stmt.GetInt64("$state_status")),
-		Start:  time.Unix(0, stmt.GetInt64("$state_start")),
-		End:    time.Unix(0, stmt.GetInt64("$state_end")),
+	s.Name = stmt.GetText("name")
+	s.Descr = stmt.GetText("descr")
+	s.State, err = fieldToState(stmt)
+	if err != nil {
+		return nil, fmt.Errorf("sequenceRowToSequence: %w", err)
 	}
 	s.Actions, err = p.fieldToActions(ctx, conn, stmt)
 	if err != nil {

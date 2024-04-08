@@ -4,6 +4,7 @@ go 1.21.3
 
 require (
 	github.com/go-json-experiment/json v0.0.0-20231102232822-2e55bd4e08b0
+	github.com/google/go-cmp v0.6.0
 	github.com/google/uuid v1.6.0
 	github.com/gostdlib/concurrency v0.0.0-20240319155954-cfb345297e52
 	github.com/gostdlib/ops v0.0.0-20240403194558-b078d352f3fc
