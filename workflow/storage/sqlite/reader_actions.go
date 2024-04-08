@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"reflect"
-	"strings"
 	"time"
 
 	"github.com/element-of-surprise/workstream/workflow"
@@ -117,21 +116,4 @@ func (p *planReader) actionRowToAction(ctx context.Context, stmt *sqlite.Stmt) (
 		}
 	}
 	return a, nil
-}
-
-// idSearchFromUUID returns a byte slice that can be used in a query to search for the given UUIDs.
-// The returned byte slice is a comma separated list of UUIDs
-func idSearchFromUUID(ids []uuid.UUID) string {
-	if len(ids) == 0 {
-		return ""
-	}
-
-	build := strings.Builder{}
-	for i, id := range ids {
-		build.WriteString(id.String())
-		if i < len(ids)-1 {
-			build.WriteString(",")
-		}
-	}
-	return build.String()
 }

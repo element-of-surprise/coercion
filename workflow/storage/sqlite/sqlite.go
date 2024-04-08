@@ -95,8 +95,8 @@ func createTables(ctx context.Context, conn *sqlite.Conn) error {
 	return nil
 }
 
-// CreatePlan writes the plan to storage. If the plan already exists, this will return an error.
-func (r *ReadWriter) CreatePlan(ctx context.Context, plan *workflow.Plan) error {
+// Create writes the plan to storage. If the plan already exists, this will return an error.
+func (r *ReadWriter) Create(ctx context.Context, plan *workflow.Plan) error {
 	if plan.ID == uuid.Nil {
 		return fmt.Errorf("plan ID cannot be nil")
 	}
@@ -113,7 +113,7 @@ func (r *ReadWriter) CreatePlan(ctx context.Context, plan *workflow.Plan) error 
 	return commitPlan(ctx, r.conn, plan)
 }
 
-func (r *ReadWriter) PlanWriter(ctx context.Context, id uuid.UUID) (storage.PlanWriter, error) {
+func (r *ReadWriter) Writer(ctx context.Context, id uuid.UUID) (storage.PlanWriter, error) {
 	exist, err := r.Exists(ctx, id)
 	if err != nil {
 		return nil, err

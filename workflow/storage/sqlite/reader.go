@@ -3,6 +3,7 @@ package sqlite
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 	"unsafe"
 
@@ -55,14 +56,156 @@ func (p *planReader) Read(ctx context.Context, id uuid.UUID) (*workflow.Plan, er
 }
 
 // SearchPlans returns a list of Plan IDs that match the filter.
-func (p *planReader) Search(ctx context.Context, filter storage.SearchFilter) ([]uuid.UUID, error) {
-	panic("not implemented") // TODO: Implement
+func (p *planReader) Search(ctx context.Context, filters storage.Filters) (chan storage.Stream[storage.ListResult], error) {
+	if err := filters.Validate(); err != nil {
+		return nil, fmt.Errorf("invalid filter: %w", err)
+	}
+
+	q, named := p.buildSearchQuery(filters)
+
+	results := make(chan storage.Stream[storage.ListResult], 1)
+
+	go func() {
+		err := sqlitex.Execute(
+			p.conn,
+			q,
+			&sqlitex.ExecOptions{
+				Named: named,
+				ResultFunc: func(stmt *sqlite.Stmt) error {
+					r, err := p.listResultsFunc(stmt)
+					if err != nil {
+						return fmt.Errorf("problem searching plans: %w", err)
+					}
+					select {
+					case <-ctx.Done():
+						results <- storage.Stream[storage.ListResult]{
+							Err: ctx.Err(),
+						}
+						return ctx.Err()
+					case results <- storage.Stream[storage.ListResult]{Result: r}:
+						return nil
+					}
+				},
+			},
+		)
+
+		if err != nil {
+			results <- storage.Stream[storage.ListResult]{Err: fmt.Errorf("couldn't complete list plans: %w", err)}
+		}
+	}()
+	return results, nil
 }
 
-// ListPlans returns a list of all Plan IDs in the storage. This should
-// return with most recent submiited first.
-func (p *planReader) List(ctx context.Context, limit int) ([]uuid.UUID, error) {
-	panic("not implemented") // TODO: Implement
+func (p *planReader) buildSearchQuery(filters storage.Filters) (string, map[string]any) {
+	const sel = `SELECT id, group_id, name, descr, submit_time, state_status, state_start, state_end FROM plans WHERE`
+
+	named := map[string]any{}
+
+	build := strings.Builder{}
+	build.WriteString(sel)
+
+	numFilters := 0
+
+	if len(filters.ByIDs) > 0 {
+		numFilters++
+		named["$ids"] = idSearchFromUUID(filters.ByIDs)
+		build.WriteString(" id IN ($ids)")
+	}
+	if len(filters.ByGroupIDs) > 0 {
+		if numFilters > 0 {
+			build.WriteString(" AND")
+		}
+		numFilters++
+		named["$group_ids"] = idSearchFromUUID(filters.ByGroupIDs)
+		build.WriteString(" group_id IN ($group_ids)")
+	}
+	if len(filters.ByStatus) > 0 {
+		if numFilters > 0 {
+			build.WriteString(" AND")
+		}
+		numFilters++
+		for i, s := range filters.ByStatus {
+			name := fmt.Sprintf("$status%d", i)
+			named[name] = int64(s)
+			if i == 0 {
+				build.WriteString(fmt.Sprintf(" state_status = %s", name))
+			} else {
+				build.WriteString(fmt.Sprintf(" AND state_status = %s", name))
+			}
+		}
+	}
+	build.WriteString(" ORDER BY submit_time DESC;")
+	return build.String(), named
+}
+
+// List returns a list of Plan IDs in the storage in order from newest to oldest. This should
+// return with most recent submiited first. Limit sets the maximum number of
+// entrie to return
+func (p *planReader) List(ctx context.Context, limit int) (chan storage.Stream[storage.ListResult], error) {
+	const listPlans = `SELECT id, group_id, name, descr, submit_time, state_status, state_start, state_end FROM plans ORDER BY submit_time DESC`
+
+	named := map[string]any{}
+
+	q := listPlans
+	if limit > 0 {
+		q += " LIMIT $limit;"
+		named["$limit"] = limit
+	}
+
+	results := make(chan storage.Stream[storage.ListResult], 1)
+
+	go func() {
+		err := sqlitex.Execute(
+			p.conn,
+			q,
+			&sqlitex.ExecOptions{
+				Named: named,
+				ResultFunc: func(stmt *sqlite.Stmt) error {
+					r, err := p.listResultsFunc(stmt)
+					if err != nil {
+						return fmt.Errorf("problem listing plans: %w", err)
+					}
+					select {
+					case <-ctx.Done():
+						results <- storage.Stream[storage.ListResult]{
+							Err: ctx.Err(),
+						}
+						return ctx.Err()
+					case results <- storage.Stream[storage.ListResult]{Result: r}:
+						return nil
+					}
+				},
+			},
+		)
+
+		if err != nil {
+			results <- storage.Stream[storage.ListResult]{Err: fmt.Errorf("couldn't complete list plans: %w", err)}
+		}
+	}()
+	return results, nil
+}
+
+// listResultsFunc is a helper function to convert a SQLite statement into a ListResult.
+func (p *planReader) listResultsFunc(stmt *sqlite.Stmt) (storage.ListResult, error) {
+	r := storage.ListResult{}
+	var err error
+	r.ID, err = fieldToID("id", stmt)
+	if err != nil {
+		return storage.ListResult{}, fmt.Errorf("couldn't get ID: %w", err)
+	}
+	r.GroupID, err = fieldToID("group_id", stmt)
+	if err != nil {
+		return storage.ListResult{}, fmt.Errorf("couldn't get group ID: %w", err)
+	}
+	r.Name = stmt.GetText("name")
+	r.Descr = stmt.GetText("descr")
+	r.SubmitTime = time.Unix(0, stmt.GetInt64("submit_time"))
+	r.State = &workflow.State{
+		Status: workflow.Status(stmt.GetInt64("state_status")),
+		Start:  time.Unix(0, stmt.GetInt64("state_start")),
+		End:    time.Unix(0, stmt.GetInt64("state_end")),
+	}
+	return r, nil
 }
 
 func (p *planReader) private() {
@@ -140,4 +283,21 @@ func fieldToState(stmt *sqlite.Stmt) (*workflow.State, error) {
 		Start:  start,
 		End:    end,
 	}, nil
+}
+
+// idSearchFromUUID returns a string that can be used in a query to search for the given UUIDs.
+// The returned byte slice is a comma separated list of UUIDs
+func idSearchFromUUID(ids []uuid.UUID) string {
+	if len(ids) == 0 {
+		return ""
+	}
+
+	build := strings.Builder{}
+	for i, id := range ids {
+		build.WriteString(id.String())
+		if i < len(ids)-1 {
+			build.WriteString(",")
+		}
+	}
+	return build.String()
 }
