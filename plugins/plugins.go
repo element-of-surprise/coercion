@@ -8,14 +8,48 @@ import (
 	"github.com/gostdlib/ops/retry/exponential"
 )
 
+// ErrCode is the type for error codes that are returned by plugins.:w
+type ErrCode uint
+
+//go:generate stringer -type=ErrCode
+
+// ECUnknown is the error code for an unknown error.
+const ECUnknown ErrCode = 0
+
+// Error is an error that is returned by a plugin. This implements the error interface.
+// However, it is not used as an error type in plugin methods, as an error interface cannot be encoded
+// and decoded by various encoding packages.
+type Error struct {
+	// Code is the error code that is returned by the plugin, with 0 representing unknown.
+	// This is an error code specific to the plugin and all plugins should define their own error codes.
+	Code ErrCode
+	// Message is the error message that is returned by the plugin.
+	Message string
+	// Permanent is true if the error is permanent and should not be retried.
+	Permanent bool
+	// Wrapped is the error that is wrapped by the plugin error.
+	Wrapped *Error
+}
+
+// Error implements the error interface.
+func (e *Error) Error() string {
+	return e.Message
+}
+
+// Unwrap implements the errors.Wrapper interface.
+func (e *Error) Unwrap() error {
+	return e.Wrapped
+}
+
 // Plugin is the interface that must be implemented by all plugins.
 type Plugin interface {
 	// Name returns the name of the plugin.
 	Name() string
 	// Execute executes the plugin.
-	Execute(ctx context.Context, req any) (any, error)
-	// ValidateReq validates the request object.
-	ValidateReq(any) error
+	Execute(ctx context.Context, req any) (any, *Error)
+	// ValidateReq validates the request object. This must check that the request object
+	// is the same as the object returned by Request().
+	ValidateReq(req any) error
 	// Request returns an empty request object.
 	Request() any
 	// Response returns an empty response object.

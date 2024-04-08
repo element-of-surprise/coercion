@@ -1,8 +1,11 @@
 package sqlite
 
 import (
+	"context"
 	"fmt"
+	"time"
 
+	"github.com/element-of-surprise/workstream/plugins"
 	"github.com/element-of-surprise/workstream/workflow"
 
 	"github.com/go-json-experiment/json"
@@ -30,8 +33,10 @@ const insertPlan = `
 	) VALUES ($id, $group_id, $name, $descr, $meta, $prechecks, $postchecks, $contchecks, $blocks,
 	$state_status, $state_start, $state_end, $submit_time, $reason)`
 
+var zeroTime = time.Unix(0, 0)
+
 // commitPlan commits a plan to the database. This commits the entire plan and all sub-objects.
-func commitPlan(conn *sqlite.Conn, p *workflow.Plan) error {
+func commitPlan(ctx context.Context, conn *sqlite.Conn, p *workflow.Plan) error {
 	if p == nil {
 		return fmt.Errorf("planToSQL: plan cannot be nil")
 	}
@@ -44,16 +49,11 @@ func commitPlan(conn *sqlite.Conn, p *workflow.Plan) error {
 			return fmt.Errorf("planToSQL(insertPlan): %w", err)
 		}
 
-		meta, err := json.Marshal(p.Meta)
-		if err != nil {
-			return fmt.Errorf("planToSQL(json.Marshal): %w", err)
-		}
-
 		stmt.SetText("$id", p.ID.String())
 		stmt.SetText("$group_id", p.GroupID.String())
 		stmt.SetText("$name", p.Name)
 		stmt.SetText("$descr", p.Descr)
-		stmt.SetBytes("$meta", meta)
+		stmt.SetBytes("$meta", p.Meta)
 		stmt.SetText("$prechecks", p.PreChecks.ID.String())
 		stmt.SetText("$postchecks", p.PostChecks.ID.String())
 		stmt.SetText("$contchecks", p.ContChecks.ID.String())
@@ -66,7 +66,11 @@ func commitPlan(conn *sqlite.Conn, p *workflow.Plan) error {
 		stmt.SetInt64("$state_status", int64(p.State.Status))
 		stmt.SetInt64("$state_start", p.State.Start.UnixNano())
 		stmt.SetInt64("$state_end", p.State.End.UnixNano())
-		stmt.SetInt64("$submit_time", p.SubmitTime.UnixNano())
+		if p.SubmitTime.Before(zeroTime) {
+			stmt.SetInt64("$submit_time", zeroTime.UnixNano())
+		} else {
+			stmt.SetInt64("$submit_time", p.SubmitTime.UnixNano())
+		}
 		stmt.SetInt64("$reason", int64(p.Reason))
 
 
@@ -75,17 +79,17 @@ func commitPlan(conn *sqlite.Conn, p *workflow.Plan) error {
 			return fmt.Errorf("planToSQL(plan): %w", err)
 		}
 
-		if err := commitChecks(conn, p.ID, p.PreChecks); err != nil {
+		if err := commitChecks(ctx, conn, p.ID, p.PreChecks); err != nil {
 			return fmt.Errorf("planToSQL(commitChecks(prechecks)): %w", err)
 		}
-		if err := commitChecks(conn, p.ID, p.PostChecks); err != nil {
+		if err := commitChecks(ctx, conn, p.ID, p.PostChecks); err != nil {
 			return fmt.Errorf("planToSQL(commitChecks(postchecks)): %w", err)
 		}
-		if err := commitChecks(conn, p.ID, p.ContChecks); err != nil {
+		if err := commitChecks(ctx, conn, p.ID, p.ContChecks); err != nil {
 			return fmt.Errorf("planToSQL(commitChecks(contchecks)): %w", err)
 		}
 		for i, b := range p.Blocks {
-			if err := commitBlock(conn, p.ID, i, b); err != nil {
+			if err := commitBlock(ctx, conn, p.ID, i, b); err != nil {
 				return fmt.Errorf("planToSQL(commitBlocks): %w", err)
 			}
 		}
@@ -108,7 +112,7 @@ const insertChecks = `
 	) VALUES ($id, $plan_id, $actions, $delay,
 	$state_status, $state_start, $state_end)`
 
-func commitChecks(conn *sqlite.Conn, planID uuid.UUID, checks *workflow.Checks) error {
+func commitChecks(ctx context.Context, conn *sqlite.Conn, planID uuid.UUID, checks *workflow.Checks) error {
 	stmt, err := conn.Prepare(insertChecks)
 	if err != nil {
 		return fmt.Errorf("conn.Prepare(insertCheck): %w", err)
@@ -133,7 +137,7 @@ func commitChecks(conn *sqlite.Conn, planID uuid.UUID, checks *workflow.Checks) 
 	}
 
 	for i, a := range checks.Actions {
-		if err := commitAction(conn, planID, i, a); err != nil {
+		if err := commitAction(ctx, conn, planID, i, a); err != nil {
 			return fmt.Errorf("commitAction: %w", err)
 		}
 	}
@@ -148,24 +152,28 @@ const insertBlock = `
 		name,
 		descr,
 		pos,
+		entrancedelay,
+		exitdelay,
 		prechecks,
 		postchecks,
 		contchecks,
 		sequences,
+		concurrency,
+		toleratedfailures,
 		state_status,
 		state_start,
 		state_end
-	) VALUES ($id, $plan_id, $name, $descr, $pos, $prechecks, $postchecks, $contchecks, $sequences,
-	$state_status, $state_start, $state_end)`
+	) VALUES ($id, $plan_id, $name, $descr, $pos, $entrancedelay, $exitdelay, $prechecks, $postchecks, $contchecks, $sequences,
+	$concurrency, $toleratedfailures,$state_status, $state_start, $state_end)`
 
-func commitBlock(conn *sqlite.Conn, planID uuid.UUID, pos int, block *workflow.Block) error {
+func commitBlock(ctx context.Context, conn *sqlite.Conn, planID uuid.UUID, pos int, block *workflow.Block) error {
 	stmt, err := conn.Prepare(insertBlock)
 	if err != nil {
 		return fmt.Errorf("conn.Prepate(insertBlock): %w", err)
 	}
 
 	for _, c := range []*workflow.Checks{block.PreChecks, block.PostChecks, block.ContChecks} {
-		if err := commitChecks(conn, planID, c); err != nil {
+		if err := commitChecks(ctx, conn, planID, c); err != nil {
 			return fmt.Errorf("commitBlock(commitChecks): %w", err)
 		}
 	}
@@ -180,10 +188,14 @@ func commitBlock(conn *sqlite.Conn, planID uuid.UUID, pos int, block *workflow.B
 	stmt.SetText("$name", block.Name)
 	stmt.SetText("$descr", block.Descr)
 	stmt.SetInt64("$pos", int64(pos))
+	stmt.SetInt64("$entrancedelay", int64(block.EntranceDelay))
+	stmt.SetInt64("$exitdelay", int64(block.ExitDelay))
 	stmt.SetText("$prechecks", block.PreChecks.ID.String())
 	stmt.SetText("$postchecks", block.PostChecks.ID.String())
 	stmt.SetText("$contchecks", block.ContChecks.ID.String())
 	stmt.SetBytes("$sequences", sequences)
+	stmt.SetInt64("$concurrency", int64(block.Concurrency))
+	stmt.SetInt64("$toleratedfailures", int64(block.ToleratedFailures))
 	stmt.SetInt64("$state_status", int64(block.State.Status))
 	stmt.SetInt64("$state_start", block.State.Start.UnixNano())
 	stmt.SetInt64("$state_end", block.State.End.UnixNano())
@@ -194,7 +206,7 @@ func commitBlock(conn *sqlite.Conn, planID uuid.UUID, pos int, block *workflow.B
 	}
 
 	for i, seq := range block.Sequences {
-		if err := commitSequence(conn, planID, i, seq); err != nil {
+		if err := commitSequence(ctx, conn, planID, i, seq); err != nil {
 			return fmt.Errorf("(commitSequence: %w", err)
 		}
 	}
@@ -214,7 +226,7 @@ const insertSequence = `
 		state_end
 	) VALUES ($id, $plan_id, $name, $descr, $pos, $actions, $state_status, $state_start, $state_end)`
 
-func commitSequence(conn *sqlite.Conn, planID uuid.UUID, pos int, seq *workflow.Sequence) error {
+func commitSequence(ctx context.Context, conn *sqlite.Conn, planID uuid.UUID, pos int, seq *workflow.Sequence) error {
 	stmt, err := conn.Prepare(insertSequence)
 	if err != nil {
 		return fmt.Errorf("conn.Prepare(insertSequence): %w", err)
@@ -241,7 +253,7 @@ func commitSequence(conn *sqlite.Conn, planID uuid.UUID, pos int, seq *workflow.
 	}
 
 	for i, a := range seq.Actions {
-		if err := commitAction(conn, planID, i, a); err != nil {
+		if err := commitAction(ctx, conn, planID, i, a); err != nil {
 			return fmt.Errorf("planToSQL(commitAction): %w", err)
 		}
 	}
@@ -263,10 +275,10 @@ const insertAction = `
 		state_status,
 		state_start,
 		state_end
-	) VALUES ($id, $plan_id, $name, $descr, $plugin, $timeout, $retries, $req, $attempts,
+	) VALUES ($id, $plan_id, $name, $descr, $pos, $plugin, $timeout, $retries, $req, $attempts,
 	$state_status, $state_start, $state_end)`
 
-func commitAction(conn *sqlite.Conn, planID uuid.UUID, pos int, action *workflow.Action) error {
+func commitAction(ctx context.Context, conn *sqlite.Conn, planID uuid.UUID, pos int, action *workflow.Action) error {
 	stmt, err := conn.Prepare(insertAction)
 	if err != nil {
 		return err
@@ -276,9 +288,10 @@ func commitAction(conn *sqlite.Conn, planID uuid.UUID, pos int, action *workflow
 	if err != nil {
 		return fmt.Errorf("json.Marshal(req): %w", err)
 	}
-	attempts, err := json.Marshal(action.Attempts)
+
+	attempts, err := encodeAttempts(action.Attempts)
 	if err != nil {
-		return fmt.Errorf("json.Marshal(attempts): %w", err)
+		return fmt.Errorf("can't encode action.Attempts: %w", err)
 	}
 
 	stmt.SetText("$id", action.ID.String())
@@ -290,7 +303,9 @@ func commitAction(conn *sqlite.Conn, planID uuid.UUID, pos int, action *workflow
 	stmt.SetInt64("$timeout", int64(action.Timeout))
 	stmt.SetInt64("$retries", int64(action.Retries))
 	stmt.SetBytes("$req", req)
-	stmt.SetBytes("$attempts", attempts)
+	if attempts != nil {
+		stmt.SetBytes("$attempts", attempts)
+	}
 	stmt.SetInt64("$state_status", int64(action.State.Status))
 	stmt.SetInt64("$state_start", action.State.Start.UnixNano())
 	stmt.SetInt64("$state_end", action.State.End.UnixNano())
@@ -300,6 +315,43 @@ func commitAction(conn *sqlite.Conn, planID uuid.UUID, pos int, action *workflow
 		return err
 	}
 	return nil
+}
+
+// encodeAttempts encodes a slice of attempts into a JSON array hodling JSON encoded attempts as byte slices.
+func encodeAttempts (attempts []*workflow.Attempt) ([]byte, error) {
+	if len(attempts) == 0 {
+		return nil, nil
+	}
+	var out [][]byte
+	if len(attempts) > 0 {
+		out = make([][]byte, 0, len(attempts))
+		for _, a := range attempts {
+			b, err := json.Marshal(a)
+			if err != nil {
+				return nil, fmt.Errorf("json.Marshal(attempt): %w", err)
+			}
+			out = append(out, b)
+		}
+	}
+	return json.Marshal(out)
+}
+
+// decodeAttempts decodes a JSON array of JSON encoded attempts as byte slices into a slice of attempts.
+func decodeAttempts(rawAttempts []byte, plug plugins.Plugin) ([]*workflow.Attempt, error) {
+	rawList := make([][]byte, 0)
+	if err := json.Unmarshal(rawAttempts, &rawList); err != nil {
+		return nil, fmt.Errorf("json.Unmarshal(rawAttempts): %w", err)
+	}
+
+	attempts := make([]*workflow.Attempt, 0, len(rawList))
+	for _, raw := range rawList {
+		var a = &workflow.Attempt{Resp: plug.Response()}
+		if err := json.Unmarshal(raw, a); err != nil {
+			return nil, fmt.Errorf("json.Unmarshal(raw): %w", err)
+		}
+		attempts = append(attempts, a)
+	}
+	return attempts, nil
 }
 
 type ider interface {

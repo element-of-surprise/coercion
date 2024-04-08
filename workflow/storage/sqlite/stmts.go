@@ -28,10 +28,14 @@ SELECT
 	name,
 	descr,
 	pos,
+	entrancedelay,
+	exitdelay,
 	prechecks,
 	postchecks,
 	contchecks,
 	sequences,
+	concurrency,
+	toleratedfailures,
 	state_status,
 	state_start,
 	state_end
@@ -73,7 +77,7 @@ SELECT
 	timeout,
 	retries,
 	req,
-	attemtps,
+	attempts,
 	state_status,
 	state_start,
 	state_end

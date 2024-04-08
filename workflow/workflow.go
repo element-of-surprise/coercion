@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/element-of-surprise/workstream/plugins"
+	"github.com/element-of-surprise/workstream/plugins/registry"
 
 	"github.com/google/uuid"
 )
@@ -503,20 +504,13 @@ func (s *Sequence) validate() ([]validator, error) {
 	return vals, nil
 }
 
-// register is an interface that is used to get a plugin by name.
-// Note: violates interface naming, but Getter is too generic.
-type register interface {
-	Get(name string) plugins.Plugin
-}
-
 // Attempt is the result of an action that is executed by a plugin.
+// Nothing in Attempt should be set by the user.
 type Attempt struct {
 	// Resp is the response object that is returned by the plugin.
-	// This should not be set by the user.
 	Resp any
-	// Err is the error that is returned by the plugin.
-	// This should not be set by the user.
-	Err error
+	// Err is the plugin error that is returned by the plugin. If this is not nil, the attempt failed.
+	Err *plugins.Error
 
 	// Start is the time the attempt started.
 	Start time.Time
@@ -543,11 +537,11 @@ type Action struct {
 	Req any
 
 	// Attempts is the attempts of the action. This should not be set by the user.
-	Attempts []Attempt
+	Attempts []*Attempt
 	// State represents settings that should not be set by the user, but users can query.
 	State *State
 
-	register register
+	register *registry.Register
 }
 
 // GetID is a getter for the ID field.
@@ -647,9 +641,9 @@ func (a *Action) validate() ([]validator, error) {
 
 	var plug  plugins.Plugin
 	if a.register == nil {
-		plug = plugins.Registry.Plugin(a.Plugin)
+		plug = registry.Plugins.Plugin(a.Plugin)
 	} else {
-		plug = a.register.Get(a.Plugin)
+		plug = a.register.Plugin(a.Plugin)
 	}
 	if plug == nil {
 		return nil, fmt.Errorf("plugin %q not found", a.Plugin)

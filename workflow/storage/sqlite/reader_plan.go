@@ -17,36 +17,49 @@ func (p *planReader) fetchPlan(ctx context.Context, id uuid.UUID) (*workflow.Pla
 	do := func(conn *sqlite.Conn) (err error) {
 		defer sqlitex.Transaction(conn)(&err)
 
-		stmt, err := conn.Prepare(fetchPlanByID)
-		if err != nil {
-			return fmt.Errorf("couldn't prepare statement: %w", err)
-		}
-		stmt.SetBytes("$id", id[:])
-
 		return sqlitex.Execute(
 			conn,
 			fetchPlanByID,
 			&sqlitex.ExecOptions{
 				Named: map[string]any{
-					"$id": id[:],
+					"$id": id.String(),
 				},
 				ResultFunc: func(stmt *sqlite.Stmt) error {
-					stmt.GetBytes("$id", plan.ID[:])
-					plan.Name = stmt.GetText("$name")
-					plan.Descr = stmt.GetText("$descr")
-					if b := fieldToBytes("$meta", stmt); b != nil {
+					var err error
+					plan.ID, err = uuid.Parse(stmt.GetText("id"))
+					if err != nil {
+						return fmt.Errorf("couldn't convert ID to UUID: %w", err)
+					}
+					gid := stmt.GetText("group_id")
+					if gid == "" {
+						plan.GroupID = uuid.Nil
+					} else {
+						plan.GroupID, err = uuid.Parse(stmt.GetText("group_id"))
+					}
+					plan.Name = stmt.GetText("name")
+					plan.Descr = stmt.GetText("descr")
+					plan.SubmitTime, err = timeFromField("submit_time", stmt)
+					if err != nil {
+						return fmt.Errorf("couldn't get plan submit time: %w", err)
+					}
+					plan.State, err = fieldToState(stmt)
+					if err != nil {
+						return fmt.Errorf("couldn't get plan state: %w", err)
+					}
+
+					if b := fieldToBytes("meta", stmt); b != nil {
 						plan.Meta = b
 					}
 
-					plan.PreChecks, err = p.fieldToCheck(ctx, "$prechecks", conn, stmt)
+					plan.PreChecks, err = p.fieldToCheck(ctx, "prechecks", conn, stmt)
 					if err != nil {
 						return fmt.Errorf("couldn't get plan prechecks: %w", err)
 					}
-					plan.ContChecks, err = p.fieldToCheck(ctx, "$contchecks", conn, stmt)
+					plan.ContChecks, err = p.fieldToCheck(ctx, "contchecks", conn, stmt)
 					if err != nil {
 						return fmt.Errorf("couldn't get plan contchecks: %w", err)
 					}
-					plan.PostChecks, err = p.fieldToCheck(ctx, "$postchecks", conn, stmt)
+					plan.PostChecks, err = p.fieldToCheck(ctx, "postchecks", conn, stmt)
 					if err != nil {
 						return fmt.Errorf("couldn't get plan postchecks: %w", err)
 					}

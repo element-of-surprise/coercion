@@ -13,7 +13,7 @@ import (
 
 // fieldToBlocks converts the "$blocks" field in a sqlite row to a list of workflow.Blocks.
 func (p *planReader) fieldToBlocks(ctx context.Context, conn *sqlite.Conn, stmt *sqlite.Stmt) ([]*workflow.Block, error) {
-	ids, err := fieldToIDs("$blocks", stmt)
+	ids, err := fieldToIDs("blocks", stmt)
 	if err != nil {
 		return nil, fmt.Errorf("couldn't read plan block ids: %w", err)
 	}
@@ -38,7 +38,7 @@ func (p *planReader) fetchBlockByID(ctx context.Context, conn *sqlite.Conn, id u
 			fetchBlocksByID,
 			&sqlitex.ExecOptions{
 				Named: map[string]any{
-					"$id": id,
+					"$id": id.String(),
 				},
 				ResultFunc: func(stmt *sqlite.Stmt) error {
 					block, err = p.blockRowToBlock(ctx, conn, stmt)
@@ -65,26 +65,30 @@ func (p *planReader) fetchBlockByID(ctx context.Context, conn *sqlite.Conn, id u
 func (p *planReader) blockRowToBlock(ctx context.Context, conn *sqlite.Conn, stmt *sqlite.Stmt) (*workflow.Block, error) {
 	var err error
 	b := &workflow.Block{}
-	b.ID, err = fieldToID("$id", stmt)
+	b.ID, err = fieldToID("id", stmt)
 	if err != nil {
 		return nil, fmt.Errorf("couldn't read block id: %w", err)
 	}
-	b.Name = stmt.GetText("$name")
-	b.Descr = stmt.GetText("$descr")
-	b.State = &workflow.State{
-		Status: workflow.Status(stmt.GetInt64("$state_status")),
-		Start:  time.Unix(0, stmt.GetInt64("$state_start")),
-		End:    time.Unix(0, stmt.GetInt64("$state_end")),
+	b.Name = stmt.GetText("name")
+	b.Descr = stmt.GetText("descr")
+	b.EntranceDelay = time.Duration(stmt.GetInt64("entrancedelay"))
+	b.ExitDelay = time.Duration(stmt.GetInt64("exitdelay"))
+	b.State, err = fieldToState(stmt)
+	if err != nil {
+		return nil, fmt.Errorf("blockRowToBlock: %w", err)
 	}
-	b.PreChecks, err = p.fieldToCheck(ctx, "$prechecks", conn, stmt)
+	b.Concurrency = int(stmt.GetInt64("concurrency"))
+	b.ToleratedFailures = int(stmt.GetInt64("toleratedfailures"))
+
+	b.PreChecks, err = p.fieldToCheck(ctx, "prechecks", conn, stmt)
 	if err != nil {
 		return nil, fmt.Errorf("couldn't read block prechecks: %w", err)
 	}
-	b.ContChecks, err = p.fieldToCheck(ctx, "$contchecks", conn, stmt)
+	b.ContChecks, err = p.fieldToCheck(ctx, "contchecks", conn, stmt)
 	if err != nil {
 		return nil, fmt.Errorf("couldn't read block contchecks: %w", err)
 	}
-	b.PostChecks, err = p.fieldToCheck(ctx, "$postchecks", conn, stmt)
+	b.PostChecks, err = p.fieldToCheck(ctx, "postchecks", conn, stmt)
 	if err != nil {
 		return nil, fmt.Errorf("couldn't read block postchecks: %w", err)
 	}

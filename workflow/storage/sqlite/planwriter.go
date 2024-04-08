@@ -27,7 +27,7 @@ func (p *planWriter) Write(ctx context.Context, plan *workflow.Plan) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
-	panic("not implemented") // TODO: Implement
+	return commitPlan(ctx, p.conn, plan)
 }
 
 // Checks returns a PlanChecksWriter.

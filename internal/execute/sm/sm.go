@@ -454,10 +454,16 @@ func (s *States) runAction(ctx context.Context, action *workflow.Action, writer 
 				expect := p.Response()
 				if !isType(attempt.Resp, expect) {
 					attempt.Resp = nil
-					attempt.Err = fmt.Errorf("plugin(%s) returned a type %T but expected %T: %w", p.Name(), attempt.Resp, expect, exponential.ErrPermanent)
+					attempt.Err = &plugins.Error{
+						Message: fmt.Sprintf("plugin(%s) returned a type %T but expected %T", p.Name(), attempt.Resp, expect),
+						Permanent: true,
+					}
 				}
 			}
-			action.Attempts = append(action.Attempts, attempt)
+			action.Attempts = append(action.Attempts, &attempt)
+			if attempt.Err.Permanent {
+				return fmt.Errorf("%w %w", attempt.Err, exponential.ErrPermanent)
+			}
 			return attempt.Err
 		},
 	)

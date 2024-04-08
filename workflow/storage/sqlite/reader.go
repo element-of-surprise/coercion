@@ -3,6 +3,7 @@ package sqlite
 import (
 	"context"
 	"fmt"
+	"time"
 	"unsafe"
 
 	"github.com/element-of-surprise/workstream/plugins/registry"
@@ -76,7 +77,7 @@ func fieldToID(field string, stmt *sqlite.Stmt) (uuid.UUID, error) {
 // fieldToIDs returns the IDs from the statement field. Field must the a blob
 // encoded as a JSON array that has string UUIDs in v7 format.
 func fieldToIDs(field string, stmt *sqlite.Stmt) ([]uuid.UUID, error) {
-	contents := fieldToBytes("field", stmt)
+	contents := fieldToBytes(field, stmt)
 	if contents == nil {
 		return nil, fmt.Errorf("actions IDs are nil")
 	}
@@ -109,4 +110,34 @@ func fieldToBytes(field string, stmt *sqlite.Stmt) []byte {
 	b := make([]byte, l)
 	stmt.GetBytes(field, b)
 	return b
+}
+
+func timeFromField(field string, stmt *sqlite.Stmt) (time.Time, error) {
+	unixTime := stmt.GetInt64(field)
+	if unixTime == 0 {
+		return time.Time{}, nil
+	}
+	t := time.Unix(0, unixTime)
+	if t.Before(zeroTime) {
+		return time.Time{}, nil
+	}
+	return t, nil
+}
+
+// fieldToState pulls the state_start, state_end and state_status from a stmt
+// and turns them into a *workflow.State.
+func fieldToState(stmt *sqlite.Stmt) (*workflow.State, error) {
+	start, err := timeFromField("state_start", stmt)
+	if err != nil {
+		return nil, err
+	}
+	end, err := timeFromField("state_end", stmt)
+	if err != nil {
+		return nil, err
+	}
+	return &workflow.State{
+		Status: workflow.Status(stmt.GetInt64("state_status")),
+		Start:  start,
+		End:    end,
+	}, nil
 }

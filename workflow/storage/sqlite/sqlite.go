@@ -110,7 +110,7 @@ func (r *ReadWriter) CreatePlan(ctx context.Context, plan *workflow.Plan) error 
 		return fmt.Errorf("plan with ID(%s) already exists", plan.ID)
 	}
 
-	return commitPlan(r.conn, plan)
+	return commitPlan(ctx, r.conn, plan)
 }
 
 func (r *ReadWriter) PlanWriter(ctx context.Context, id uuid.UUID) (storage.PlanWriter, error) {

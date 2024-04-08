@@ -33,10 +33,14 @@ CREATE Table If Not Exists blocks (
     name TEXT NOT NULL,
     descr TEXT NOT NULL,
     pos INTEGER NOT NULL,
+    entrancedelay INTEGER NOT NULL,
+    exitdelay INTEGER NOT NULL,
     prechecks TEXT,
     postchecks TEXT,
     contchecks TEXT,
     sequences BLOB NOT NULL,
+    concurrency INTEGER NOT NULL,
+    toleratedfailures INTEGER NOT NULL,
     state_status INTEGER NOT NULL,
     state_start INTEGER NOT NULL,
     state_end INTEGER NOT NULL
@@ -77,7 +81,7 @@ CREATE Table If Not Exists actions (
     timeout INTEGER NOT NULL,
     retries INTEGER NOT NULL,
     req BLOB,
-    attempts BLOB NOT NULL,
+    attempts BLOB,
     state_status INTEGER NOT NULL,
     state_start INTEGER NOT NULL,
     state_end INTEGER NOT NULL
