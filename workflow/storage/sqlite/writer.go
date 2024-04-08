@@ -11,8 +11,8 @@ import (
 	"zombiezen.com/go/sqlite"
 )
 
-// planWriter implements the storage.PlanWriter interface.
-type planWriter struct {
+// PlanWriter implements the storage.PlanWriter interface.
+type PlanWriter struct {
 	id uuid.UUID
 	// mu is a mutex to protect the underlying storage.
 	// It ensures that only one write operation is happening at a time.
@@ -23,7 +23,7 @@ type planWriter struct {
 }
 
 // Write writes Plan data to storage, and all underlying data.
-func (p *planWriter) Write(ctx context.Context, plan *workflow.Plan) error {
+func (p *PlanWriter) Write(ctx context.Context, plan *workflow.Plan) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
@@ -31,18 +31,21 @@ func (p *planWriter) Write(ctx context.Context, plan *workflow.Plan) error {
 }
 
 // Checks returns a PlanChecksWriter.
-func (p *planWriter) Checks() storage.ChecksWriter {
-
-	panic("not implemented") // TODO: Implement
+func (p *PlanWriter) Checks() storage.ChecksWriter {
+	return ChecksWriter{mu: &p.mu, conn: p.conn}
 }
 
-// Block returns a BlockWriter for the given Block ID. If the Block ID does not exist,
-// this will panic.
-func (p *planWriter) Block(id uuid.UUID) storage.BlockWriter {
-
-	panic("not implemented") // TODO: Implement
+// Block returns a BlockWriter.
+func (p *PlanWriter) Block() storage.BlockWriter {
+	return BlockWriter{mu: &p.mu, conn: p.conn}
 }
 
-func (p *planWriter) private() {
-	panic("not implemented") // TODO: Implement
+// Sequence returns a SequenceWriter.
+func (p *PlanWriter) Sequence() storage.SequenceWriter {
+	return SequenceWriter{mu: &p.mu, conn: p.conn}
+}
+
+// Action returns an ActionWriter.
+func (p *PlanWriter) Action() storage.ActionWriter {
+	return ActionWriter{mu: &p.mu, conn: p.conn}
 }

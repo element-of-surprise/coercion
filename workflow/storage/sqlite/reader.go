@@ -209,7 +209,7 @@ func (p *planReader) listResultsFunc(stmt *sqlite.Stmt) (storage.ListResult, err
 }
 
 func (p *planReader) private() {
-	panic("not implemented") // TODO: Implement
+	return
 }
 
 // fieldToID returns a uuid.UUID from a field "field" in the Stmt that must be a TEXT field.

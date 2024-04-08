@@ -90,11 +90,15 @@ type PlanWriter interface {
 	// Write writes Plan data to storage, and all underlying data.
 	Write(context.Context, *workflow.Plan) error
 
-	// Checks returns a PlanChecksWriter.
+	// Checks returns a ChecksWriter.
 	Checks() ChecksWriter
-	// Block returns a BlockWriter for the given Block ID. If the Block ID does not exist,
+	// Block returns a BlockWriter.
 	// this will panic.
-	Block(id uuid.UUID) BlockWriter
+	Block() BlockWriter
+	// Sequence returns a SequenceWriter.
+	Sequence() SequenceWriter
+	// Action returns an ActionWriter.
+	Action() ActionWriter
 
 	private.Storage
 }
@@ -104,36 +108,21 @@ type BlockWriter interface {
 	// Write writes Block data to storage, but not underlying data.
 	Write(context.Context, *workflow.Block) error
 
-	// Checks returns a ChecksWriter for Checks in this Block.
-	Checks() ChecksWriter
-	// Sequence returns a SequenceWriter for Sequence in this Block.
-	Sequence(uuid.UUID) SequenceWriter
-
 	private.Storage
 }
 
 // ChecksWriter is a storage writer for Checks in a specific Plan or Block.
 type ChecksWriter interface {
-	// PreChecks writes PreChecks data to storage for PreChecks in the specific Plan or Block, but not underlying data.
-	PreChecks(context.Context, *workflow.Checks) error
-	// ContChecks writes ContChecks data to storage for ContChecks in the specific Plan or Block, but not underlying data.
-	ContChecks(context.Context, *workflow.Checks) error
-	// PostChecks writes PostChecks data to storage for PostChecks in the specific Plan or Block, but not underlying data.
-	PostChecks(context.Context, *workflow.Checks) error
+	// Write writes Checks states data to storage but not underlying data.
+	Write(context.Context, *workflow.Checks) error
 
-	// Action returns an ActionWriter for Actions in either PreChecks, ContChecks or PostChecks.
-	// The type of the Action is determined by the workflow.ObjectType. This must be:
-	// workflow.OTPreCheck, workflow.OTContCheck or workflow.OTPostCheck or this will panic.
-	Action(t workflow.ObjectType) ActionWriter
+	private.Storage
 }
 
 // SequenceWriter is a storage writer for Sequences in a specific Block.
 type SequenceWriter interface {
 	// Write writes Sequence data to storage for Sequences in the specific Block, but not underlying data.
 	Write(context.Context, *workflow.Sequence) error
-
-	// Action returns an ActionWriter for Actions in this Sequence.
-	Action() ActionWriter
 
 	private.Storage
 }
