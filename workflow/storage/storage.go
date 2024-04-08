@@ -39,21 +39,6 @@ type Stream[T any] struct {
 	Err    error
 }
 
-// ReadWriter is a storage reader and writer for Plan data. An implementation of ReadWriter must ensure
-// atomic writes for all data.
-type ReadWriter interface {
-	PlanReader
-
-	// Create creates a new Plan in storage. This fails if the Plan ID already exists.
-	Create(ctx context.Context, plan *workflow.Plan) error
-
-	// Writer returns a PlanWriter for the given Plan ID.
-	Writer(context.Context, uuid.UUID) (PlanWriter, error)
-
-	// Close closes the storage.
-	Close(ctx context.Context) error
-}
-
 // ListResult is a result from a List operation.
 type ListResult struct {
 	// ID is the Plan ID.
@@ -68,6 +53,21 @@ type ListResult struct {
 	SubmitTime time.Time
 	// State is the Plan state.
 	State *workflow.State
+}
+
+// ReadWriter is a storage reader and writer for Plan data. An implementation of ReadWriter must ensure
+// atomic writes for all data.
+type ReadWriter interface {
+	PlanReader
+
+	// Create creates a new Plan in storage. This fails if the Plan ID already exists.
+	Create(ctx context.Context, plan *workflow.Plan) error
+
+	// Writer returns a PlanWriter for the given Plan ID.
+	Writer(context.Context, uuid.UUID) (PlanWriter, error)
+
+	// Close closes the storage.
+	Close(ctx context.Context) error
 }
 
 // PlanReader allows for reading Plan data from storage.
