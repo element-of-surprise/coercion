@@ -11,7 +11,7 @@ import (
 )
 
 // fieldToSequences converts the "sequences" field in a sqlite row to a list of workflow.Sequences.
-func (p *planReader) fieldToSequences(ctx context.Context, conn *sqlite.Conn, stmt *sqlite.Stmt) ([]*workflow.Sequence, error) {
+func (p reader) fieldToSequences(ctx context.Context, conn *sqlite.Conn, stmt *sqlite.Stmt) ([]*workflow.Sequence, error) {
 	ids, err := fieldToIDs("sequences", stmt)
 	if err != nil {
 		return nil, fmt.Errorf("couldn't read plan sequence ids: %w", err)
@@ -29,7 +29,7 @@ func (p *planReader) fieldToSequences(ctx context.Context, conn *sqlite.Conn, st
 }
 
 // fetchSequenceByID fetches a sequence by its id.
-func (p *planReader) fetchSequenceByID(ctx context.Context, conn *sqlite.Conn, id uuid.UUID) (*workflow.Sequence, error) {
+func (p reader) fetchSequenceByID(ctx context.Context, conn *sqlite.Conn, id uuid.UUID) (*workflow.Sequence, error) {
 	sequence := &workflow.Sequence{}
 	do := func(conn *sqlite.Conn) (err error) {
 		err = sqlitex.Execute(
@@ -61,7 +61,7 @@ func (p *planReader) fetchSequenceByID(ctx context.Context, conn *sqlite.Conn, i
 }
 
 // sequenceRowToSequence converts a sqlite row to a workflow.Sequence.
-func (p *planReader) sequenceRowToSequence(ctx context.Context, conn *sqlite.Conn, stmt *sqlite.Stmt) (*workflow.Sequence, error) {
+func (p reader) sequenceRowToSequence(ctx context.Context, conn *sqlite.Conn, stmt *sqlite.Stmt) (*workflow.Sequence, error) {
 	var err error
 	s := &workflow.Sequence{}
 	s.ID, err = fieldToID("id", stmt)

@@ -12,7 +12,7 @@ import (
 )
 
 // fieldToBlocks converts the "$blocks" field in a sqlite row to a list of workflow.Blocks.
-func (p *planReader) fieldToBlocks(ctx context.Context, conn *sqlite.Conn, stmt *sqlite.Stmt) ([]*workflow.Block, error) {
+func (p reader) fieldToBlocks(ctx context.Context, conn *sqlite.Conn, stmt *sqlite.Stmt) ([]*workflow.Block, error) {
 	ids, err := fieldToIDs("blocks", stmt)
 	if err != nil {
 		return nil, fmt.Errorf("couldn't read plan block ids: %w", err)
@@ -30,7 +30,7 @@ func (p *planReader) fieldToBlocks(ctx context.Context, conn *sqlite.Conn, stmt 
 }
 
 // fetchBlockByID fetches a block by its id.
-func (p *planReader) fetchBlockByID(ctx context.Context, conn *sqlite.Conn, id uuid.UUID) (*workflow.Block, error) {
+func (p reader) fetchBlockByID(ctx context.Context, conn *sqlite.Conn, id uuid.UUID) (*workflow.Block, error) {
 	block := &workflow.Block{}
 	do := func(conn *sqlite.Conn) (err error) {
 		err = sqlitex.Execute(
@@ -62,7 +62,7 @@ func (p *planReader) fetchBlockByID(ctx context.Context, conn *sqlite.Conn, id u
 }
 
 // blockRowToBlock converts a sqlite row to a workflow.Block.
-func (p *planReader) blockRowToBlock(ctx context.Context, conn *sqlite.Conn, stmt *sqlite.Stmt) (*workflow.Block, error) {
+func (p reader) blockRowToBlock(ctx context.Context, conn *sqlite.Conn, stmt *sqlite.Stmt) (*workflow.Block, error) {
 	var err error
 	b := &workflow.Block{}
 	b.ID, err = fieldToID("id", stmt)

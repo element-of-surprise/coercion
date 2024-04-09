@@ -27,11 +27,11 @@ func init() {
 // per application. It is safe to use concurrently.
 type Workstream struct {
 	exec  *execute.Plans
-	store storage.ReadWriter
+	store storage.Vault
 }
 
 // New creates a new Workstream.
-func New(ctx context.Context, store storage.ReadWriter) (*Workstream, error) {
+func New(ctx context.Context, store storage.Vault) (*Workstream, error) {
 	if store == nil {
 		return nil, fmt.Errorf("storage is required")
 	}

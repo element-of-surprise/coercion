@@ -12,6 +12,7 @@ import (
 	"github.com/element-of-surprise/workstream/plugins"
 	"github.com/element-of-surprise/workstream/workflow"
 	"github.com/element-of-surprise/workstream/workflow/storage"
+
 	"github.com/gostdlib/concurrency/goroutines/pooled"
 	"github.com/gostdlib/concurrency/prim/wait"
 	"github.com/gostdlib/ops/retry/exponential"
@@ -66,14 +67,18 @@ func (d Data) contChecks() (workflow.ObjectType, error) {
 	return workflow.OTUnknown, nil
 }
 
+type nower func() time.Time
+
 // States is the statemachine that handles the execution of a Plan.
 type States struct {
-	store storage.PlanWriter
+	store storage.Vault
 	registry registry
+
+	nower nower
 }
 
 // New creates a new States statemachine.
-func New(store storage.PlanWriter, registry registry) (*States, error) {
+func New(store storage.Vault, registry registry) (*States, error) {
 	if store == nil {
 		return nil, fmt.Errorf("store is required")
 	}
@@ -95,7 +100,7 @@ func (s *States) Start(req statemachine.Request[Data]) statemachine.Request[Data
 	plan.State.Status = workflow.Running
 	plan.State.Start = s.now()
 
-	if err := s.store.Write(req.Ctx, plan); err != nil {
+	if err := s.store.Create(req.Ctx, plan); err != nil {
 		log.Fatalf("failed to write Plan: %v", err)
 	}
 
@@ -141,7 +146,7 @@ func (s *States) ExecuteBlock(req statemachine.Request[Data]) statemachine.Reque
 	h := req.Data.blocks[0]
 
 	h.block.State.Status = workflow.Running
-	if err := s.store.Block().Write(req.Ctx, h.block); err != nil {
+	if err := s.store.Block().UpdateBlock(req.Ctx, h.block); err != nil {
 		log.Printf("failed to write Block: %v", err)
 		return req
 	}
@@ -259,7 +264,7 @@ func (s *States) BlockEnd(req statemachine.Request[Data]) statemachine.Request[D
 		h.block.State.Status = workflow.Failed
 	}
 
-	if err := s.store.Block().Write(req.Ctx, h.block); err != nil {
+	if err := s.store.UpdateBlock(req.Ctx, h.block); err != nil {
 		log.Printf("failed to write Block: %v", err)
 		return req
 	}
@@ -329,7 +334,7 @@ func (s *States) runContChecks(ctx context.Context, checks *workflow.Checks, res
 			return
 		case <-time.After(checks.Delay):
 			resetActions(checks.Actions)
-			if err := s.store.Checks().Write(ctx, checks); err != nil {
+			if err := s.store.UpdateChecks(ctx, checks); err != nil {
 				log.Fatalf("failed to write ContChecks: %v", err)
 			}
 
@@ -337,7 +342,7 @@ func (s *States) runContChecks(ctx context.Context, checks *workflow.Checks, res
 				resultCh <- err
 				return
 			}
-			if err := s.store.Checks().Write(ctx, checks); err != nil {
+			if err := s.store.UpdateChecks(ctx, checks); err != nil {
 				log.Fatalf("failed to write ContChecks: %v", err)
 			}
 		}
@@ -350,7 +355,7 @@ func (s *States) runChecks(ctx context.Context, actions []*workflow.Action) erro
 	for _, action := range actions {
 		action.State.Status = workflow.Running
 		action.State.Start = s.now()
-		if err := s.store.Action().Write(ctx, action); err != nil {
+		if err := s.store.UpdateAction(ctx, action); err != nil {
 			log.Fatalf("failed to write Action: %v", err)
 		}
 	}
@@ -362,7 +367,7 @@ func (s *States) runChecks(ctx context.Context, actions []*workflow.Action) erro
 		action := action
 
 		g.Go(ctx, func(ctx context.Context) (err error) {
-			return s.runAction(ctx, action)
+			return s.runAction(ctx, action, s.store)
 		})
 	}
 	return g.Wait(ctx)
@@ -372,17 +377,17 @@ func (s *States) runChecks(ctx context.Context, actions []*workflow.Action) erro
 // based on the retry policy.
 func (s *States) execSeq(ctx context.Context, seq *workflow.Sequence) error {
 	seq.State.Status = workflow.Running
-	if err := s.store.Sequence().Write(ctx, seq); err != nil {
+	if err := s.store.UpdateSequence(ctx, seq); err != nil {
 		log.Fatalf("failed to write Sequence: %v", err)
 	}
 	defer func() {
-		if err := s.store.Sequence().Write(ctx, seq); err != nil {
+		if err := s.store.UpdateSequence(ctx, seq); err != nil {
 			log.Fatalf("failed to write Sequence: %v", err)
 		}
 	}()
 
 	for _, action := range seq.Actions {
-		if err := s.runAction(ctx, action); err != nil {
+		if err := s.runAction(ctx, action, s.store); err != nil {
 			seq.State.Status = workflow.Failed
 			return err
 		}
@@ -394,14 +399,14 @@ func (s *States) execSeq(ctx context.Context, seq *workflow.Sequence) error {
 
 // runAction runs an action and returns the response or an error. If the response is not the expected
 // type, it returns a permanent error that prevents retries.
-func (s *States) runAction(ctx context.Context, action *workflow.Action) error {
+func (s *States) runAction(ctx context.Context, action *workflow.Action, writer storage.ActionUpdater) error {
 	action.State.Start = s.now()
 	action.State.Status = workflow.Running
-	if err := s.store.Action().Write(ctx, action); err != nil {
+	if err := writer.UpdateAction(ctx, action); err != nil {
 		log.Fatalf("failed to write Action: %v", err)
 	}
 	defer func() {
-		if err := s.store.Action().Write(ctx, action); err != nil {
+		if err := writer.UpdateAction(ctx, action); err != nil {
 			log.Fatalf("failed to write Action: %v", err)
 		}
 	}()
@@ -411,6 +416,12 @@ func (s *States) runAction(ctx context.Context, action *workflow.Action) error {
 
 
 	p := s.registry.Plugin(action.Plugin)
+	// This is defense in depth. The plugin should be checked when the Plan is created.
+	if p == nil {
+		action.State.Status = workflow.Failed
+		return fmt.Errorf("plugin %s not found", action.Plugin)
+	}
+
 	backoff, err := exponential.New(
 		exponential.WithPolicy(p.RetryPolicy()),
 	)
@@ -423,7 +434,7 @@ func (s *States) runAction(ctx context.Context, action *workflow.Action) error {
 			}
 
 			defer func() {
-				if err := s.store.Action().Write(ctx, action); err != nil {
+				if err := writer.UpdateAction(ctx, action); err != nil {
 					log.Fatalf("failed to write Action: %v", err)
 				}
 			}()
@@ -466,8 +477,12 @@ func (s *States) runAction(ctx context.Context, action *workflow.Action) error {
 	return nil
 }
 
+// now returns the current time in UTC. If a nower is set, it uses that to get the time.
 func (s *States) now() time.Time {
-	return time.Now().UTC()
+	if s.nower == nil {
+		return time.Now().UTC()
+	}
+	return s.nower().UTC()
 }
 
 // resetActions adjusts all the actions to their initial un-started state.

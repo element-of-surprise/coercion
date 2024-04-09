@@ -17,14 +17,14 @@ import (
 	"zombiezen.com/go/sqlite/sqlitex"
 )
 
-// planReader implements the storage.PlanReader interface.
-type planReader struct {
+// reader implements the storage.PlanReader interface.
+type reader struct {
 	conn *sqlite.Conn
 	reg  *registry.Register
 }
 
 // Exists returns true if the Plan ID exists in the storage.
-func (p *planReader) Exists(ctx context.Context, id uuid.UUID) (bool, error) {
+func (p reader) Exists(ctx context.Context, id uuid.UUID) (bool, error) {
 	const q = "SELECT COUNT(*) FROM 'plans' WHERE 'id' = ?;"
 
 	count := -1
@@ -51,12 +51,12 @@ func (p *planReader) Exists(ctx context.Context, id uuid.UUID) (bool, error) {
 }
 
 // ReadPlan returns a Plan from the storage.
-func (p *planReader) Read(ctx context.Context, id uuid.UUID) (*workflow.Plan, error) {
+func (p reader) Read(ctx context.Context, id uuid.UUID) (*workflow.Plan, error) {
 	return p.fetchPlan(ctx, id)
 }
 
 // SearchPlans returns a list of Plan IDs that match the filter.
-func (p *planReader) Search(ctx context.Context, filters storage.Filters) (chan storage.Stream[storage.ListResult], error) {
+func (p reader) Search(ctx context.Context, filters storage.Filters) (chan storage.Stream[storage.ListResult], error) {
 	if err := filters.Validate(); err != nil {
 		return nil, fmt.Errorf("invalid filter: %w", err)
 	}
@@ -96,7 +96,7 @@ func (p *planReader) Search(ctx context.Context, filters storage.Filters) (chan 
 	return results, nil
 }
 
-func (p *planReader) buildSearchQuery(filters storage.Filters) (string, map[string]any) {
+func (p reader) buildSearchQuery(filters storage.Filters) (string, map[string]any) {
 	const sel = `SELECT id, group_id, name, descr, submit_time, state_status, state_start, state_end FROM plans WHERE`
 
 	named := map[string]any{}
@@ -141,7 +141,7 @@ func (p *planReader) buildSearchQuery(filters storage.Filters) (string, map[stri
 // List returns a list of Plan IDs in the storage in order from newest to oldest. This should
 // return with most recent submiited first. Limit sets the maximum number of
 // entrie to return
-func (p *planReader) List(ctx context.Context, limit int) (chan storage.Stream[storage.ListResult], error) {
+func (p reader) List(ctx context.Context, limit int) (chan storage.Stream[storage.ListResult], error) {
 	const listPlans = `SELECT id, group_id, name, descr, submit_time, state_status, state_start, state_end FROM plans ORDER BY submit_time DESC`
 
 	named := map[string]any{}
@@ -186,7 +186,7 @@ func (p *planReader) List(ctx context.Context, limit int) (chan storage.Stream[s
 }
 
 // listResultsFunc is a helper function to convert a SQLite statement into a ListResult.
-func (p *planReader) listResultsFunc(stmt *sqlite.Stmt) (storage.ListResult, error) {
+func (p reader) listResultsFunc(stmt *sqlite.Stmt) (storage.ListResult, error) {
 	r := storage.ListResult{}
 	var err error
 	r.ID, err = fieldToID("id", stmt)
@@ -208,7 +208,7 @@ func (p *planReader) listResultsFunc(stmt *sqlite.Stmt) (storage.ListResult, err
 	return r, nil
 }
 
-func (p *planReader) private() {
+func (p reader) private() {
 	return
 }
 

@@ -25,7 +25,7 @@ type registry interface {
 // Plans handles execution of workflow.Plan instances for a Workstream.
 type Plans struct {
 	registry registry
-	store    storage.ReadWriter
+	store    storage.Vault
 
 	states *sm.States
 
@@ -34,7 +34,7 @@ type Plans struct {
 }
 
 // New creates a new Executor. This should only be created once.
-func New(ctx context.Context, store storage.ReadWriter) (*Plans, error) {
+func New(ctx context.Context, store storage.Vault) (*Plans, error) {
 	e := &Plans{}
 
 	if err := e.initPlugins(ctx); err != nil {

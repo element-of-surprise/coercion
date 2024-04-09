@@ -11,18 +11,18 @@ import (
 	"zombiezen.com/go/sqlite"
 )
 
-var _ storage.SequenceWriter = SequenceWriter{}
+var _ storage.SequenceUpdater = sequenceUpdater{}
 
-// SequenceWriter implements the storage.SequenceWriter interface.
-type SequenceWriter struct {
+// sequenceUpdater implements the storage.sequenceUpdater interface.
+type sequenceUpdater struct {
 	mu   *sync.Mutex
 	conn *sqlite.Conn
 
 	private.Storage
 }
 
-// Write implements storage.SequenceWriter.Write().
-func (s SequenceWriter) Write(ctx context.Context, seq *workflow.Sequence) error {
+// UpdateSequence implements storage.SequenceUpdater.UpdateSequence().
+func (s sequenceUpdater) UpdateSequence(ctx context.Context, seq *workflow.Sequence) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 

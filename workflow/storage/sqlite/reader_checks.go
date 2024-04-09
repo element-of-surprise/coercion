@@ -13,7 +13,7 @@ import (
 
 // fieldToCheck reads a field from the statement and returns a workflow.Checks  object. stmt must be
 // from a Plan or Block query.
-func (p *planReader) fieldToCheck(ctx context.Context, field string, conn *sqlite.Conn, stmt *sqlite.Stmt) (*workflow.Checks, error) {
+func (p reader) fieldToCheck(ctx context.Context, field string, conn *sqlite.Conn, stmt *sqlite.Stmt) (*workflow.Checks, error) {
 	strID := stmt.GetText(field)
 	if strID == "" {
 		return nil, nil
@@ -26,7 +26,7 @@ func (p *planReader) fieldToCheck(ctx context.Context, field string, conn *sqlit
 }
 
 // fetchChecksByID fetches a Checks object by its ID.
-func (p *planReader) fetchChecksByID(ctx context.Context, conn *sqlite.Conn, id uuid.UUID) (*workflow.Checks, error) {
+func (p reader) fetchChecksByID(ctx context.Context, conn *sqlite.Conn, id uuid.UUID) (*workflow.Checks, error) {
 	var check *workflow.Checks
 	do := func(conn *sqlite.Conn) (err error) {
 		err = sqlitex.Execute(
@@ -61,7 +61,7 @@ func (p *planReader) fetchChecksByID(ctx context.Context, conn *sqlite.Conn, id 
 }
 
 // checksRowToChecks converts a sqlite row to a workflow.Checks.
-func (p *planReader) checksRowToChecks(ctx context.Context, conn *sqlite.Conn, stmt *sqlite.Stmt) (*workflow.Checks, error) {
+func (p reader) checksRowToChecks(ctx context.Context, conn *sqlite.Conn, stmt *sqlite.Stmt) (*workflow.Checks, error) {
 	var err error
 	c := &workflow.Checks{}
 	c.ID, err = uuid.Parse(stmt.GetText("id"))
