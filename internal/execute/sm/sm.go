@@ -9,21 +9,15 @@ import (
 	"reflect"
 	"time"
 
-	"github.com/element-of-surprise/workstream/plugins"
+	"github.com/element-of-surprise/workstream/internal/execute/sm/actions"
+	"github.com/element-of-surprise/workstream/plugins/registry"
 	"github.com/element-of-surprise/workstream/workflow"
 	"github.com/element-of-surprise/workstream/workflow/storage"
 
 	"github.com/gostdlib/concurrency/goroutines/pooled"
 	"github.com/gostdlib/concurrency/prim/wait"
-	"github.com/gostdlib/ops/retry/exponential"
 	"github.com/gostdlib/ops/statemachine"
 )
-
-// registry represents a registry of plugins
-type registry interface {
-	// Plugin returns a plugin by name. If the plugin is not found, nil is returned.
-	Plugin(name string) plugins.Plugin
-}
 
 // block is a wrapper around a workflow.Block that contains additional information for the statemachine.
 type block struct  {
@@ -72,13 +66,15 @@ type nower func() time.Time
 // States is the statemachine that handles the execution of a Plan.
 type States struct {
 	store storage.Vault
-	registry registry
+	registry *registry.Register
+
+	actionsSM actions.Runner
 
 	nower nower
 }
 
 // New creates a new States statemachine.
-func New(store storage.Vault, registry registry) (*States, error) {
+func New(store storage.Vault, registry *registry.Register) (*States, error) {
 	if store == nil {
 		return nil, fmt.Errorf("store is required")
 	}
@@ -146,7 +142,7 @@ func (s *States) ExecuteBlock(req statemachine.Request[Data]) statemachine.Reque
 	h := req.Data.blocks[0]
 
 	h.block.State.Status = workflow.Running
-	if err := s.store.Block().UpdateBlock(req.Ctx, h.block); err != nil {
+	if err := s.store.UpdateBlock(req.Ctx, h.block); err != nil {
 		log.Printf("failed to write Block: %v", err)
 		return req
 	}
@@ -399,81 +395,20 @@ func (s *States) execSeq(ctx context.Context, seq *workflow.Sequence) error {
 
 // runAction runs an action and returns the response or an error. If the response is not the expected
 // type, it returns a permanent error that prevents retries.
-func (s *States) runAction(ctx context.Context, action *workflow.Action, writer storage.ActionUpdater) error {
-	action.State.Start = s.now()
-	action.State.Status = workflow.Running
-	if err := writer.UpdateAction(ctx, action); err != nil {
-		log.Fatalf("failed to write Action: %v", err)
-	}
-	defer func() {
-		if err := writer.UpdateAction(ctx, action); err != nil {
-			log.Fatalf("failed to write Action: %v", err)
-		}
-	}()
-	defer func() {
-		action.State.End = s.now()
-	}()
-
-
-	p := s.registry.Plugin(action.Plugin)
-	// This is defense in depth. The plugin should be checked when the Plan is created.
-	if p == nil {
-		action.State.Status = workflow.Failed
-		return fmt.Errorf("plugin %s not found", action.Plugin)
-	}
-
-	backoff, err := exponential.New(
-		exponential.WithPolicy(p.RetryPolicy()),
-	)
-
-	err = backoff.Retry(
-		ctx,
-		func(ctx context.Context, record exponential.Record) error {
-			if len(action.Attempts) > action.Retries {
-				return exponential.ErrPermanent
-			}
-
-			defer func() {
-				if err := writer.UpdateAction(ctx, action); err != nil {
-					log.Fatalf("failed to write Action: %v", err)
-				}
-			}()
-
-			attempt := workflow.Attempt{
-				Start: s.now(),
-			}
-
-			runCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), action.Timeout)
-			attempt.Resp, attempt.Err = p.Execute(runCtx, action.Req)
-			cancel()
-
-			// We make sure the response is the expected type. If not, we return a permanent error.
-			// This case means the plugin is not behaving as expected and we should avoid conversion panics
-			// by not returning the junk they gave us.
-			if attempt.Err == nil {
-				expect := p.Response()
-				if !isType(attempt.Resp, expect) {
-					attempt.Resp = nil
-					attempt.Err = &plugins.Error{
-						Message: fmt.Sprintf("plugin(%s) returned a type %T but expected %T", p.Name(), attempt.Resp, expect),
-						Permanent: true,
-					}
-				}
-			}
-			action.Attempts = append(action.Attempts, &attempt)
-			if attempt.Err.Permanent {
-				return fmt.Errorf("%w %w", attempt.Err, exponential.ErrPermanent)
-			}
-			return attempt.Err
+func (s *States) runAction(ctx context.Context, action *workflow.Action, updater storage.ActionUpdater) error {
+	req := statemachine.Request[actions.Data]{
+		Ctx: ctx,
+		Data: actions.Data{
+			Action: action,
+			Updater: updater,
+			Registry: s.registry,
 		},
-	)
-
+		Next: s.actionsSM.Start,
+	}
+	req, err := statemachine.Run("run action statemachine", req)
 	if err != nil {
-		action.State.Status = workflow.Failed
 		return err
 	}
-
-	action.State.Status = workflow.Completed
 	return nil
 }
 

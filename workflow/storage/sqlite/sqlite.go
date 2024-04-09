@@ -14,8 +14,8 @@ import (
 	"path/filepath"
 	"sync"
 
+	"github.com/element-of-surprise/workstream/internal/private"
 	"github.com/element-of-surprise/workstream/workflow/storage"
-	"github.com/element-of-surprise/workstream/workflow/storage/internal/private"
 
 	"zombiezen.com/go/sqlite"
 	"zombiezen.com/go/sqlite/sqlitex"

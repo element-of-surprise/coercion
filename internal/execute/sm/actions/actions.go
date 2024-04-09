@@ -51,7 +51,15 @@ func (r Runner) Start(req statemachine.Request[Data]) statemachine.Request[Data]
 		log.Fatalf("failed to write Action: %v", err)
 	}
 
+	req.Next = r.GetPlugin
 	return req
+}
+
+// pluginNotFoundErr returns an error for when a plugin is not found.
+// This allows tests to check for this specific error without worrying
+// about the text changing.
+func pluginNotFoundErr(name string) error {
+	return fmt.Errorf("plugin %s not found", name)
 }
 
 func (r Runner) GetPlugin(req statemachine.Request[Data]) statemachine.Request[Data] {
@@ -60,8 +68,7 @@ func (r Runner) GetPlugin(req statemachine.Request[Data]) statemachine.Request[D
 	p := req.Data.Registry.Plugin(action.Plugin)
 	// This is defense in depth. The plugin should be checked when the Plan is created.
 	if p == nil {
-		action.State.Status = workflow.Failed
-		req.Data.err = fmt.Errorf("plugin %s not found", action.Plugin)
+		req.Data.err = pluginNotFoundErr(action.Plugin)
 		req.Next = r.End
 		return req
 	}
@@ -102,10 +109,9 @@ func (r Runner) End(req statemachine.Request[Data]) statemachine.Request[Data] {
 	action := req.Data.Action
 	updater := req.Data.Updater
 
+	action.State.Status = workflow.Completed
 	if req.Data.err != nil {
 		action.State.Status = workflow.Failed
-	} else {
-		action.State.Status = workflow.Completed
 	}
 
 	action.State.End = r.now()
@@ -117,7 +123,15 @@ func (r Runner) End(req statemachine.Request[Data]) statemachine.Request[Data] {
 	return req
 }
 
+// pluginTimeoutMsg is the message returned when a plugin times out. Set here
+// to syncronize changes with test code.
 const pluginTimeoutMsg = "plugin execution timed out"
+
+// unexpectedTypeMsg returns a message for when a plugin returns an unexpected response type.
+// This is used to syncronize changes with test code.
+func unexpectedTypeMsg(plugin plugins.Plugin, got, want any) string {
+	return fmt.Sprintf("plugin(%s) returned a type %T but expected %T", plugin.Name(), got, want)
+}
 
 // exec runs the action once using the plugin and writes the result to the store, unless the action
 // has exceeded the maximum number of retries. In that case, it returns a permanent error.
@@ -160,18 +174,23 @@ func (r Runner) exec(ctx context.Context, action *workflow.Action, plugin plugin
 	// by not returning the junk they gave us.
 	if attempt.Err == nil {
 		expect := plugin.Response()
-		if !isType(attempt.Resp, expect) {
-			attempt.Resp = nil
-			attempt.Err = &plugins.Error{
-				Message: fmt.Sprintf("plugin(%s) returned a type %T but expected %T", plugin.Name(), attempt.Resp, expect),
-				Permanent: true,
-			}
+		if isType(attempt.Resp, expect) {
+			return nil
 		}
+		attempt.Err = &plugins.Error{
+			Message: unexpectedTypeMsg(plugin, attempt.Resp, expect),
+			Permanent: true,
+		}
+		attempt.Resp = nil
 	}
 	if attempt.Err.Permanent {
-		return fmt.Errorf("%w %w", attempt.Err, exponential.ErrPermanent)
+		return errPermanent(attempt.Err)
 	}
 	return attempt.Err
+}
+
+func errPermanent(err *plugins.Error) error {
+	return fmt.Errorf("%w: %w", exponential.ErrPermanent, err)
 }
 
 func (r Runner) now() time.Time {

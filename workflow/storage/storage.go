@@ -7,8 +7,8 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/element-of-surprise/workstream/internal/private"
 	"github.com/element-of-surprise/workstream/workflow"
-	"github.com/element-of-surprise/workstream/workflow/storage/internal/private"
 
 	"github.com/google/uuid"
 )
@@ -68,11 +68,15 @@ type Vault interface {
 type Creator interface {
 	// Create creates a new Plan in storage. This fails if the Plan ID already exists.
 	Create (ctx context.Context, plan *workflow.Plan) error
+
+	private.Storage
 }
 
 // Closer allows for closing the storage.
 type Closer interface {
 	Close(ctx context.Context) error
+
+	private.Storage
 }
 
 // Reader allows for reading Plan data from storage.

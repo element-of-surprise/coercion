@@ -7,3 +7,7 @@ package private
 type Storage interface {
 	private()
 }
+
+type Impl struct{}
+
+func (Impl) private() {}
