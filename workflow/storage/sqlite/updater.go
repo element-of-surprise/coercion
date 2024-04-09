@@ -3,7 +3,7 @@ package sqlite
 import (
 	"sync"
 
-	"github.com/element-of-surprise/workstream/workflow/storage/internal/private"
+	"github.com/element-of-surprise/workstream/internal/private"
 	"zombiezen.com/go/sqlite"
 )
 
