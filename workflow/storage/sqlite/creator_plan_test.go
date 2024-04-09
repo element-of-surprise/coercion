@@ -139,6 +139,8 @@ func dbSetup() (path string, conn *sqlite.Conn, err error) {
 }
 
 func TestCommitPlan(t *testing.T) {
+	t.Parallel()
+
 	path, conn, err := dbSetup()
 	if err != nil {
 		t.Fatal(err)
@@ -155,7 +157,7 @@ func TestCommitPlan(t *testing.T) {
 	reg.Register(&plugins.HelloPlugin{})
 
 	// TODO(element-of-surprise): Add checks to verify the data in the database
-	reader := &planReader{
+	reader := &reader{
 		conn: conn,
 		reg:  reg,
 	}

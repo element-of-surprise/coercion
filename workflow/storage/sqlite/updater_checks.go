@@ -11,18 +11,18 @@ import (
 	"zombiezen.com/go/sqlite"
 )
 
-var _ storage.ChecksWriter = ChecksWriter{}
+var _ storage.ChecksUpdater = checksUpdater{}
 
-// ChecksWriter implements the storage.ChecksWriter interface.
-type ChecksWriter struct {
+// checksUpdater implements the storage.checksUpdater interface.
+type checksUpdater struct {
 	mu   *sync.Mutex
 	conn *sqlite.Conn
 
 	private.Storage
 }
 
-// Write implements storage.ChecksWriter.Checks().
-func (c ChecksWriter) Write(ctx context.Context, check *workflow.Checks) error {
+// UpdateChecks implements storage.ChecksUpdater.UpdateCheck().
+func (c checksUpdater) UpdateChecks(ctx context.Context, check *workflow.Checks) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 

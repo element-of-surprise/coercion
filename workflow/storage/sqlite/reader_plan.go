@@ -11,7 +11,7 @@ import (
 )
 
 // fetchPlan fetches a plan by its id.
-func (p *planReader) fetchPlan(ctx context.Context, id uuid.UUID) (*workflow.Plan, error) {
+func (p reader) fetchPlan(ctx context.Context, id uuid.UUID) (*workflow.Plan, error) {
 	plan := &workflow.Plan{}
 
 	do := func(conn *sqlite.Conn) (err error) {

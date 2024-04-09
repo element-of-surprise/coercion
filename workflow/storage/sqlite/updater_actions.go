@@ -11,18 +11,18 @@ import (
 	"zombiezen.com/go/sqlite"
 )
 
-var _ storage.ActionWriter = ActionWriter{}
+var _ storage.ActionUpdater = actionUpdater{}
 
-// ActionWriter implements the storage.ActionWriter interface.
-type ActionWriter struct {
+// actionUpdater implements the storage.actionUpdater interface.
+type actionUpdater struct {
 	mu   *sync.Mutex
 	conn *sqlite.Conn
 
 	private.Storage
 }
 
-// Write implements storage.ActionWriter.Write().
-func (a ActionWriter) Write(ctx context.Context, action *workflow.Action) error {
+// UpdateAction implements storage.ActionUpdater.UpdateAction().
+func (a actionUpdater) UpdateAction(ctx context.Context, action *workflow.Action) error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 

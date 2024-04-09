@@ -55,23 +55,28 @@ type ListResult struct {
 	State *workflow.State
 }
 
-// ReadWriter is a storage reader and writer for Plan data. An implementation of ReadWriter must ensure
+// Vault is a storage reader and writer for Plan data. An implementation of Vault must ensure
 // atomic writes for all data.
-type ReadWriter interface {
-	PlanReader
+type Vault interface {
+	Reader
+	Creator
+	Updater
+	Closer
+}
 
+// Creator allows for creating Plan data in storage.
+type Creator interface {
 	// Create creates a new Plan in storage. This fails if the Plan ID already exists.
-	Create(ctx context.Context, plan *workflow.Plan) error
+	Create (ctx context.Context, plan *workflow.Plan) error
+}
 
-	// Writer returns a PlanWriter for the given Plan ID.
-	Writer(context.Context, uuid.UUID) (PlanWriter, error)
-
-	// Close closes the storage.
+// Closer allows for closing the storage.
+type Closer interface {
 	Close(ctx context.Context) error
 }
 
-// PlanReader allows for reading Plan data from storage.
-type PlanReader interface {
+// Reader allows for reading Plan data from storage.
+type Reader interface {
 	// Exists returns true if the Plan ID exists in the storage.
 	Exists(ctx context.Context, id uuid.UUID) (bool, error)
 	// Read returns a Plan from the storage.
@@ -85,52 +90,44 @@ type PlanReader interface {
 	private.Storage
 }
 
-// PlanWriter allows for writing Plan data to storage.
-type PlanWriter interface {
-	// Write writes Plan data to storage, and all underlying data.
-	Write(context.Context, *workflow.Plan) error
-
-	// Checks returns a ChecksWriter.
-	Checks() ChecksWriter
-	// Block returns a BlockWriter.
-	// this will panic.
-	Block() BlockWriter
-	// Sequence returns a SequenceWriter.
-	Sequence() SequenceWriter
-	// Action returns an ActionWriter.
-	Action() ActionWriter
+// Updater allows for writing Plan data to storage.
+type Updater interface {
+	ChecksUpdater
+	BlockUpdater
+	SequenceUpdater
+	ActionUpdater
 
 	private.Storage
 }
 
-// BlockWriter allows for writing Block data to storage.
-type BlockWriter interface {
-	// Write writes Block data to storage, but not underlying data.
-	Write(context.Context, *workflow.Block) error
+// BlockUpdater allows for writing Block data to storage.
+type BlockUpdater interface {
+	// Update writes Block data to storage, but not underlying data.
+	UpdateBlock(context.Context, *workflow.Block) error
 
 	private.Storage
 }
 
-// ChecksWriter is a storage writer for Checks in a specific Plan or Block.
-type ChecksWriter interface {
-	// Write writes Checks states data to storage but not underlying data.
-	Write(context.Context, *workflow.Checks) error
+// ChecksUpdater is a storage writer for Checks in a specific Plan or Block.
+type ChecksUpdater interface {
+	// Update writes Checks states data to storage but not underlying data.
+	UpdateChecks(context.Context, *workflow.Checks) error
 
 	private.Storage
 }
 
-// SequenceWriter is a storage writer for Sequences in a specific Block.
-type SequenceWriter interface {
-	// Write writes Sequence data to storage for Sequences in the specific Block, but not underlying data.
-	Write(context.Context, *workflow.Sequence) error
+// SequenceUpdater is a storage writer for Sequences in a specific Block.
+type SequenceUpdater interface {
+	// Update writes Sequence data to storage for Sequences in the specific Block, but not underlying data.
+	UpdateSequence(context.Context, *workflow.Sequence) error
 
 	private.Storage
 }
 
-// ActionWriter is a storage writer for Actions in a specific Sequence, PreChecks, PostChecks or ContChecks.
-type ActionWriter interface {
-	// Write writes Action data to storage for Actions in the specific Sequence, PreChecks, PostChecks or ContChecks.
-	Write(context.Context, *workflow.Action) error
+// ActionUpdater is a storage writer for Actions in a specific Sequence, PreChecks, PostChecks or ContChecks.
+type ActionUpdater interface {
+	// Update writes Action data to storage for Actions in the specific Sequence, PreChecks, PostChecks or ContChecks.
+	UpdateAction(context.Context, *workflow.Action) error
 
 	private.Storage
 }

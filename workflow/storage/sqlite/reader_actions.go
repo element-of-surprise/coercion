@@ -14,7 +14,7 @@ import (
 )
 
 // fieldToActions converts the "actions" field in a sqlite row to a list of workflow.Actions.
-func (p *planReader) fieldToActions(ctx context.Context, conn *sqlite.Conn, stmt *sqlite.Stmt) ([]*workflow.Action, error) {
+func (p reader) fieldToActions(ctx context.Context, conn *sqlite.Conn, stmt *sqlite.Stmt) ([]*workflow.Action, error) {
 	ids, err := fieldToIDs("actions", stmt)
 	if err != nil {
 		return nil, fmt.Errorf("couldn't read action ids: %w", err)
@@ -28,7 +28,7 @@ func (p *planReader) fieldToActions(ctx context.Context, conn *sqlite.Conn, stmt
 }
 
 // fetchActionsByIDs fetches a list of actions by their IDs.
-func (p *planReader) fetchActionsByIDs(ctx context.Context, conn *sqlite.Conn, ids []uuid.UUID) ([]*workflow.Action, error) {
+func (p reader) fetchActionsByIDs(ctx context.Context, conn *sqlite.Conn, ids []uuid.UUID) ([]*workflow.Action, error) {
 	if len(ids) == 0 {
 		return nil, nil
 	}
@@ -70,7 +70,7 @@ func (p *planReader) fetchActionsByIDs(ctx context.Context, conn *sqlite.Conn, i
 var emptyAttemptsJSON = []byte(`[]`)
 
 // actionRowToAction converts a sqlite row to a workflow.Action.
-func (p *planReader) actionRowToAction(ctx context.Context, stmt *sqlite.Stmt) (*workflow.Action, error) {
+func (p reader) actionRowToAction(ctx context.Context, stmt *sqlite.Stmt) (*workflow.Action, error) {
 	var err error
 	a := &workflow.Action{}
 	a.ID, err = uuid.Parse(stmt.GetText("id"))

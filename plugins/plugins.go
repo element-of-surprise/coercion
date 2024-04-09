@@ -38,6 +38,9 @@ func (e *Error) Error() string {
 
 // Unwrap implements the errors.Wrapper interface.
 func (e *Error) Unwrap() error {
+	if e.Wrapped == nil {
+		return nil
+	}
 	return e.Wrapped
 }
 

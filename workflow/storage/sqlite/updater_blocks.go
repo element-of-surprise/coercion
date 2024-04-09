@@ -11,18 +11,18 @@ import (
 	"zombiezen.com/go/sqlite"
 )
 
-var _ storage.BlockWriter = BlockWriter{}
+var _ storage.BlockUpdater = blockUpdater{}
 
-// BlockWriter implements the storage.BlockWriter interface.
-type BlockWriter struct {
+// blockUpdater implements the storage.blockUpdater interface.
+type blockUpdater struct {
 	mu   *sync.Mutex
 	conn *sqlite.Conn
 
 	private.Storage
 }
 
-// Write implements storage.BlockWriter.Write().
-func (b BlockWriter) Write(ctx context.Context, action *workflow.Block) error {
+// UpdateBlock implements storage.Blockupdater.UpdateBlock().
+func (b blockUpdater) UpdateBlock(ctx context.Context, action *workflow.Block) error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
