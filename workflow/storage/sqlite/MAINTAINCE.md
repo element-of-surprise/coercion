@@ -2,7 +2,9 @@
 
 ## File structure
 
-- `reader.go` contains the `*planReader` struct.
+### Reading
+
+- `reader.go` contains the `reader` struct.
 - `stmts.go` contains all the SQL statements used to query the database.
 - `schema.go` contains the schema for the database.
 - `reader_actions.go` contains the methods to convert the `$actions` field to `Action` objects.
@@ -10,11 +12,24 @@
 - `reader_checks.go` contains the methods to convert the `$pre_checks`, `$post_checks`, and `$cont_checks` fields to `Checks` objects.
 - `reader_plans.go` contains the methods to convert to locate a Plan in SQLITE by its ID and convert it to a `Plan` objects.
 - `reader_sequences.go` contains the methods to convert the `$sequences` field to `Sequence` objects.
-- `commit.go` contains a function for committing an entire `*workflow.Plan` object to the database.
 
-## PlanReader
+### Writing
 
-`*storage.PlanReader` is implemented by `*planReader`.
+- `creator.go` contains the `creator` struct.
+- `creator_plan.go` contains a function for committing an entire `*workflow.Plan` object to the database.
+
+### Updating
+
+- `updater.go` contains the `updater` struct.
+- `updater_actions.go` contains the `actionUpdater` struct and methods to update the `Action` object in the database.
+- `updater_blocks.go` contains the `blockUpdater` struct and methods to update the `Block` object in the database.
+- `updater_checks.go` contains the `checkUpdater` struct and methods to update the `Checks` object in the database.
+- `updater_sequences.go` contains the `sequenceUpdater` struct and methods to update the `Sequence` object in the database.
+- `updater_stmts.go` contains the SQL statements used to update the database.
+
+## Reader
+
+`*storage.Reader` is implemented by `reader`.
 
 ## Read
 
