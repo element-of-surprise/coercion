@@ -67,10 +67,20 @@ type State struct {
 }
 
 // Reset resets the running state of the object. Not for use by users.
-func (i *State) Reset() {
-	i.Status = NotStarted
-	i.Start = time.Time{}
-	i.End = time.Time{}
+func (s *State) Reset() {
+	s.Status = NotStarted
+	s.Start = time.Time{}
+	s.End = time.Time{}
+}
+
+// Clone returns a copy of the state. This is not used by any object Clone method,
+// but can be used in testing.
+func (s *State) Clone() *State {
+	return &State{
+		Status: s.Status,
+		Start:  s.Start,
+		End:    s.End,
+	}
 }
 
 // validator is a type that validates its own fields. If the validator has sub-types that
@@ -275,6 +285,25 @@ func (c *Checks) defaults() {
 	c.State = &State{
 		Status: NotStarted,
 	}
+}
+
+// Clone clones the Checks object. This does not copy the ID or the State object.
+// All actions are cloned according to their Clone() method.
+func (c *Checks) Clone() *Checks {
+	if c == nil {
+		return nil
+	}
+
+	clone := &Checks{
+		Delay:   c.Delay,
+		Actions: make([]*Action, len(c.Actions)),
+	}
+
+	for i := 0; i < len(c.Actions); i++ {
+		clone.Actions[i] = c.Actions[i].Clone()
+	}
+
+	return clone
 }
 
 func (c *Checks) validate() ([]validator, error) {
@@ -502,6 +531,23 @@ func (s *Sequence) validate() ([]validator, error) {
 		vals = append(vals, a)
 	}
 	return vals, nil
+}
+
+// Clone clones an Sequence with no ID and no State. Also clones all the Actions
+// following the cloning rules of the Action.Clone() method.
+func (s *Sequence) Clone() *Sequence {
+	if s == nil {
+		return nil
+	}
+	ns := &Sequence{
+		Name:   s.Name,
+		Descr:  s.Descr,
+		Actions: make([]*Action, len(s.Actions)),
+	}
+	for i, a := range s.Actions {
+		ns.Actions[i] = a.Clone()
+	}
+	return ns
 }
 
 // Attempt is the result of an action that is executed by a plugin.
