@@ -53,7 +53,7 @@ func (f *fakeUpdater) UpdateAction(ctx context.Context, action *workflow.Action)
 func TestStart(t *testing.T) {
 	t.Parallel()
 
-	now := time.Now()
+	now := time.Now().UTC()
 	nower := func() time.Time {
 		return now
 	}
@@ -94,7 +94,7 @@ func TestStart(t *testing.T) {
 func TestGetPlugin(t *testing.T) {
 	t.Parallel()
 
-	now := time.Now()
+	now := time.Now().UTC()
 	nower := func() time.Time {
 		return now
 	}
@@ -159,7 +159,7 @@ func TestGetPlugin(t *testing.T) {
 func TestExecute(t *testing.T) {
 	t.Parallel()
 
-	now := time.Now()
+	now := time.Now().UTC()
 	nower := func() time.Time {
 		return now
 	}
@@ -272,7 +272,7 @@ func TestExecute(t *testing.T) {
 func TestEnd(t *testing.T) {
 	t.Parallel()
 
-	now := time.Now()
+	now := time.Now().UTC()
 	nower := func() time.Time {
 		return now
 	}
@@ -340,7 +340,7 @@ func TestExec(t *testing.T) {
 	reg := registry.New()
 	reg.Register(&testplugin.Plugin{})
 
-	now := time.Now()
+	now := time.Now().UTC()
 	nower := func() time.Time {
 		return now
 	}

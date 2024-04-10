@@ -195,9 +195,9 @@ func errPermanent(err *plugins.Error) error {
 
 func (r Runner) now() time.Time {
 	if r.nower == nil {
-		return time.Now()
+		return time.Now().UTC()
 	}
-	return r.nower()
+	return r.nower().UTC()
 }
 
 type plugResp struct {
