@@ -12,6 +12,70 @@ import (
 	"github.com/gostdlib/ops/statemachine"
 )
 
+func TestBlockPostChecks(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name 	 string
+		block block
+		wantErr  bool
+		wantStatus workflow.Status
+	}{
+		{
+			name: "Success: No post checks",
+			block: block{
+				block: &workflow.Block{},
+			},
+			wantStatus: workflow.Running,
+		},
+		{
+			name: "Error: PostChecks fail",
+			block: block{
+				block: &workflow.Block{
+					PostChecks: &workflow.Checks{Actions: []*workflow.Action{{Name: "error"}}},
+				},
+			},
+			wantStatus: workflow.Failed,
+			wantErr: true,
+		},
+		{
+			name: "Success: Post checks succeed",
+			block: block{
+				block: &workflow.Block{
+					PostChecks: &workflow.Checks{Actions: []*workflow.Action{{Name: "success"}}},
+				},
+			},
+			wantStatus: workflow.Running,
+		},
+	}
+
+	for _, test := range tests {
+		states := &States{
+			checksRunner: fakeRunChecksOnce,
+		}
+		test.block.block.State = &workflow.State{Status: workflow.Running}
+
+		req := statemachine.Request[Data]{
+			Ctx: context.Background(),
+			Data: Data{
+				blocks: []block{test.block},
+			},
+		}
+
+		req = states.BlockPostChecks(req)
+
+		if test.wantErr != (req.Data.err != nil) {
+			t.Errorf("TestBlockPostChecks(%s): got err == %v, want err == %v", test.name, req.Data.err, test.wantErr)
+		}
+		if req.Data.blocks[0].block.State.Status != test.wantStatus {
+			t.Errorf("TestBlockPostChecks(%s): got status == %v, want status == %v", test.name, req.Data.blocks[0].block.State.Status, test.wantStatus)
+		}
+		if methodName(req.Next) != methodName(states.BlockEnd) {
+			t.Errorf("TestBlockPostChecks(%s): got next == %v, want next == %v", test.name, methodName(req.Next), methodName(states.BlockEnd))
+		}
+	}
+}
+
 func TestBlockEnd(t *testing.T) {
 	t.Parallel()
 
@@ -64,7 +128,7 @@ func TestBlockEnd(t *testing.T) {
 			store: &fakeUpdater{},
 		}
 		for i, block := range test.data.blocks {
-			block.block = &workflow.Block{State: &workflow.State{}}
+			block.block = &workflow.Block{State: &workflow.State{Status: workflow.Running}}
 			test.data.blocks[i] = block
 		}
 		var ctx context.Context

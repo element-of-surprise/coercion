@@ -182,7 +182,7 @@ func (s *States) BlockPreChecks(req statemachine.Request[Data]) statemachine.Req
 	if err != nil {
 		h.block.State.Status = workflow.Failed
 		req.Data.err = err
-		req.Next = s.End
+		req.Next = s.BlockEnd
 		return req
 	}
 
@@ -226,14 +226,14 @@ func (s *States) ExecuteSequences(req statemachine.Request[Data]) statemachine.R
 		if h.block.ToleratedFailures >= 0 && failures > h.block.ToleratedFailures {
 			h.block.State.Status = workflow.Failed
 			req.Data.err = fmt.Errorf("block(%s) has exceeded the tolerated failures", h.block.Name)
-			req.Next = s.End
+			req.Next = s.BlockEnd
 			return req
 		}
 
 		if _, err := req.Data.contChecksPassing(); err != nil {
 			h.block.State.Status = workflow.Failed
 			req.Data.err = err
-			req.Next = s.End
+			req.Next = s.BlockEnd
 			return req
 		}
 
@@ -254,27 +254,19 @@ func (s *States) ExecuteSequences(req statemachine.Request[Data]) statemachine.R
 	return req
 }
 
+// BlockPostChecks runs all PostChecks on the current block.
 func (s *States) BlockPostChecks(req statemachine.Request[Data]) statemachine.Request[Data] {
 	h := req.Data.blocks[0]
-
-	if h.block.ContChecks != nil {
-		// Cancel the ContChecks if they are still running and wait for the final result.
-		h.contCancel()
-		for err := range h.contCheckResult {
-			if err != nil {
-				h.block.State.Status = workflow.Failed
-				req.Data.err = err
-				req.Next = s.End
-				return req
-			}
-		}
+	if h.block.PostChecks == nil {
+		req.Next = s.BlockEnd
+		return req
 	}
 
 	err := s.runChecksOnce(req.Ctx, h.block.PostChecks)
 	if err != nil {
 		h.block.State.Status = workflow.Failed
 		req.Data.err = err
-		req.Next = s.End
+		req.Next = s.BlockEnd
 		return req
 	}
 
@@ -299,7 +291,7 @@ func (s *States) BlockEnd(req statemachine.Request[Data]) statemachine.Request[D
 			break
 		}
 	}
-	if err == nil {
+	if err == nil && h.block.State.Status == workflow.Running{
 		h.block.State.Status = workflow.Completed
 	}else{
 		h.block.State.Status = workflow.Failed
