@@ -3,115 +3,145 @@ package sm
 import (
 	"context"
 	"fmt"
+	"reflect"
+	"runtime"
+	"strings"
 	"testing"
-	"time"
 
 	"github.com/element-of-surprise/workstream/workflow"
-	"github.com/element-of-surprise/workstream/workflow/storage"
-	"github.com/kylelemons/godebug/pretty"
+	"github.com/gostdlib/ops/statemachine"
 )
 
-func fakeActionRunner(ctx context.Context, action *workflow.Action, updater storage.ActionUpdater) error {
-	if action.Name == "error" {
-		return fmt.Errorf("error")
-	}
-	return nil
-}
-
-func fakeParallelActionRunner(ctx context.Context, actions []*workflow.Action) error {
-	for _, action := range actions {
-		if action.Name == "error" {
-			return fmt.Errorf("error")
-		}
-	}
-	return nil
-}
-
-// TODO(element-of-surprise): Remove this, I'm just testing something.
-func (s *States) fakeParallelActionsRunner(ctx context.Context, actions []*workflow.Action) error {
-	return fakeParallelActionRunner(ctx, actions)
-}
-
-type fakeUpdater struct {
-	seqs    []*workflow.Sequence
-	actions []*workflow.Action
-	checks  []*workflow.Checks
-	calls   int
-
-	storage.Vault
-}
-
-func (f *fakeUpdater) UpdateChecks(ctx context.Context, checks *workflow.Checks) error {
-	f.calls++
-
-	n := checks.Clone()
-	n.State = checks.State.Clone()
-	f.checks = append(f.checks, n)
-	return nil
-}
-
-func (f *fakeUpdater) UpdateAction(ctx context.Context, action *workflow.Action) error {
-	f.calls++
-
-	n := action.Clone()
-	n.State = action.State.Clone()
-	f.actions = append(f.actions, n)
-	return nil
-}
-
-func (f *fakeUpdater) UpdateSequence(ctx context.Context, seq *workflow.Sequence) error {
-	f.calls++
-
-	n := seq.Clone()
-	n.State = seq.State.Clone()
-	f.seqs = append(f.seqs, n)
-	return nil
-}
-
-func fakeRunChecksOnce(ctx context.Context, checks *workflow.Checks) error {
-	if checks.Actions[0].Name == "error" {
-		return fmt.Errorf("error")
-	}
-	return nil
-}
-
-func TestRunPreChecks(t *testing.T) {
+func TestBlockEnd(t *testing.T) {
 	t.Parallel()
 
-	actionSuccess := &workflow.Action{Name: "success"}
-	actionError := &workflow.Action{Name: "error"}
+	// This is simply used to get the name next State we expect.
+	// We create new ones in the tests to avoid having a shared one.
+	states := &States{}
 
 	tests := []struct {
-		name       string
-		preChecks  *workflow.Checks
-		contChecks *workflow.Checks
-		wantErr    bool
+		name     string
+		data    Data
+		contCheckResult error
+		wantErr  bool
+		wantBlockStatus workflow.Status
+		wantNextState statemachine.State[Data]
+		wantBlocksLen int
 	}{
 		{
-			name: "Success: No prechecks or contchecks",
+			name: "Error: contchecks failure",
+			data: Data{
+				blocks: []block{{}},
+			},
+			contCheckResult: fmt.Errorf("error"),
+			wantErr: true,
+			wantBlockStatus: workflow.Failed,
+			wantNextState: states.End,
+			wantBlocksLen: 1,
 		},
 		{
-			name:       "Error: PreChecks fail but ContChecks succeed",
-			preChecks:  &workflow.Checks{Actions: []*workflow.Action{actionError}},
-			contChecks: &workflow.Checks{Actions: []*workflow.Action{actionSuccess}},
-			wantErr:    true,
+			name: "Success: no more blocks",
+			data: Data{
+				blocks: []block{{}},
+			},
+			wantBlockStatus: workflow.Completed,
+			wantNextState: states.ExecuteBlock,
+			wantBlocksLen: 0,
 		},
 		{
-			name:       "Error: PreChecks succeed but ContChecks fail",
-			preChecks:  &workflow.Checks{Actions: []*workflow.Action{actionSuccess}},
-			contChecks: &workflow.Checks{Actions: []*workflow.Action{actionError}},
-			wantErr:    true,
+			name: "Success: more blocks",
+			data: Data{
+				blocks: []block{{}, {}},
+			},
+			wantBlockStatus: workflow.Completed,
+			wantNextState: states.ExecuteBlock,
+			wantBlocksLen: 1,
+		},
+	}
+
+	for _, test := range tests {
+		states := &States{
+			store: &fakeUpdater{},
+		}
+		for i, block := range test.data.blocks {
+			block.block = &workflow.Block{State: &workflow.State{}}
+			test.data.blocks[i] = block
+		}
+		var ctx context.Context
+		ctx, test.data.blocks[0].contCancel = context.WithCancel(context.Background())
+
+		req := statemachine.Request[Data]{
+			Ctx: context.Background(),
+			Data: test.data,
+		}
+
+		req.Data.blocks[0].contCheckResult = make(chan error, 1)
+		if test.contCheckResult != nil {
+			req.Data.blocks[0].contCheckResult = make(chan error, 1)
+			req.Data.blocks[0].contCheckResult <- test.contCheckResult
+		}
+		close(req.Data.blocks[0].contCheckResult)
+
+		// We store this here because blocks is shrunk after the call.
+		block := req.Data.blocks[0].block
+
+		req = states.BlockEnd(req)
+
+		if test.wantErr != (req.Data.err != nil) {
+			t.Errorf("TestBlockEnd(%s): got err == %v, want err == %v", test.name, req.Data.err, test.wantErr)
+		}
+		if block.State.Status != test.wantBlockStatus {
+			t.Errorf("TestBlockEnd(%s): got block status == %v, want block status == %v", test.name, block.State.Status, test.wantBlockStatus)
+		}
+		if methodName(req.Next) != methodName(test.wantNextState) {
+			t.Errorf("TestBlockEnd(%s): got next state == %v, want next state == %v", test.name, methodName(req.Next), methodName(test.wantNextState))
+		}
+		if len(req.Data.blocks) != test.wantBlocksLen {
+			t.Errorf("TestBlockEnd(%s): got blocks len == %v, want blocks len == %v", test.name, len(req.Data.blocks), test.wantBlocksLen)
+		}
+		if ctx.Err() == nil {
+			t.Errorf("TestBlockEnd(%s): context for continuous checks should have been cancelled", test.name)
+		}
+		if states.store.(*fakeUpdater).calls != 1 {
+			t.Errorf("TestBlockEnd(%s): got store calls == %v, want store calls == 1", test.name, states.store.(*fakeUpdater).calls)
+		}
+	}
+}
+
+func TestPlanPostChecks(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name 	 string
+		plan 	 *workflow.Plan
+		contCheckResult error
+		wantErr  bool
+	}{
+		{
+			name: "Success: No post checks",
+			plan: &workflow.Plan{},
 		},
 		{
-			name:       "Error: PreChecks fail and ContChecks fail",
-			preChecks:  &workflow.Checks{Actions: []*workflow.Action{actionError}},
-			contChecks: &workflow.Checks{Actions: []*workflow.Action{actionError}},
-			wantErr:    true,
+			name: "Error: Continuous checks fail",
+			plan: &workflow.Plan{
+				ContChecks: &workflow.Checks{},
+			},
+			contCheckResult:  fmt.Errorf("error"),
+			wantErr: true,
 		},
 		{
-			name:       "Success: PreChecks succeed and ContChecks succeed",
-			preChecks:  &workflow.Checks{Actions: []*workflow.Action{actionSuccess}},
-			contChecks: &workflow.Checks{Actions: []*workflow.Action{actionSuccess}},
+			name: "Error: PostChecks fail",
+			plan: &workflow.Plan{
+				PostChecks: &workflow.Checks{Actions: []*workflow.Action{{Name: "error"}}},
+			},
+			wantErr: true,
+		},
+		{
+			name: "Success: Cont and Post checks succeed",
+			plan: &workflow.Plan{
+				ContChecks: &workflow.Checks{},
+				PostChecks: &workflow.Checks{Actions: []*workflow.Action{{Name: "success"}}},
+			},
 		},
 	}
 
@@ -119,279 +149,52 @@ func TestRunPreChecks(t *testing.T) {
 		states := &States{
 			checksRunner: fakeRunChecksOnce,
 		}
+		// We cancel a context for continuous checks that are running. This
+		// is used to simulate that we signal the continuous checks to stop.
+		ctx, cancel := context.WithCancel(context.Background())
 
-		err := states.runPreChecks(context.Background(), test.preChecks, test.contChecks)
-		if (err != nil) != test.wantErr {
-			t.Errorf("TestRunPreChecks(%s): err == %v, want err == %v", test.name, err, test.wantErr)
+		// Simulates that we are done waiting for the continuous checks.`
+		var results chan error
+		if test.plan.ContChecks != nil {
+			results = make(chan error, 1)
+			if test.contCheckResult != nil {
+				results <- test.contCheckResult
+			}
+			close(results)
+		}
+
+		req := statemachine.Request[Data]{
+			Ctx: context.Background(),
+			Data: Data{
+				Plan: test.plan,
+				contCheckResult: results,
+				contCancel: cancel,
+			},
+		}
+
+		req = states.PlanPostChecks(req)
+
+		if test.wantErr != (req.Data.err != nil) {
+			t.Errorf("TestPlanPostChecks(%s): got err == %v, want err == %v", test.name, req.Data.err, test.wantErr)
+		}
+		if test.plan.ContChecks != nil {
+			if ctx.Err() == nil {
+				t.Errorf("TestPlanPostChecks(%s): continuous checks ctx.Err() == nil, want ctx.Err() != nil", test.name)
+			}
 		}
 	}
 }
 
-func TestRunChecksOnce(t *testing.T) {
-	t.Parallel()
-
-	now := time.Now().UTC()
-
-	emptyState := &workflow.State{}
-
-	tests := []struct {
-		name       string
-		checks     *workflow.Checks
-		wantChecks *workflow.Checks
-		wantErr    bool
-	}{
-		{
-			name: "Error: runActionsParallel returns error",
-			checks: &workflow.Checks{
-				Actions: []*workflow.Action{
-					{Name: "error"},
-				},
-			},
-			wantChecks: &workflow.Checks{
-				Actions: []*workflow.Action{
-					{Name: "error", State: emptyState},
-				},
-				State: &workflow.State{
-					Status: workflow.Failed,
-					Start:  now,
-					End:    now,
-				},
-			},
-			wantErr: true,
-		},
-		{
-			name: "Success",
-			checks: &workflow.Checks{
-				Actions: []*workflow.Action{
-					{Name: "action1"},
-				},
-			},
-			wantChecks: &workflow.Checks{
-				Actions: []*workflow.Action{
-					{Name: "action1", State: emptyState},
-				},
-				State: &workflow.State{
-					Status: workflow.Completed,
-					Start:  now,
-					End:    now,
-				},
-			},
-		},
+// methodName returns the name of the method of the given value.
+func methodName(method any) string {
+	if method == nil {
+		return "<nil>"
 	}
-
-	for _, test := range tests {
-		updater := &fakeUpdater{}
-		states := &States{
-			store:                 updater,
-			actionsParallelRunner: fakeParallelActionRunner,
-			nower:                 func() time.Time { return now },
-		}
-		test.checks.State = &workflow.State{}
-		for _, action := range test.checks.Actions {
-			action.State = &workflow.State{}
-		}
-
-		err := states.runChecksOnce(context.Background(), test.checks)
-		if diff := pretty.Compare(test.wantChecks, test.checks); diff != "" {
-			t.Errorf("TestRunChecksOnce(%s): checks not correct: -want/+got:\n%s", test.name, diff)
-		}
-		if test.wantErr != (err != nil) {
-			t.Errorf("TestRunChecksOnce(%s): got err == %v, want err == %v", test.name, err, test.wantErr)
-		}
-		if updater.calls != 2 {
-			t.Errorf("TestRunChecksOnce(%s): updater got %d calls, want 2", test.name, updater.calls)
-		}
-	}
-}
-
-func TestParallelActionsRunner(t *testing.T) {
-	t.Parallel()
-
-	now := time.Now().UTC()
-
-	tests := []struct {
-		name        string
-		actions     []*workflow.Action
-		wantActions []*workflow.Action
-		err         bool
-	}{
-		{
-			name: "One action fails",
-			actions: []*workflow.Action{
-				{Name: "action1"},
-				{Name: "error"},
-			},
-			// Note: Even though this is a failed action, we are faking the action runner
-			// so we just need to make sure the action was marked Running.
-			wantActions: []*workflow.Action{
-				{Name: "action1", State: &workflow.State{Status: workflow.Running, Start: now}},
-				{Name: "error", State: &workflow.State{Status: workflow.Running, Start: now}},
-			},
-			err: true,
-		},
-		{
-			name: "All actions pass",
-			actions: []*workflow.Action{
-				{Name: "action1"},
-				{Name: "action2"},
-			},
-			wantActions: []*workflow.Action{
-				{Name: "action1", State: &workflow.State{Status: workflow.Running, Start: now}},
-				{Name: "action2", State: &workflow.State{Status: workflow.Running, Start: now}},
-			},
-		},
-	}
-
-	for _, test := range tests {
-		updater := &fakeUpdater{}
-		states := &States{
-			store:        updater,
-			actionRunner: fakeActionRunner,
-			nower:        func() time.Time { return now },
-		}
-		for _, action := range test.actions {
-			action.State = &workflow.State{}
-		}
-
-		err := states.runActionsParallel(context.Background(), test.actions)
-
-		if diff := pretty.Compare(test.wantActions, test.actions); diff != "" {
-			t.Errorf("TestRunChecks(%s): actions differ (-want +got):\n%s", test.name, diff)
-		}
-
-		if test.err && err == nil {
-			t.Errorf("TestRunChecks(%s): expected error, got nil", test.name)
-		}
-	}
-}
-
-// TestRunActions tests the runActions function. Since this is wrapper around
-// the actions state machine, we only need to test it runs, we don't need to
-// do indepth testing.
-func TestExecSeq(t *testing.T) {
-	t.Parallel()
-
-	tests := []struct {
-		name      string
-		seq       *workflow.Sequence
-		wantSeq   *workflow.Sequence
-		dbUpdates []*workflow.Sequence
-		wantErr   bool
-	}{
-		{
-			name: "action failed, so seq failed",
-			seq: &workflow.Sequence{
-				Name:    "seq",
-				Actions: []*workflow.Action{{Name: "action"}, {Name: "error"}},
-				State:   &workflow.State{},
-			},
-			wantSeq: &workflow.Sequence{
-				Name:    "seq",
-				Actions: []*workflow.Action{{Name: "action"}, {Name: "error"}},
-				State: &workflow.State{
-					Status: workflow.Failed,
-				},
-			},
-			dbUpdates: []*workflow.Sequence{
-				{
-					Name:    "seq",
-					Actions: []*workflow.Action{{Name: "action"}, {Name: "error"}},
-					State: &workflow.State{
-						Status: workflow.Running,
-					},
-				},
-				{
-					Name:    "seq",
-					Actions: []*workflow.Action{{Name: "action"}, {Name: "error"}},
-					State: &workflow.State{
-						Status: workflow.Failed,
-					},
-				},
-			},
-			wantErr: true,
-		},
-		{
-			name: "seq completed",
-			seq: &workflow.Sequence{
-				Name:    "seq",
-				Actions: []*workflow.Action{{Name: "action1"}, {Name: "action2"}},
-				State:   &workflow.State{},
-			},
-			wantSeq: &workflow.Sequence{
-				Name:    "seq",
-				Actions: []*workflow.Action{{Name: "action1"}, {Name: "action2"}},
-				State: &workflow.State{
-					Status: workflow.Completed,
-				},
-			},
-			dbUpdates: []*workflow.Sequence{
-				{
-					Name:    "seq",
-					Actions: []*workflow.Action{{Name: "action1"}, {Name: "action2"}},
-					State: &workflow.State{
-						Status: workflow.Running,
-					},
-				},
-				{
-					Name:    "seq",
-					Actions: []*workflow.Action{{Name: "action1"}, {Name: "action2"}},
-					State: &workflow.State{
-						Status: workflow.Completed,
-					},
-				},
-			},
-		},
-	}
-
-	for _, test := range tests {
-		updater := &fakeUpdater{}
-		states := &States{
-			store:        updater,
-			actionRunner: fakeActionRunner,
-		}
-
-		err := states.execSeq(context.Background(), test.seq)
-
-		if diff := pretty.Compare(test.wantSeq, test.seq); diff != "" {
-			t.Errorf("TestExecSeq(%s): expected Sequence: -want/+got:\n%s", test.name, diff)
-		}
-		if diff := pretty.Compare(test.dbUpdates, updater.seqs); diff != "" {
-			t.Errorf("TestExecSeq(%s): expected dbUpdates: -want/+got:\n%s", test.name, diff)
-		}
-		if (err != nil) != test.wantErr {
-			t.Errorf("TestExecSeq(%s): expected error: %v, got: %v", test.name, test.wantErr, err)
-		}
-	}
-}
-
-func TestResetActions(t *testing.T) {
-	t.Parallel()
-
-	action := &workflow.Action{
-		Name: "action",
-		State: &workflow.State{
-			Status: workflow.Running,
-			Start:  time.Now(),
-			End:    time.Now(),
-		},
-		Attempts: []*workflow.Attempt{
-			{},
-		},
-	}
-
-	want := &workflow.Action{
-		Name: "action",
-		State: &workflow.State{
-			Status: workflow.NotStarted,
-			Start:  time.Time{},
-			End:    time.Time{},
-		},
-		Attempts: nil,
-	}
-
-	resetActions([]*workflow.Action{action})
-
-	if diff := pretty.Compare(want, action); diff != "" {
-		t.Errorf("TestResetActions: -want +got):\n%s", diff)
+	valueOf := reflect.ValueOf(method)
+	switch valueOf.Kind() {
+	case reflect.Func:
+		return strings.TrimSuffix(strings.TrimSuffix(runtime.FuncForPC(valueOf.Pointer()).Name(), "-fm"), "[...]")
+	default:
+		return "<not a function>"
 	}
 }

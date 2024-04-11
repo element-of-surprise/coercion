@@ -1,5 +1,14 @@
 package sqlite
 
+const updatePlan = `
+UPDATE plans
+SET
+	reason = $reason,
+	state_status = $state_status,
+	state_start = $state_start,
+	state_end = $state_end
+WHERE id = $id`
+
 const updateChecks = `
 UPDATE checks
 SET

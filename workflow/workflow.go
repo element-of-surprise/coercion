@@ -447,6 +447,36 @@ func (b *Block) validate() ([]validator, error) {
 	return vals, nil
 }
 
+// Clone makes a copy of the block, but without an ID or State. All checks and sequences are cloned acccording
+// to their Clone() method.
+func (b *Block) Clone() *Block {
+	n := &Block{
+		Name: 		   b.Name,
+		Descr: 		   b.Descr,
+		EntranceDelay: b.EntranceDelay,
+		ExitDelay:     b.ExitDelay,
+		Concurrency:   b.Concurrency,
+		ToleratedFailures: b.ToleratedFailures,
+	}
+
+	if b.PreChecks != nil {
+		n.PreChecks = b.PreChecks.Clone()
+	}
+	if b.ContChecks != nil {
+		n.ContChecks = b.ContChecks.Clone()
+	}
+	if b.PostChecks != nil {
+		n.PostChecks = b.PostChecks.Clone()
+	}
+
+	n.Sequences = make([]*Sequence, len(b.Sequences))
+	for i, seq := range b.Sequences {
+		n.Sequences[i] = seq.Clone()
+	}
+
+	return n
+}
+
 // Sequence represents a set of Actions that are executed in sequence. Any error will cause the workflow to fail.
 type Sequence struct {
 	// ID is a unique identifier for the object. Should not be set by the user.

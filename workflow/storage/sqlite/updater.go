@@ -4,11 +4,15 @@ import (
 	"sync"
 
 	"github.com/element-of-surprise/workstream/internal/private"
+	"github.com/element-of-surprise/workstream/workflow/storage"
 	"zombiezen.com/go/sqlite"
 )
 
+var _ storage.Updater = updater{}
+
 // updater implements the storage.updater interface.
 type updater struct {
+	planUpdater
 	checksUpdater
 	blockUpdater
 	sequenceUpdater
@@ -19,6 +23,7 @@ type updater struct {
 
 func newUpdater(mu *sync.Mutex, conn *sqlite.Conn) updater {
 	return updater{
+		planUpdater:     planUpdater{mu: mu, conn: conn},
 		checksUpdater:   checksUpdater{mu: mu, conn: conn},
 		blockUpdater:    blockUpdater{mu: mu, conn: conn},
 		sequenceUpdater: sequenceUpdater{mu: mu, conn: conn},

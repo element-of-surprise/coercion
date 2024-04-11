@@ -56,7 +56,11 @@ type ListResult struct {
 }
 
 // Vault is a storage reader and writer for Plan data. An implementation of Vault must ensure
-// atomic writes for all data.
+// atomic writes for all data. It also should never return an error for any operation that is
+// not a permanent failure. It should otherwise retry unil the operations succeeds. A permenant
+// failure is one in which an unreasonable amount of time has passed or the an error is returned
+// that is not recoverable under any circumstances (disk is full, but not transient network errors where
+// you could reconnect).
 type Vault interface {
 	Reader
 	Creator
@@ -67,7 +71,7 @@ type Vault interface {
 // Creator allows for creating Plan data in storage.
 type Creator interface {
 	// Create creates a new Plan in storage. This fails if the Plan ID already exists.
-	Create (ctx context.Context, plan *workflow.Plan) error
+	Create(ctx context.Context, plan *workflow.Plan) error
 
 	private.Storage
 }
@@ -96,10 +100,20 @@ type Reader interface {
 
 // Updater allows for writing Plan data to storage.
 type Updater interface {
+	PlanUpdater
 	ChecksUpdater
 	BlockUpdater
 	SequenceUpdater
 	ActionUpdater
+
+	private.Storage
+}
+
+// PlanUpdater allows for writing Plan data to storage.
+type PlanUpdater interface {
+	// UpdatePlan updates an existing Plan in storage. This fails if the Plan ID does not exist.
+	// This only applies the changes in the Plan, not the entire Plan heirarchy.
+	UpdatePlan(ctx context.Context, plan *workflow.Plan) error
 
 	private.Storage
 }
