@@ -24,13 +24,8 @@ func fakeParallelActionRunner(ctx context.Context, actions []*workflow.Action) e
 	return nil
 }
 
-// TODO(element-of-surprise): Remove this, I'm just testing something.
-func (s *States) fakeParallelActionsRunner(ctx context.Context, actions []*workflow.Action) error {
-	return fakeParallelActionRunner(ctx, actions)
-}
-
 type fakeUpdater struct {
-	blocks []*workflow.Block
+	blocks  []*workflow.Block
 	seqs    []*workflow.Sequence
 	actions []*workflow.Action
 	checks  []*workflow.Checks
