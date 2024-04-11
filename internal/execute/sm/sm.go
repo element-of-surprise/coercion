@@ -38,6 +38,8 @@ type Data struct {
 	contCancel context.CancelFunc
 	// contCheckResult is the channel that will receive the result of the continuous check for the Plan.
 	contCheckResult chan error
+
+	err error
 }
 
 // contChecks will check if any of the continuous checkes on the Plan or the current block have failed.
@@ -128,7 +130,8 @@ func (s *States) Start(req statemachine.Request[Data]) statemachine.Request[Data
 func (s *States) PlanPreChecks(req statemachine.Request[Data]) statemachine.Request[Data] {
 	err := s.runPreChecks(req.Ctx, req.Data.Plan.PreChecks, req.Data.Plan.ContChecks)
 	if err != nil {
-		req.Err = err
+		req.Data.err = err
+		req.Next = s.End
 		return req
 	}
 
@@ -178,7 +181,8 @@ func (s *States) BlockPreChecks(req statemachine.Request[Data]) statemachine.Req
 	err := s.runPreChecks(req.Ctx, h.block.PreChecks, h.block.ContChecks)
 	if err != nil {
 		h.block.State.Status = workflow.Failed
-		req.Err = err
+		req.Data.err = err
+		req.Next = s.End
 		return req
 	}
 
@@ -221,13 +225,15 @@ func (s *States) ExecuteSequences(req statemachine.Request[Data]) statemachine.R
 		seq := h.block.Sequences[i]
 		if h.block.ToleratedFailures >= 0 && failures > h.block.ToleratedFailures {
 			h.block.State.Status = workflow.Failed
-			req.Err = fmt.Errorf("block(%s) has exceeded the tolerated failures", h.block.Name)
+			req.Data.err = fmt.Errorf("block(%s) has exceeded the tolerated failures", h.block.Name)
+			req.Next = s.End
 			return req
 		}
 
 		if _, err := req.Data.contChecksPassing(); err != nil {
 			h.block.State.Status = workflow.Failed
-			req.Err = err
+			req.Data.err = err
+			req.Next = s.End
 			return req
 		}
 
@@ -257,7 +263,8 @@ func (s *States) BlockPostChecks(req statemachine.Request[Data]) statemachine.Re
 		for err := range h.contCheckResult {
 			if err != nil {
 				h.block.State.Status = workflow.Failed
-				req.Err = err
+				req.Data.err = err
+				req.Next = s.End
 				return req
 			}
 		}
@@ -266,7 +273,8 @@ func (s *States) BlockPostChecks(req statemachine.Request[Data]) statemachine.Re
 	err := s.runChecksOnce(req.Ctx, h.block.PostChecks)
 	if err != nil {
 		h.block.State.Status = workflow.Failed
-		req.Err = err
+		req.Data.err = err
+		req.Next = s.End
 		return req
 	}
 
@@ -277,6 +285,11 @@ func (s *States) BlockPostChecks(req statemachine.Request[Data]) statemachine.Re
 // BlockEnd ends the current block and moves to the next block.
 func (s *States) BlockEnd(req statemachine.Request[Data]) statemachine.Request[Data] {
 	h := req.Data.blocks[0]
+
+	if err := s.store.UpdateBlock(req.Ctx, h.block); err != nil {
+		log.Fatalf("failed to write Block: %v", err)
+		return req
+	}
 
 	// Stop our cont checks if they are still running, get the final result.
 	h.contCancel()
@@ -290,34 +303,58 @@ func (s *States) BlockEnd(req statemachine.Request[Data]) statemachine.Request[D
 		h.block.State.Status = workflow.Completed
 	}else{
 		h.block.State.Status = workflow.Failed
-		req.Err = err
+		req.Data.err = err
+		req.Next = s.End
 		return req
 	}
 
-	if err := s.store.UpdateBlock(req.Ctx, h.block); err != nil {
-		log.Printf("failed to write Block: %v", err)
-		return req
+	if len(req.Data.blocks) == 1 {
+		req.Data.blocks = nil
+	}else{
+		req.Data.blocks = req.Data.blocks[1:]
 	}
-	req.Data.blocks = req.Data.blocks[1:]
 	req.Next = s.ExecuteBlock
 	return req
 }
 
 // PlanPostChecks stops the ContChecks and runs the PostChecks of the current plan.
 func (s *States) PlanPostChecks(req statemachine.Request[Data]) statemachine.Request[Data] {
+	// No matter what the outcome here is, we go to the end state.
+	req.Next = s.End
+
 	if req.Data.Plan.ContChecks != nil {
 		req.Data.contCancel()
 		for err := range req.Data.contCheckResult {
 			if err != nil {
-				req.Err = err
+				req.Data.err = err
 				return req
 			}
 		}
 	}
 
-	if err := s.runChecksOnce(req.Ctx, req.Data.Plan.PostChecks); err != nil {
-		req.Err = err
+	if req.Data.Plan.PostChecks != nil {
+		if err := s.runChecksOnce(req.Ctx, req.Data.Plan.PostChecks); err != nil {
+			req.Data.err = err
+			return req
+		}
 	}
+	return req
+}
+
+// End is the final state of the state machine. This is always the last state, regardless of errors.
+// This will do the calculations of the final state of the Plan.
+func (s *States) End(req statemachine.Request[Data]) statemachine.Request[Data] {
+	defer func() {
+		if err := s.store.UpdatePlan(req.Ctx, req.Data.Plan); err != nil {
+			log.Fatalf("failed to write Plan: %v", err)
+		}
+	}()
+
+	// Promote the error to the request if it is not nil.
+	if req.Data.err != nil {
+		req.Err = req.Data.err
+	}
+	panic("TO BE IMPLEMENTED")
 	return req
 }
 
