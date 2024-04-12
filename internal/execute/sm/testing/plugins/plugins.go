@@ -20,6 +20,10 @@ type Req struct {
 	Sleep time.Duration
 	// FailValidation is a flag to indicate if the request should fail validation.
 	FailValidation bool
+	// Started is a channel that is closed when the request is started.
+	Started chan struct{}
+	// PauseUntil is a channel that Execute() will block on until closed.
+	PauseUntil chan struct{}
 }
 
 type Resp struct {
@@ -37,8 +41,24 @@ type Plugin struct {
 	// AlwaysRespond indicates to ignore Responses and always return a non-error response.
 	AlwaysRespond bool
 
+	// MaxCount is a count of the maximum concurrecy this Plugin was called with.
+	// You should not set this.
+	MaxCount atomic.Int64
+	// Running is a count of currently how many Execute() calls are in flight.
+	// You should not set this.
+	Running atomic.Int64
+	// Calls is a count of how many times Execute() was called.
+	// You should not set this.
+	Calls atomic.Int64
+
 	// at is the current index of the response.
 	at atomic.Int64
+}
+
+func (h *Plugin) ResetCounts() {
+	h.MaxCount.Store(0)
+	h.Running.Store(0)
+	h.Calls.Store(0)
 }
 
 // Name returns the name of the plugin.
@@ -48,11 +68,28 @@ func (h *Plugin) Name() string {
 
 // Execute executes the plugin.
 func (h *Plugin) Execute(ctx context.Context, req any) (any, *plugins.Error) {
-	at := h.at.Add(1) - 1
+	n := h.Running.Add(1)
+	defer h.Running.Add(-1)
+	h.Calls.Add(1)
+
 	r, ok := req.(Req)
 	if !ok {
 		panic("invalid request object")
 	}
+
+	if r.Started != nil {
+		close(r.Started)
+	}
+
+	if n > h.MaxCount.Load() {
+		h.MaxCount.Store(n)
+	}
+
+	if r.PauseUntil != nil {
+		<-r.PauseUntil
+	}
+
+	at := h.at.Add(1) - 1
 
 	time.Sleep(r.Sleep)
 	if h.AlwaysRespond {
