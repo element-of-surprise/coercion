@@ -5,8 +5,8 @@ import (
 	"context"
 	"fmt"
 	"log"
-	"path"
 	"reflect"
+	"sync/atomic"
 	"time"
 
 	"github.com/element-of-surprise/workstream/internal/execute/sm/actions"
@@ -178,6 +178,11 @@ func (s *States) ExecuteBlock(req statemachine.Request[Data]) statemachine.Reque
 func (s *States) BlockPreChecks(req statemachine.Request[Data]) statemachine.Request[Data] {
 	h := req.Data.blocks[0]
 
+	if h.block.PreChecks == nil && h.block.ContChecks == nil {
+		req.Next = s.BlockStartContChecks
+		return req
+	}
+
 	err := s.runPreChecks(req.Ctx, h.block.PreChecks, h.block.ContChecks)
 	if err != nil {
 		h.block.State.Status = workflow.Failed
@@ -211,24 +216,34 @@ func (s *States) BlockStartContChecks(req statemachine.Request[Data]) statemachi
 // ExecuteSequences executes the sequences of the current block.
 func (s *States) ExecuteSequences(req statemachine.Request[Data]) statemachine.Request[Data ]{
 	h := req.Data.blocks[0]
+	failures := atomic.Int64{}
 
-	name := path.Join(req.Data.Plan.Name, h.block.Name,"ExecuteSequences")
+	exceededFailures := func() bool {
+		if h.block.ToleratedFailures >= 0 && failures.Load() > int64(h.block.ToleratedFailures) {
+			return true
+		}
+		return false
+	}
 
-	pool, err := pooled.New(name, h.block.Concurrency)
+	// So the limiter is pretty standard, but you might be asking why we have one if the pool is already limiting.
+	// Its because g.Go() that uses the pool is going to fire off whatever you give it, even if it blocks on waiting for the pool
+	// to have room. So if we call g.Go(), and it blocks and in one that is currently running we go over the failures, we will
+	// still end up running the one we just queued up. So we use the limiter to block the g.Go() from even being called.
+	limiter := make(chan struct{}, h.block.Concurrency)
+
+	pool, err := pooled.New("", h.block.Concurrency)
 	if err != nil {
-		panic("bug: failed to create pool")
+		panic("bug: failed to create pool: " + err.Error())
 	}
 	defer pool.Close()
 
-	failures := 0
+	g := wait.Group{
+		Pool: pool,
+		Name: "ExecuteSequences",
+	}
+
 	for i := 0; i < len(h.block.Sequences); i++ {
 		seq := h.block.Sequences[i]
-		if h.block.ToleratedFailures >= 0 && failures > h.block.ToleratedFailures {
-			h.block.State.Status = workflow.Failed
-			req.Data.err = fmt.Errorf("block(%s) has exceeded the tolerated failures", h.block.Name)
-			req.Next = s.BlockEnd
-			return req
-		}
 
 		if _, err := req.Data.contChecksPassing(); err != nil {
 			h.block.State.Status = workflow.Failed
@@ -237,17 +252,43 @@ func (s *States) ExecuteSequences(req statemachine.Request[Data]) statemachine.R
 			return req
 		}
 
-		err := pool.Submit(
+		if exceededFailures() {
+			h.block.State.Status = workflow.Failed
+			req.Data.err = fmt.Errorf("block(%s) has exceeded the tolerated failures", h.block.Name)
+			req.Next = s.BlockEnd
+			return req
+		}
+
+		limiter <- struct{}{}
+		g.Go(
 			req.Ctx,
-			func(ctx context.Context) {
-				if err := s.execSeq(ctx, seq); err != nil {
-					failures++
+			func(ctx context.Context) error {
+				defer func() {<-limiter}()
+
+				// Defense in depth to make sure we don't run more than we should.
+				if exceededFailures() {
+					return fmt.Errorf("exceeded tolerated failures")
 				}
+
+				err := s.execSeq(ctx, seq)
+				if err != nil {
+					failures.Add(1)
+				}
+				return err
 			},
 		)
-		if err != nil {
-			panic("Bug: pool.Submit should never fail")
-		}
+	}
+
+	waitCtx := context.WithoutCancel(req.Ctx)
+	g.Wait(waitCtx) // We don't care about the error here, we just want to wait for all sequences to finish.'
+
+
+	// Need to recheck in case the last sequence failed and sent us over the edge.
+	if h.block.ToleratedFailures >= 0 && failures.Load() > int64(h.block.ToleratedFailures) {
+		h.block.State.Status = workflow.Failed
+		req.Data.err = fmt.Errorf("block(%s) has exceeded the tolerated failures", h.block.Name)
+		req.Next = s.BlockEnd
+		return req
 	}
 
 	req.Next = s.BlockPostChecks
@@ -379,11 +420,18 @@ func (s *States) runPreChecks(ctx context.Context, preChecks *workflow.Checks, c
 func (s *States) runContChecks(ctx context.Context, checks *workflow.Checks, resultCh chan error) {
 	defer close(resultCh)
 
-	t := time.NewTicker(checks.Delay)
+	// If the delay is less than or equal to 0, we set it to 1ns to avoid a panic,
+	// since time.NewTicker panics if the duration is less than or equal to 0.
+	delay := checks.Delay
+	if delay <= 0 {
+		delay = time.Nanosecond
+	}
+
+	t := time.NewTicker(delay)
 	defer t.Stop()
 
 	for {
-		t.Reset(checks.Delay)
+		t.Reset(delay)
 		select {
 		case <-ctx.Done():
 			return
