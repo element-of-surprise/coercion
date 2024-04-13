@@ -76,6 +76,9 @@ func (s *State) Reset() {
 // Clone returns a copy of the state. This is not used by any object Clone method,
 // but can be used in testing.
 func (s *State) Clone() *State {
+	if s == nil {
+		return nil
+	}
 	return &State{
 		Status: s.Status,
 		Start:  s.Start,
@@ -228,6 +231,40 @@ func (p *Plan) validate() ([]validator, error) {
 	}
 
 	return vals, nil
+}
+
+// Clone clones a plan with no ID, State, SubmitTime or Reason. It also clones
+// all of the sub-objects according to their Clone() method.
+func (p *Plan) Clone() *Plan {
+	if p == nil {
+		return nil
+	}
+
+	meta := make([]byte, len(p.Meta))
+	copy(meta, p.Meta)
+
+	np := &Plan{
+		Name: p.Name,
+		Descr: p.Descr,
+		GroupID: p.GroupID,
+		Meta: meta,
+	}
+
+	if p.PreChecks != nil {
+		np.PreChecks = p.PreChecks.Clone()
+	}
+	if p.ContChecks != nil {
+		np.ContChecks = p.ContChecks.Clone()
+	}
+	if p.PostChecks != nil {
+		np.PostChecks = p.PostChecks.Clone()
+	}
+
+	np.Blocks = make([]*Block, len(p.Blocks))
+	for i, b := range p.Blocks {
+		np.Blocks[i] = b.Clone()
+	}
+	return np
 }
 
 // Checks represents a set of actions that are executed before the workflow starts.

@@ -3,6 +3,7 @@ package sm
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"reflect"
@@ -18,6 +19,8 @@ import (
 	"github.com/gostdlib/concurrency/prim/wait"
 	"github.com/gostdlib/ops/statemachine"
 )
+
+var ErrInternalFailure = errors.New("internal failure")
 
 // block is a wrapper around a workflow.Block that contains additional information for the statemachine.
 type block struct  {
@@ -128,6 +131,12 @@ func (s *States) Start(req statemachine.Request[Data]) statemachine.Request[Data
 
 // PlanPreChecks runs all PreChecks and ContChecks on the Plan before proceeding.
 func (s *States) PlanPreChecks(req statemachine.Request[Data]) statemachine.Request[Data] {
+	defer func() {
+		if err := s.store.UpdatePlan(req.Ctx, req.Data.Plan); err != nil {
+			log.Fatalf("failed to write Plan: %v", err)
+		}
+	}()
+
 	err := s.runPreChecks(req.Ctx, req.Data.Plan.PreChecks, req.Data.Plan.ContChecks)
 	if err != nil {
 		req.Data.err = err
@@ -324,19 +333,31 @@ func (s *States) BlockEnd(req statemachine.Request[Data]) statemachine.Request[D
 		return req
 	}
 
+	// For safety reasons, we always check this so we don't get goroutine leaks.
+	if h.contCancel != nil {
+		h.contCancel()
+	}
+
 	// Stop our cont checks if they are still running, get the final result.
-	h.contCancel()
-	var err error
-	for err = range h.contCheckResult {
+	if h.block.ContChecks != nil {
+		var err error
+		for err = range h.contCheckResult {
+			if err != nil {
+				break
+			}
+		}
 		if err != nil {
-			break
+			h.block.State.Status = workflow.Failed
+			req.Data.err = err
+			req.Next = s.End
+			return req
 		}
 	}
-	if err == nil && h.block.State.Status == workflow.Running{
+
+	if h.block.State.Status == workflow.Running{
 		h.block.State.Status = workflow.Completed
 	}else{
 		h.block.State.Status = workflow.Failed
-		req.Data.err = err
 		req.Next = s.End
 		return req
 	}
@@ -355,8 +376,13 @@ func (s *States) PlanPostChecks(req statemachine.Request[Data]) statemachine.Req
 	// No matter what the outcome here is, we go to the end state.
 	req.Next = s.End
 
-	if req.Data.Plan.ContChecks != nil {
+	// We always checks this to avoid programmer mistakes that lead to a goroutine lea
+	// 	// We always checks this to avoid programmer mistakes that lead to a goroutine leak.
+	if req.Data.contCancel != nil {
 		req.Data.contCancel()
+	}
+
+	if req.Data.Plan.ContChecks != nil {
 		for err := range req.Data.contCheckResult {
 			if err != nil {
 				req.Data.err = err
@@ -387,7 +413,31 @@ func (s *States) End(req statemachine.Request[Data]) statemachine.Request[Data] 
 	if req.Data.err != nil {
 		req.Err = req.Data.err
 	}
-	panic("TO BE IMPLEMENTED")
+
+	// Extra cancel, defense in depth.
+	if req.Data.contCancel != nil {
+		req.Data.contCancel()
+	}
+
+	plan := req.Data.Plan
+	plan.State.End = s.now()
+
+	f := finalStates{}
+	req.Next = f.start
+
+	var err error
+	req, err = statemachine.Run("finalStates", req)
+	if err != nil {
+		if errors.Is(err, ErrInternalFailure) {
+			log.Println("Plan object did not come out in expected state: %w", err)
+		}
+	}
+
+	// Promote Data.err to the request if it is not nil.
+	if req.Data.err != nil {
+		req.Err = req.Data.err
+	}
+
 	return req
 }
 
