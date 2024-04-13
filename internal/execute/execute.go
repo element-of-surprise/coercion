@@ -1,3 +1,5 @@
+// Package executes validates Plan objects, checks Plugins can run in this environment (via Plugins.Init()) and
+// allows execution of the Plan objects by starting a statemachine that runs a Plan to completion.
 package execute
 
 import (
@@ -7,7 +9,7 @@ import (
 	"time"
 
 	"github.com/element-of-surprise/workstream/internal/execute/sm"
-	"github.com/element-of-surprise/workstream/plugins"
+	"github.com/element-of-surprise/workstream/plugins/registry"
 	"github.com/element-of-surprise/workstream/workflow"
 	"github.com/element-of-surprise/workstream/workflow/storage"
 	"github.com/element-of-surprise/workstream/workflow/utils/walk"
@@ -17,14 +19,9 @@ import (
 	"github.com/gostdlib/ops/statemachine"
 )
 
-type registry interface {
-	Plugin(name string) plugins.Plugin
-	Plugins() chan plugins.Plugin
-}
-
 // Plans handles execution of workflow.Plan instances for a Workstream.
 type Plans struct {
-	registry registry
+	registry *registry.Register
 	store    storage.Vault
 
 	states *sm.States
@@ -40,7 +37,11 @@ func New(ctx context.Context, store storage.Vault) (*Plans, error) {
 	if err := e.initPlugins(ctx); err != nil {
 		return nil, fmt.Errorf("failed to initialize plugins: %w", err)
 	}
-	e.states = sm.New(store, e.registry)
+	var err error
+	e.states, err = sm.New(store, e.registry)
+	if err != nil {
+		return nil, err
+	}
 
 	return e, nil
 }
@@ -49,7 +50,7 @@ func New(ctx context.Context, store storage.Vault) (*Plans, error) {
 // meet the preconditions for execution.
 func (e *Plans) initPlugins(ctx context.Context) error {
 	if e.registry == nil {
-		e.registry = plugins.Registry
+		e.registry = registry.Plugins
 	}
 
 	g := wait.Group{}
@@ -67,7 +68,7 @@ func (e *Plans) initPlugins(ctx context.Context) error {
 	return g.Wait(ctx)
 }
 
-// Start stats a previously Submitted Plan by its ID. Cancelling the Context will not Stop execution.
+// Start starts a previously Submitted Plan by its ID. Cancelling the Context will not Stop execution.
 // Please use Stop to stop execution of a Plan.
 func (e *Plans) Start(ctx context.Context, id uuid.UUID) error {
 	plan, err := e.store.Read(ctx, id)
@@ -103,8 +104,6 @@ func (e *Plans) Start(ctx context.Context, id uuid.UUID) error {
 		// NOTE: We are not handling the error here, as we are not returning it to the caller
 		// and doesn't actually matter. All errors are encapsulated in the Plan's state.
 		statemachine.Run(plan.Name, req)
-
-		e.writePlanState(ctx, plan)
 	}()
 
 	return nil
@@ -114,7 +113,7 @@ func (e *Plans) now() time.Time {
 	return time.Now().UTC()
 }
 
-// getInternal provides an interface for grabbing the Internal struct from workflow objects.
+// getStater provides an interface for grabbing the State struct from workflow objects.
 // This is used to validate that the starting state of the plan is correct before starting it.
 type getStater interface {
 	GetState() *workflow.State
@@ -165,45 +164,4 @@ func (e *Plans) validateStartState(ctx context.Context, plan *workflow.Plan) err
 		}
 	}
 	return nil
-}
-
-// writePlanState looks at teh current state of the Plan and figures out what the final
-// state should be. It then writes that state to the storage.
-func (e *Plans) writePlanState(ctx context.Context, p *workflow.Plan) error {
-
-forLoop:
-	for item := range walk.Plan(context.WithoutCancel(ctx), p) {
-		switch item.Value.Type() {
-		case workflow.OTPlan:
-			switch workflow.Failed {
-			case p.PreChecks.Internal.Status:
-				p.Internals.Internal.Status = workflow.Failed
-				p.Internals.Reason = workflow.FRPreCheck
-				break forLoop
-			case p.ContChecks.Internal.Status:
-				p.Internals.Internal.Status = workflow.Failed
-				p.Internals.Reason = workflow.FRContCheck
-				break forLoop
-			case p.PostChecks.Internal.Status:
-				p.Internals.Internal.Status = workflow.Failed
-				p.Internals.Reason = workflow.FRPostCheck
-			}
-		case workflow.OTBlock:
-			b := item.Block()
-			switch workflow.Failed {
-			case b.PreChecks.Internal.Status:
-				p.Internals.Internal.Status = workflow.Failed
-				p.Internals.Reason = workflow.FRBlock
-				break forLoop
-			case b.ContChecks.Internal.Status:
-				p.Internals.Internal.Status = workflow.Failed
-				p.Internals.Reason = workflow.FRBlock
-				break forLoop
-			case b.PostChecks.Internal.Status:
-				p.Internals.Internal.Status = workflow.Failed
-				p.Internals.Reason = workflow.FRBlock
-			}
-		}
-	}
-	return e.store.Write(ctx, p)
 }

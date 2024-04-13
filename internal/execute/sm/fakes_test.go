@@ -25,6 +25,8 @@ func fakeParallelActionRunner(ctx context.Context, actions []*workflow.Action) e
 }
 
 type fakeUpdater struct {
+	create  []*workflow.Plan
+	plans   []*workflow.Plan
 	blocks  []*workflow.Block
 	seqs    []*workflow.Sequence
 	actions []*workflow.Action
@@ -32,6 +34,24 @@ type fakeUpdater struct {
 	calls   int
 
 	storage.Vault
+}
+
+func (f *fakeUpdater) Create(ctx context.Context, plan *workflow.Plan) error {
+	f.calls++
+
+	n := plan.Clone()
+	n.State = plan.State.Clone()
+	f.create = append(f.create, n)
+	return nil
+}
+
+func (f *fakeUpdater) UpdatePlan(ctx context.Context, plan *workflow.Plan) error {
+	f.calls++
+
+	n := plan.Clone()
+	n.State = plan.State.Clone()
+	f.plans = append(f.plans, n)
+	return nil
 }
 
 func (f *fakeUpdater) UpdateBlock(ctx context.Context, block *workflow.Block) error {
