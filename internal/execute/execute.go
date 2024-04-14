@@ -19,31 +19,64 @@ import (
 	"github.com/gostdlib/ops/statemachine"
 )
 
+// runner runs a Plan through the statemachine.
+// In production this is the statemachine.Run function.
+type runner func(name string, req statemachine.Request[sm.Data], options ...statemachine.Option[sm.Data]) (statemachine.Request[sm.Data], error)
+
+// validator validates a workflow.Object.
+type validator func(walk.Item) error
+
 // Plans handles execution of workflow.Plan instances for a Workstream.
 type Plans struct {
+	// registry is the registry of plugins that can be used to execute Plans.
 	registry *registry.Register
+	// store is the storage backend for the Plans.
 	store    storage.Vault
 
+	// states is the statemachine that runs the Plans.
 	states *sm.States
 
 	mu       sync.Mutex // protects stoppers
 	stoppers map[uuid.UUID]context.CancelFunc
+
+	// runner is the function that runs the statemachine.
+	// In production this is the statemachine.Run function.
+	runner runner
+
+	// validators is a list of validators that are run on a Plan before it is started.
+	validators []validator
 }
 
 // New creates a new Executor. This should only be created once.
 func New(ctx context.Context, store storage.Vault) (*Plans, error) {
-	e := &Plans{}
+	e := &Plans{
+		store:    store,
+		stoppers: map[uuid.UUID]context.CancelFunc{},
+		runner:   statemachine.Run[sm.Data],
+	}
 
 	if err := e.initPlugins(ctx); err != nil {
 		return nil, fmt.Errorf("failed to initialize plugins: %w", err)
 	}
+
 	var err error
 	e.states, err = sm.New(store, e.registry)
 	if err != nil {
 		return nil, err
 	}
 
+	e.addValidators()
+
 	return e, nil
+}
+
+func (e *Plans) addValidators() {
+	e.validators = []validator{
+		e.validateID,
+		e.validateState,
+		e.validatePlan,
+		e.validateAction,
+	}
 }
 
 // initPlugins initializes all plugins in the registry to make sure they
@@ -103,7 +136,7 @@ func (e *Plans) Start(ctx context.Context, id uuid.UUID) error {
 
 		// NOTE: We are not handling the error here, as we are not returning it to the caller
 		// and doesn't actually matter. All errors are encapsulated in the Plan's state.
-		statemachine.Run(plan.Name, req)
+		e.runner(plan.Name, req)
 	}()
 
 	return nil
@@ -125,43 +158,89 @@ type ider interface {
 }
 
 // validateStartState validates that the plan is in a valid state to be started.
-// TODO(element-of-surprise): Add validation for check vs non-check actions.
-// TODO(element-of-surprise): Add validation for no-delays on non-ContChecks.
-func (e *Plans) validateStartState(ctx context.Context, plan *workflow.Plan) error {
+func (p *Plans) validateStartState(ctx context.Context, plan *workflow.Plan) error {
+	if plan == nil {
+		return fmt.Errorf("plan is nil")
+	}
+
 	for item := range walk.Plan(context.WithoutCancel(ctx), plan) {
-		if hasID, ok := item.Value.(ider); ok {
-			if hasID.GetID() == uuid.Nil {
-				return fmt.Errorf("Object(%T): ID is nil", item.Value)
-			}
-		}else{
-			return fmt.Errorf("Object(%T): does not implement ider", item.Value)
-		}
-
-		if get, ok := item.Value.(getStater); ok {
-			state := get.GetState()
-			if state == nil {
-				return fmt.Errorf("Object(%T).State is nil")
-			}
-			if state.Status != workflow.NotStarted {
-				return fmt.Errorf("internal status is not NotStarted")
-			}
-			if !state.Start.IsZero() {
-				return fmt.Errorf("internal start is not zero")
-			}
-			if !state.End.IsZero() {
-				return fmt.Errorf("internal end is not zero")
-			}
-		}
-		if action, ok := item.Value.(*workflow.Action); ok {
-			if action.Attempts != nil {
-				return fmt.Errorf("action(%s).Attempts was non-nil", action.Name)
-			}
-
-			plug := e.registry.Plugin(action.Plugin)
-			if plug == nil {
-				return fmt.Errorf("plugin(%s) not found", action.Plugin)
+		for _, v := range p.validators {
+			if err := v(item); err != nil {
+				return err
 			}
 		}
 	}
 	return nil
+}
+
+func (p *Plans) validatePlan(i walk.Item) error {
+	if i.Value.Type() != workflow.OTPlan {
+		return nil
+	}
+
+	plan := i.Value.(*workflow.Plan)
+	if plan.SubmitTime.IsZero() {
+		return fmt.Errorf("Plan.SubmitTime is zero")
+	}
+	if plan.Reason != workflow.FRUnknown {
+		return fmt.Errorf("Plan.Reason is not FRUnknown")
+	}
+	return nil
+}
+
+func (p *Plans) validateAction(i walk.Item) error {
+	if i.Value.Type() != workflow.OTAction {
+		return nil
+	}
+
+	action := i.Value.(*workflow.Action)
+
+	if action.Attempts != nil {
+		return fmt.Errorf("action(%s).Attempts was non-nil", action.Name)
+	}
+
+	plug := p.registry.Plugin(action.Plugin)
+	if plug == nil {
+		return fmt.Errorf("plugin(%s) not found", action.Plugin)
+	}
+
+	switch i.Chain[len(i.Chain)-1].Type() {
+	case workflow.OTCheck:
+		if !plug.IsCheck() {
+			return fmt.Errorf("plugin(%s) is not a check plugin, but in a Checks object", action.Plugin)
+		}
+	}
+	return nil
+}
+
+// validateID validates that the object has a non-nil ID.
+func (e *Plans) validateID(i walk.Item) error {
+	if hasID, ok := i.Value.(ider); ok {
+		if hasID.GetID() == uuid.Nil {
+			return fmt.Errorf("Object(%T): ID is nil", i.Value)
+		}
+		return nil
+	}
+	return fmt.Errorf("Object(%T): does not implement ider", i.Value)
+}
+
+// validateState validates that the object is in a valid state to be started.
+func (e *Plans) validateState(i walk.Item) error {
+	if get, ok := i.Value.(getStater); ok {
+		state := get.GetState()
+		if state == nil {
+			return fmt.Errorf("Object(%T).State is nil", i.Value)
+		}
+		if state.Status != workflow.NotStarted {
+			return fmt.Errorf("internal status is not NotStarted")
+		}
+		if !state.Start.IsZero() {
+			return fmt.Errorf("internal start is not zero")
+		}
+		if !state.End.IsZero() {
+			return fmt.Errorf("internal end is not zero")
+		}
+		return nil
+	}
+	return fmt.Errorf("Object(%T): does not implement getStater", i.Value)
 }
