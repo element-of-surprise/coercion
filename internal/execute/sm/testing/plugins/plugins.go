@@ -34,6 +34,8 @@ type Resp struct {
 var _ plugins.Plugin = &Plugin{}
 
 type Plugin struct {
+	// PlugName overrides the plugin name. If empty, the default name is used.
+	PlugName string
 	// IsCheckPlugin is a flag to indicate if the plugin is a check plugin.
 	IsCheckPlugin bool
 	// Responses is a list of responses to return.
@@ -63,6 +65,9 @@ func (h *Plugin) ResetCounts() {
 
 // Name returns the name of the plugin.
 func (h *Plugin) Name() string {
+	if h.PlugName != "" {
+		return h.PlugName
+	}
 	return Name
 }
 
