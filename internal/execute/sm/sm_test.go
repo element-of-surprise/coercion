@@ -804,6 +804,45 @@ func TestPlanPostChecks(t *testing.T) {
 	}
 }
 
+func TestEnd(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	dataErr := fmt.Errorf("error")
+
+	data := Data{
+		Plan: &workflow.Plan{
+			State: &workflow.State{Status: workflow.Running},
+		},
+		contCancel: cancel,
+		err: dataErr,
+	}
+
+	states := &States{
+		store: &fakeUpdater{},
+	}
+
+	req := statemachine.Request[Data]{Data: data, Ctx: context.Background()}
+	req = states.End(req)
+
+	if ctx.Err() == nil {
+		t.Errorf("TestEnd: contChecks context should have been cancelled")
+	}
+	if data.Plan.State.Status != workflow.Completed {
+		t.Errorf("TestEnd: plan status should have been set to completed")
+	}
+	if data.Plan.State.End.IsZero() {
+		t.Errorf("TestEnd: plan end time should have been set")
+	}
+	if req.Err == nil {
+		t.Errorf("TestEnd: request error should have been set")
+	}
+	if req.Next != nil {
+		t.Errorf("TestEnd: next state should have been nil")
+	}
+	if states.store.(*fakeUpdater).calls != 1 {
+		t.Errorf("TestEnd: store.UpdatePlan() should have been called")
+	}
+}
+
 // methodName returns the name of the method of the given value.
 func methodName(method any) string {
 	if method == nil {
