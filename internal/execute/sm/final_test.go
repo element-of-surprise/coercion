@@ -121,7 +121,7 @@ func TestBlocks(t *testing.T) {
 	}
 }
 
-func TestEnd(t *testing.T) {
+func TestFinalsEnd(t *testing.T) {
 	t.Parallel()
 
 	plan := &workflow.Plan{State: &workflow.State{Status: workflow.Running}}

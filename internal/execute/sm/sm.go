@@ -409,11 +409,6 @@ func (s *States) End(req statemachine.Request[Data]) statemachine.Request[Data] 
 		}
 	}()
 
-	// Promote the error to the request if it is not nil.
-	if req.Data.err != nil {
-		req.Err = req.Data.err
-	}
-
 	// Extra cancel, defense in depth.
 	if req.Data.contCancel != nil {
 		req.Data.contCancel()
@@ -432,6 +427,7 @@ func (s *States) End(req statemachine.Request[Data]) statemachine.Request[Data] 
 			log.Println("Plan object did not come out in expected state: %w", err)
 		}
 	}
+	req.Next = nil
 
 	// Promote Data.err to the request if it is not nil.
 	if req.Data.err != nil {
