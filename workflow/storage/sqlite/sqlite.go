@@ -15,6 +15,7 @@ import (
 	"sync"
 
 	"github.com/element-of-surprise/workstream/internal/private"
+	"github.com/element-of-surprise/workstream/plugins/registry"
 	"github.com/element-of-surprise/workstream/workflow/storage"
 
 	"zombiezen.com/go/sqlite"
@@ -102,8 +103,8 @@ func New(ctx context.Context, root string, options ...Option) (*Vault, error) {
 	mu := &sync.Mutex{}
 
 	r.conn = conn
-	r.reader = reader{conn: conn}
-	r.creator = creator{mu: mu, conn: conn}
+	r.reader = reader{conn: conn, reg: registry.Plugins}
+	r.creator = creator{mu: mu, conn: conn, reader: r.reader}
 	r.updater = newUpdater(mu, conn)
 	r.closer = closer{conn: conn}
 	return r, nil

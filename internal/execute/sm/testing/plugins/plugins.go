@@ -21,9 +21,9 @@ type Req struct {
 	// FailValidation is a flag to indicate if the request should fail validation.
 	FailValidation bool
 	// Started is a channel that is closed when the request is started.
-	Started chan struct{}
+	Started chan struct{} `json:"-"`
 	// PauseUntil is a channel that Execute() will block on until closed.
-	PauseUntil chan struct{}
+	PauseUntil chan struct{} `json:"-"`
 }
 
 type Resp struct {

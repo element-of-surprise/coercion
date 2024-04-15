@@ -559,7 +559,7 @@ func TestExecuteSequencesConcurrency(t *testing.T) {
    req = states.ExecuteSequences(req)
 
    if plug.MaxCount.Load() != 3 {
-   		t.Errorf("TestExecuteSequencesConcurrency: expected MaxCount == 3, got %d", plug.MaxCount)
+   		t.Errorf("TestExecuteSequencesConcurrency: expected MaxCount == 3, got %d", plug.MaxCount.Load())
    }
 }
 

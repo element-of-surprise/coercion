@@ -1,5 +1,11 @@
 package sqlite
 
+import (
+	"strings"
+
+	"github.com/google/uuid"
+)
+
 // This file holds various SQL statements used by the sqlite package.
 
 const fetchPlanByID = `
@@ -82,5 +88,21 @@ SELECT
 	state_start,
 	state_end
 FROM actions
-where id = ($ids)
+where id IN $ids
 ORDER BY pos ASC`
+
+func replaceWithIDs(query, replace string, ids []uuid.UUID) (string, []any) {
+	args := make([]any, 0, len(ids))
+	b := strings.Builder{}
+	b.WriteString("(")
+	for i := range ids {
+		args = append(args, ids[i])
+		if i < len(ids)-1 {
+			b.WriteString("?,")
+		} else {
+			b.WriteString("?")
+		}
+	}
+	b.WriteString(")")
+	return strings.Replace(query, replace, b.String(), 1), args
+}

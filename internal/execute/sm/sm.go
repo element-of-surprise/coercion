@@ -121,7 +121,7 @@ func (s *States) Start(req statemachine.Request[Data]) statemachine.Request[Data
 	plan.State.Status = workflow.Running
 	plan.State.Start = s.now()
 
-	if err := s.store.Create(req.Ctx, plan); err != nil {
+	if err := s.store.UpdatePlan(req.Ctx, plan); err != nil {
 		log.Fatalf("failed to write Plan: %v", err)
 	}
 
