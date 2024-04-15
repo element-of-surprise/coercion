@@ -93,6 +93,8 @@ type validator interface {
 	validate() ([]validator, error)
 }
 
+//go:generate stringer -type=ObjectType
+
 // ObjectType is the type of object.
 type ObjectType int
 
@@ -191,7 +193,8 @@ func (p *Plan) Type() ObjectType {
 // object implements the Object interface.
 func (p *Plan) object() {}
 
-func (p *Plan) defaults() {
+// Defaults sets the default values for the object. For use internally.
+func (p *Plan) Defaults() {
 	if p == nil {
 		return
 	}
@@ -317,7 +320,8 @@ func (c *Checks) Type() ObjectType {
 // object implements the Object interface.
 func (c *Checks) object() {}
 
-func (c *Checks) defaults() {
+// Defaults sets the default values for the object. For use internally.
+func (c *Checks) Defaults() {
 	if c == nil {
 		return
 	}
@@ -438,9 +442,10 @@ func (b *Block) Type() ObjectType {
 // object implements the Object interface.
 func (b *Block) object() {}
 
-func (b *Block) defaults() *Block {
+// Defaults sets the default values for the object. For use internally.
+func (b *Block) Defaults() {
 	if b == nil {
-		return nil
+		return
 	}
 	b.ID = uuid.New()
 	if b.Concurrency < 1 {
@@ -449,7 +454,7 @@ func (b *Block) defaults() *Block {
 	b.State = &State{
 		Status: NotStarted,
 	}
-	return b
+	return
 }
 
 func (b *Block) validate() ([]validator, error) {
@@ -559,7 +564,8 @@ func (s *Sequence) Type() ObjectType {
 // object implements the Object interface.
 func (s *Sequence) object() {}
 
-func (s *Sequence) defaults() {
+// Defaults sets the default values for the object. For use internally.
+func (s *Sequence) Defaults() {
 	if s == nil {
 		return
 	}
@@ -704,7 +710,8 @@ func (a *Action) Type() ObjectType {
 // object implements the Object interface.
 func (a *Action) object() {}
 
-func (a *Action) defaults() {
+// Defaults sets the default values for the object. For use internally.
+func (a *Action) Defaults() {
 	if a == nil {
 		return
 	}

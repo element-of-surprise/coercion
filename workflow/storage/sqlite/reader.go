@@ -24,12 +24,12 @@ type reader struct {
 }
 
 // Exists returns true if the Plan ID exists in the storage.
-func (p reader) Exists(ctx context.Context, id uuid.UUID) (bool, error) {
+func (r reader) Exists(ctx context.Context, id uuid.UUID) (bool, error) {
 	const q = "SELECT COUNT(*) FROM 'plans' WHERE 'id' = ?;"
 
 	count := -1
 	err := sqlitex.ExecuteTransient(
-		p.conn,
+		r.conn,
 		q,
 		&sqlitex.ExecOptions{
 			Args: []any{
@@ -51,28 +51,29 @@ func (p reader) Exists(ctx context.Context, id uuid.UUID) (bool, error) {
 }
 
 // ReadPlan returns a Plan from the storage.
-func (p reader) Read(ctx context.Context, id uuid.UUID) (*workflow.Plan, error) {
-	return p.fetchPlan(ctx, id)
+func (r reader) Read(ctx context.Context, id uuid.UUID) (*workflow.Plan, error) {
+	return r.fetchPlan(ctx, id)
 }
 
 // SearchPlans returns a list of Plan IDs that match the filter.
-func (p reader) Search(ctx context.Context, filters storage.Filters) (chan storage.Stream[storage.ListResult], error) {
+func (r reader) Search(ctx context.Context, filters storage.Filters) (chan storage.Stream[storage.ListResult], error) {
 	if err := filters.Validate(); err != nil {
 		return nil, fmt.Errorf("invalid filter: %w", err)
 	}
 
-	q, named := p.buildSearchQuery(filters)
+	q, args, named := r.buildSearchQuery(filters)
 
 	results := make(chan storage.Stream[storage.ListResult], 1)
 
 	go func() {
 		err := sqlitex.Execute(
-			p.conn,
+			r.conn,
 			q,
 			&sqlitex.ExecOptions{
+				Args:       args,
 				Named: named,
 				ResultFunc: func(stmt *sqlite.Stmt) error {
-					r, err := p.listResultsFunc(stmt)
+					r, err := r.listResultsFunc(stmt)
 					if err != nil {
 						return fmt.Errorf("problem searching plans: %w", err)
 					}
@@ -96,10 +97,11 @@ func (p reader) Search(ctx context.Context, filters storage.Filters) (chan stora
 	return results, nil
 }
 
-func (p reader) buildSearchQuery(filters storage.Filters) (string, map[string]any) {
+func (r reader) buildSearchQuery(filters storage.Filters) (string, []any, map[string]any) {
 	const sel = `SELECT id, group_id, name, descr, submit_time, state_status, state_start, state_end FROM plans WHERE`
 
-	named := map[string]any{}
+	var named map[string]any
+	var args []any
 
 	build := strings.Builder{}
 	build.WriteString(sel)
@@ -108,16 +110,14 @@ func (p reader) buildSearchQuery(filters storage.Filters) (string, map[string]an
 
 	if len(filters.ByIDs) > 0 {
 		numFilters++
-		named["$ids"] = idSearchFromUUID(filters.ByIDs)
-		build.WriteString(" id IN ($ids)")
+		build.WriteString(" id IN $ids")
 	}
 	if len(filters.ByGroupIDs) > 0 {
 		if numFilters > 0 {
 			build.WriteString(" AND")
 		}
 		numFilters++
-		named["$group_ids"] = idSearchFromUUID(filters.ByGroupIDs)
-		build.WriteString(" group_id IN ($group_ids)")
+		build.WriteString(" group_id IN $group_ids")
 	}
 	if len(filters.ByStatus) > 0 {
 		if numFilters > 0 {
@@ -135,13 +135,25 @@ func (p reader) buildSearchQuery(filters storage.Filters) (string, map[string]an
 		}
 	}
 	build.WriteString(" ORDER BY submit_time DESC;")
-	return build.String(), named
+	query := build.String()
+
+	if len(filters.ByIDs) > 0 {
+		var idArgs []any
+		query, idArgs = replaceWithIDs(query, "$id", filters.ByIDs)
+		args = append(args, idArgs...)
+	}
+	if len(filters.ByGroupIDs) > 0 {
+		var groupArgs []any
+		query, groupArgs = replaceWithIDs(query, "$group_id", filters.ByGroupIDs)
+		args = append(args, groupArgs...)
+	}
+	return query, args, named
 }
 
 // List returns a list of Plan IDs in the storage in order from newest to oldest. This should
 // return with most recent submiited first. Limit sets the maximum number of
 // entrie to return
-func (p reader) List(ctx context.Context, limit int) (chan storage.Stream[storage.ListResult], error) {
+func (r reader) List(ctx context.Context, limit int) (chan storage.Stream[storage.ListResult], error) {
 	const listPlans = `SELECT id, group_id, name, descr, submit_time, state_status, state_start, state_end FROM plans ORDER BY submit_time DESC`
 
 	named := map[string]any{}
@@ -156,12 +168,12 @@ func (p reader) List(ctx context.Context, limit int) (chan storage.Stream[storag
 
 	go func() {
 		err := sqlitex.Execute(
-			p.conn,
+			r.conn,
 			q,
 			&sqlitex.ExecOptions{
 				Named: named,
 				ResultFunc: func(stmt *sqlite.Stmt) error {
-					r, err := p.listResultsFunc(stmt)
+					result, err := r.listResultsFunc(stmt)
 					if err != nil {
 						return fmt.Errorf("problem listing plans: %w", err)
 					}
@@ -171,7 +183,7 @@ func (p reader) List(ctx context.Context, limit int) (chan storage.Stream[storag
 							Err: ctx.Err(),
 						}
 						return ctx.Err()
-					case results <- storage.Stream[storage.ListResult]{Result: r}:
+					case results <- storage.Stream[storage.ListResult]{Result: result}:
 						return nil
 					}
 				},
@@ -186,29 +198,29 @@ func (p reader) List(ctx context.Context, limit int) (chan storage.Stream[storag
 }
 
 // listResultsFunc is a helper function to convert a SQLite statement into a ListResult.
-func (p reader) listResultsFunc(stmt *sqlite.Stmt) (storage.ListResult, error) {
-	r := storage.ListResult{}
+func (r reader) listResultsFunc(stmt *sqlite.Stmt) (storage.ListResult, error) {
+	result := storage.ListResult{}
 	var err error
-	r.ID, err = fieldToID("id", stmt)
+	result.ID, err = fieldToID("id", stmt)
 	if err != nil {
 		return storage.ListResult{}, fmt.Errorf("couldn't get ID: %w", err)
 	}
-	r.GroupID, err = fieldToID("group_id", stmt)
+	result.GroupID, err = fieldToID("group_id", stmt)
 	if err != nil {
 		return storage.ListResult{}, fmt.Errorf("couldn't get group ID: %w", err)
 	}
-	r.Name = stmt.GetText("name")
-	r.Descr = stmt.GetText("descr")
-	r.SubmitTime = time.Unix(0, stmt.GetInt64("submit_time"))
-	r.State = &workflow.State{
+	result.Name = stmt.GetText("name")
+	result.Descr = stmt.GetText("descr")
+	result.SubmitTime = time.Unix(0, stmt.GetInt64("submit_time"))
+	result.State = &workflow.State{
 		Status: workflow.Status(stmt.GetInt64("state_status")),
 		Start:  time.Unix(0, stmt.GetInt64("state_start")),
 		End:    time.Unix(0, stmt.GetInt64("state_end")),
 	}
-	return r, nil
+	return result, nil
 }
 
-func (p reader) private() {
+func (r reader) private() {
 	return
 }
 
@@ -283,21 +295,4 @@ func fieldToState(stmt *sqlite.Stmt) (*workflow.State, error) {
 		Start:  start,
 		End:    end,
 	}, nil
-}
-
-// idSearchFromUUID returns a string that can be used in a query to search for the given UUIDs.
-// The returned byte slice is a comma separated list of UUIDs
-func idSearchFromUUID(ids []uuid.UUID) string {
-	if len(ids) == 0 {
-		return ""
-	}
-
-	build := strings.Builder{}
-	for i, id := range ids {
-		build.WriteString(id.String())
-		if i < len(ids)-1 {
-			build.WriteString(",")
-		}
-	}
-	return build.String()
 }

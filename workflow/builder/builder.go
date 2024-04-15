@@ -319,7 +319,7 @@ func (b *BuildPlan) AddBlock(args BlockArgs) *BuildPlan {
 		}
 		t.Blocks = append(t.Blocks, block)
 		b.chain = append(b.chain, block)
-		return nil
+		return b
 	}
 	b.setErr(fmt.Errorf("invalid type for AddBlock(): %T", b.current))
 	return b
@@ -355,7 +355,7 @@ func (b *BuildPlan) AddSequence(seq *workflow.Sequence) *BuildPlan {
 	case *workflow.Block:
 		t.Sequences = append(t.Sequences, seq)
 		b.chain = append(b.chain, seq)
-		return nil
+		return b
 	}
 	b.setErr(fmt.Errorf("invalid type for AddSequence(): %T", b.current))
 	return b

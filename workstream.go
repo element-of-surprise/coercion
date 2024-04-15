@@ -50,12 +50,13 @@ func New(ctx context.Context, store storage.Vault) (*Workstream, error) {
 		return nil, fmt.Errorf("failed to create executor: %w", err)
 	}
 
-	return &Workstream{exec: exec}, nil
+	return &Workstream{exec: exec, store: store}, nil
 }
 
 type defaulter interface {
-	defaults()
+	Defaults()
 }
+
 
 // Submit submits a workflow.Plan to the Workstream for execution. It returns the UUID of the plan.
 // If the plan is invalid, an error is returned. The plan is not executed on Submit(), you must use
@@ -68,7 +69,7 @@ func (w *Workstream) Submit(ctx context.Context, plan *workflow.Plan) (uuid.UUID
 
 	for item := range walk.Plan(context.WithoutCancel(ctx), plan) {
 		if def, ok := item.Value.(defaulter); ok {
-			def.defaults()
+			def.Defaults()
 		}
 	}
 	plan.SubmitTime = w.now()

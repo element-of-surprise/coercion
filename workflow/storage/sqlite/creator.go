@@ -15,7 +15,7 @@ import (
 type creator struct {
 	mu     *sync.Mutex
 	conn   *sqlite.Conn
-	reader *reader
+	reader reader
 
 	private.Storage
 }

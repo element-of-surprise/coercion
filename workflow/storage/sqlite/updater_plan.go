@@ -32,6 +32,7 @@ func (u planUpdater) UpdatePlan(ctx context.Context, plan *workflow.Plan) error 
 		return fmt.Errorf("PlanUpdater.UpdatePlan: %w", err)
 	}
 
+	stmt.SetText("$id", plan.ID.String())
 	stmt.SetInt64("$reason", int64(plan.Reason))
 	stmt.SetInt64("$state_status", int64(plan.State.Status))
 	stmt.SetInt64("$state_start", plan.State.Start.UnixNano())
