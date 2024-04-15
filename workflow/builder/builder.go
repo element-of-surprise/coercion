@@ -125,6 +125,11 @@ func (b *BuildPlan) Plan() (*workflow.Plan, error) {
 	return b.chain[0].(*workflow.Plan), nil
 }
 
+// Err returns the first error encountered while building the Plan.
+func (b *BuildPlan) Err() error {
+	return b.err
+}
+
 // Reset resets the internal Plan object to a new object with the given name and description.
 // This will allow you to call methods on the object after Plan() is called.
 func (b *BuildPlan) Reset(name, descr string, options ...Option) error {
@@ -156,19 +161,21 @@ func (b *BuildPlan) setErr(err error) error {
 }
 
 // Up moves your current position up one level in the plan hierarchy.
-func (b *BuildPlan) Up() error {
+func (b *BuildPlan) Up() *BuildPlan {
 	if b.emitted {
-		return errors.New("cannot call Up() after Plan() has been called")
+		b.setErr(errors.New("cannot call Up() after Plan() has been called"))
+		return b
 	}
 	if b.err != nil {
-		return b.err
+		return b
 	}
 
 	if len(b.chain) < 2 {
-		return b.setErr(errors.New("cannot go up from root"))
+		b.setErr(errors.New("cannot go up from root"))
+		return b
 	}
 	b.chain = b.chain[:len(b.chain)-1]
-	return nil
+	return b
 }
 
 // ChecksType is the check type you are adding to a Plan or Block.
@@ -178,85 +185,97 @@ const (
 	// CTUnknown is an unknown check type. This should never be used
 	// and indicates a bug in the code.
 	CTUnknown ChecksType = 0
-	// PreCheck is a set of pre-checks.
-	PreCheck ChecksType = 1
-	// ContCheck is a continuous check.
-	ContCheck ChecksType = 2
-	// PostCheck is a set of post-checks.
-	PostCheck ChecksType = 3
+	// PreChecks is a set of pre-checks.
+	PreChecks ChecksType = 1
+	// ContChecks is a continuous check.
+	ContChecks ChecksType = 2
+	// PostChecks is a set of post-checks.
+	PostChecks ChecksType = 3
 )
 
 // AddChecks adds a check to the current Plan or Block. This moves you into the check.
 // If at any other level of the plan hierarchy, AddChecks will return an error.
-func (b *BuildPlan) AddCheck(cType ChecksType, check *workflow.Checks) error {
+func (b *BuildPlan) AddChecks(cType ChecksType, check *workflow.Checks) *BuildPlan {
 	if b.emitted {
-		return errors.New("cannot call AddCheck after Plan() has been called")
+		b.setErr(errors.New("cannot call AddChecks after Plan() has been called"))
+		return b
 	}
 	if b.err != nil {
-		return b.err
+		return b
 	}
 
 	if check == nil {
-		return b.setErr(errors.New("check must not be nil"))
+		b.setErr(errors.New("check must not be nil"))
+		return b
 	}
 
 	for _, action := range check.Actions {
 		if action == nil {
-			return b.setErr(errors.New("action n a workflow.Checks must not be nil"))
+			b.setErr(errors.New("action in a workflow.Checks must not be nil"))
+			return b
 		}
 	}
 
 	switch t := b.current().(type) {
 	case *workflow.Plan:
 		switch cType {
-		case PreCheck:
+		case PreChecks:
 			if t.PreChecks != nil {
-				return b.setErr(errors.New("cannot add PreCheck to Plan with existing PreChecks"))
+				b.setErr(errors.New("cannot add PreCheck to Plan with existing PreChecks"))
+				return b
 			}
 			t.PreChecks = check
 			b.chain = append(b.chain, check)
-		case ContCheck:
+		case ContChecks:
 			if t.ContChecks != nil {
-				return b.setErr(errors.New("cannot add ContCheck to Plan with existing ContChecks"))
+				b.setErr(errors.New("cannot add ContCheck to Plan with existing ContChecks"))
+				return b
 			}
 			t.ContChecks = check
 			b.chain = append(b.chain, check)
-		case PostCheck:
+		case PostChecks:
 			if t.PostChecks != nil {
-				return b.setErr(errors.New("cannot add PostCheck to Plan with existing PostChecks"))
+				b.setErr(errors.New("cannot add PostCheck to Plan with existing PostChecks"))
+				return b
 			}
 			t.PostChecks = check
 			b.chain = append(b.chain, check)
 		default:
-			return errors.New("unknown check type")
+			b.setErr(errors.New("unknown check type"))
+			return b
 		}
 	case *workflow.Block:
 		switch cType {
-		case PreCheck:
+		case PreChecks:
 			if t.PreChecks != nil {
-				return b.setErr(errors.New("cannot add PreCheck to Block with existing PreChecks"))
+				b.setErr(errors.New("cannot add PreCheck to Block with existing PreChecks"))
+				return b
 			}
 			t.PreChecks = check
 			b.chain = append(b.chain, check)
-		case ContCheck:
+		case ContChecks:
 			if t.ContChecks != nil {
-				return b.setErr(errors.New("cannot add ContCheck to Block with existing ContChecks"))
+				b.setErr(errors.New("cannot add ContCheck to Block with existing ContChecks"))
+				return b
 			}
 			t.ContChecks = check
 			b.chain = append(b.chain, check)
-		case PostCheck:
+		case PostChecks:
 			if t.PostChecks != nil {
-				return b.setErr(errors.New("cannot add PostCheck to Block with existing PostChecks"))
+				b.setErr(errors.New("cannot add PostCheck to Block with existing PostChecks"))
+				return b
 			}
 			t.PostChecks = check
 			b.chain = append(b.chain, check)
 		default:
-			return b.setErr(errors.New("unknown check type"))
+			b.setErr(errors.New("unknown check type"))
+			return b
 		}
 	default:
-		return b.setErr(errors.New("cannot add checks to a non-Plan or non-Block object"))
+		b.setErr(fmt.Errorf("cannot add checks to a non-Plan or non-Block object(%T)", t))
+		return b
 	}
-	return nil
+	return b
 }
 
 // BlockArgs are arguements for AddBlock that define a Block in the Plan.
@@ -270,19 +289,22 @@ type BlockArgs struct {
 
 // AddBlock adds a Block to the current workflow Plan. If at any other level of the plan hierarchy,
 // AddBlock will return an error. This moves the current position in the plan hierarchy to the new Block.
-func (b *BuildPlan) AddBlock(args BlockArgs) error {
+func (b *BuildPlan) AddBlock(args BlockArgs) *BuildPlan {
 	if b.emitted {
-		return b.setErr(errors.New("cannot call AddBlock() after Plan() has been called"))
+		b.setErr(errors.New("cannot call AddBlock() after Plan() has been called"))
+		return b
 	}
 	if b.err != nil {
-		return b.err
+		return b
 	}
 
 	if args.Name == "" {
-		return b.setErr(errors.New("block name must be provided"))
+		b.setErr(errors.New("block name must be provided"))
+		return b
 	}
 	if args.Descr == "" {
-		return b.setErr(errors.New("block description must be provided"))
+		b.setErr(errors.New("block description must be provided"))
+		return b
 	}
 
 	switch t := b.current().(type) {
@@ -299,29 +321,34 @@ func (b *BuildPlan) AddBlock(args BlockArgs) error {
 		b.chain = append(b.chain, block)
 		return nil
 	}
-	return b.setErr(fmt.Errorf("invalid type for AddBlock(): %T", b.current))
+	b.setErr(fmt.Errorf("invalid type for AddBlock(): %T", b.current))
+	return b
 }
 
 // AddSequence adds a Sequence to the current workflow Block with the name and descr provided.
 // This moves into the Sequence so that you can add Actions to it (or additional actions).
 // If at any other level of the plan hierarchy, AddSequence will return an error.
-func (b *BuildPlan) AddSequence(seq *workflow.Sequence) error {
+func (b *BuildPlan) AddSequence(seq *workflow.Sequence) *BuildPlan {
 	if b.emitted {
-		return b.setErr(errors.New("cannot call AddSequence() after Plan() has been called"))
+		b.setErr(errors.New("cannot call AddSequence() after Plan() has been called"))
+		return b
 	}
 	if b.err != nil {
-		return b.err
+		return b
 	}
 
 	if seq == nil {
-		return b.setErr(errors.New("sequence must not be nil"))
+		b.setErr(errors.New("sequence must not be nil"))
+		return b
 	}
 
 	if seq.Name == "" {
-		return b.setErr(errors.New("sequence name must be provided"))
+		b.setErr(errors.New("sequence name must be provided"))
+		return b
 	}
 	if seq.Descr == "" {
-		return b.setErr(errors.New("sequence description must be provided"))
+		b.setErr(errors.New("sequence description must be provided"))
+		return b
 	}
 
 	switch t := b.current().(type) {
@@ -330,36 +357,42 @@ func (b *BuildPlan) AddSequence(seq *workflow.Sequence) error {
 		b.chain = append(b.chain, seq)
 		return nil
 	}
-	return b.setErr(fmt.Errorf("invalid type for AddSequence(): %T", b.current))
+	b.setErr(fmt.Errorf("invalid type for AddSequence(): %T", b.current))
+	return b
 }
 
 // AddAction adds an Action to the current workflow Sequence or Checks object. If at any other level of the plan hierarchy,
 // AddAction will return an error.
-func (b *BuildPlan) AddAction(action *workflow.Action) error {
+func (b *BuildPlan) AddAction(action *workflow.Action) *BuildPlan {
 	if b.emitted {
-		return b.setErr(errors.New("cannot call AddAction() after Plan() has been called"))
+		b.setErr(errors.New("cannot call AddAction() after Plan() has been called"))
+		return b
 	}
 	if b.err != nil {
-		return b.err
+		return b
 	}
 
 	if action.Name == "" {
-		return b.setErr(errors.New("action name must be provided"))
+		b.setErr(errors.New("action name must be provided"))
+		return b
 	}
 	if action.Descr == "" {
-		return b.setErr(errors.New("action description must be provided"))
+		b.setErr(errors.New("action description must be provided"))
+		return b
 	}
 	if action.Plugin == "" {
-		return b.setErr(errors.New("action plugin must be provided"))
+		b.setErr(errors.New("action plugin must be provided"))
+		return b
 	}
 
 	switch t := b.current().(type) {
 	case *workflow.Sequence:
 		t.Actions = append(t.Actions, action)
-		return nil
+		return b
 	case *workflow.Checks:
 		t.Actions = append(t.Actions, action)
-		return nil
+		return b
 	}
-	return b.setErr(fmt.Errorf("invalid type for AddAction(): %T", b.current))
+	b.setErr(fmt.Errorf("invalid type for AddAction(): %T", b.current))
+	return b
 }

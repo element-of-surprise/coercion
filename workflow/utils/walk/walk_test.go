@@ -37,17 +37,17 @@ func TestPlan(t *testing.T) {
 	plan := &workflow.Plan{
 		Name:  "plan",
 		Descr: "plan",
-		PreChecks: &workflow.PreChecks{
+		PreChecks: &workflow.Checks{
 			Actions: []*workflow.Action{
 				{Name: "plan_precheck_action"},
 			},
 		},
-		ContChecks: &workflow.ContChecks{
+		ContChecks: &workflow.Checks{
 			Actions: []*workflow.Action{
 				{Name: "plan_contcheck_action"},
 			},
 		},
-		PostChecks: &workflow.PostChecks{
+		PostChecks: &workflow.Checks{
 			Actions: []*workflow.Action{
 				{Name: "plan_postcheck_action"},
 			},
@@ -56,17 +56,17 @@ func TestPlan(t *testing.T) {
 			{
 				Name:  "plan_block",
 				Descr: "plan_block",
-				PreChecks: &workflow.PreChecks{
+				PreChecks: &workflow.Checks{
 					Actions: []*workflow.Action{
 						{Name: "plan_block_precheck_action"},
 					},
 				},
-				ContChecks: &workflow.ContChecks{
+				ContChecks: &workflow.Checks{
 					Actions: []*workflow.Action{
 						{Name: "plan_block_contcheck_action"},
 					},
 				},
-				PostChecks: &workflow.PostChecks{
+				PostChecks: &workflow.Checks{
 					Actions: []*workflow.Action{
 						{Name: "plan_block_postcheck_action"},
 					},
@@ -75,13 +75,10 @@ func TestPlan(t *testing.T) {
 					{
 						Name:  "plan_block_sequence",
 						Descr: "plan_block_sequence",
-						Jobs: []*workflow.Job{
+						Actions: []*workflow.Action{
 							{
-								Name:  "plan_block_job",
-								Descr: "plan_block_job",
-								Action: &workflow.Action{
-									Name: "plan_block_job_action",
-								},
+								Name:  "plan_block_action",
+								Descr: "plan_block_action",
 							},
 						},
 					},
@@ -108,23 +105,19 @@ func TestPlan(t *testing.T) {
 		{Chain: []workflow.Object{plan, plan.Blocks[0]}, Value: plan.Blocks[0].ContChecks},
 		{Chain: []workflow.Object{plan, plan.Blocks[0], plan.Blocks[0].ContChecks}, Value: plan.Blocks[0].ContChecks.Actions[0]},
 		{Chain: []workflow.Object{plan, plan.Blocks[0]}, Value: plan.Blocks[0].Sequences[0]},
-		{Chain: []workflow.Object{plan, plan.Blocks[0], plan.Blocks[0].Sequences[0]}, Value: plan.Blocks[0].Sequences[0].Jobs[0]},
-		{
-			Chain: []workflow.Object{
-				plan,
-				plan.Blocks[0],
-				plan.Blocks[0].Sequences[0],
-				plan.Blocks[0].Sequences[0].Jobs[0],
-			},
-			Value: plan.Blocks[0].Sequences[0].Jobs[0].Action,
-		},
+		{Chain: []workflow.Object{plan, plan.Blocks[0], plan.Blocks[0].Sequences[0]}, Value: plan.Blocks[0].Sequences[0].Actions[0]},
 		{Chain: []workflow.Object{plan, plan.Blocks[0]}, Value: plan.Blocks[0].PostChecks},
 		{Chain: []workflow.Object{plan, plan.Blocks[0], plan.Blocks[0].PostChecks}, Value: plan.Blocks[0].PostChecks.Actions[0]},
 		{Chain: []workflow.Object{plan}, Value: plan.PostChecks},
 		{Chain: []workflow.Object{plan, plan.PostChecks}, Value: plan.PostChecks.Actions[0]},
 	}
 
-	if diff := pretty.Compare(want, got); diff != "" {
+	pConfig := pretty.Config{
+		IncludeUnexported: false,
+		PrintStringers:    true,
+	}
+
+	if diff := pConfig.Compare(want, got); diff != "" {
 		t.Errorf("TestPlan: -want, +got:\n%s", diff)
 	}
 }

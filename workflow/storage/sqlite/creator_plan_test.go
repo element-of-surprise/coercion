@@ -54,15 +54,15 @@ func init() {
 		},
 	}
 
-	build.AddCheck(builder.PreCheck, &workflow.Checks{})
+	build.AddChecks(builder.PreChecks, &workflow.Checks{})
 	build.AddAction(checkAction1.Clone())
 	build.Up()
 
-	build.AddCheck(builder.ContCheck, &workflow.Checks{Delay: 32 * time.Second})
+	build.AddChecks(builder.ContChecks, &workflow.Checks{Delay: 32 * time.Second})
 	build.AddAction(checkAction2.Clone())
 	build.Up()
 
-	build.AddCheck(builder.PostCheck, &workflow.Checks{})
+	build.AddChecks(builder.PostChecks, &workflow.Checks{})
 	build.AddAction(checkAction3.Clone())
 	build.Up()
 
@@ -75,15 +75,15 @@ func init() {
 		Concurrency:       1,
 	})
 
-	build.AddCheck(builder.PreCheck, &workflow.Checks{})
+	build.AddChecks(builder.PreChecks, &workflow.Checks{})
 	build.AddAction(checkAction1)
 	build.Up()
 
-	build.AddCheck(builder.ContCheck, &workflow.Checks{Delay: 1 * time.Minute})
+	build.AddChecks(builder.ContChecks, &workflow.Checks{Delay: 1 * time.Minute})
 	build.AddAction(checkAction2)
 	build.Up()
 
-	build.AddCheck(builder.PostCheck, &workflow.Checks{})
+	build.AddChecks(builder.PostChecks, &workflow.Checks{})
 	build.AddAction(checkAction3)
 	build.Up()
 

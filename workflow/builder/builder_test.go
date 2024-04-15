@@ -8,6 +8,11 @@ import (
 	"github.com/kylelemons/godebug/pretty"
 )
 
+var pConfig = pretty.Config{
+	IncludeUnexported: false,
+	PrintStringers:    true,
+}
+
 func TestUp(t *testing.T) {
 	t.Parallel()
 
@@ -41,7 +46,8 @@ func TestUp(t *testing.T) {
 	}
 
 	for _, test := range tests {
-		err := test.bp.Up()
+		test.bp.Up()
+		err := test.bp.Err()
 		switch {
 		case test.err && err == nil:
 			t.Errorf("TestUp(%s): got err == nil, want err != nil", test.name)
@@ -53,7 +59,7 @@ func TestUp(t *testing.T) {
 			continue
 		}
 
-		if diff := pretty.Compare(test.expect, test.bp.chain); diff != "" {
+		if diff := pConfig.Compare(test.expect, test.bp.chain); diff != "" {
 			t.Errorf("TestUp(%s): -want/+got:\n%s", test.name, diff)
 		}
 	}
@@ -67,7 +73,10 @@ func TestPlan(t *testing.T) {
 		panic(err)
 	}
 
-	plan := bp.Plan()
+	plan, err := bp.Plan()
+	if err != nil {
+		t.Fatalf("TestPlan: got err != nil, want err == nil: %s", err)
+	}
 	if plan == nil {
 		t.Fatalf("TestPlan: got nil, want non-nil")
 	}
@@ -131,238 +140,26 @@ func TestReset(t *testing.T) {
 			continue
 		}
 
-		if diff := pretty.Compare(test.want, test.bp); diff != "" {
+		if diff := pConfig.Compare(test.want, test.bp); diff != "" {
 			t.Errorf("TestReset(%s): -want/+got:\n%s", test.name, diff)
 		}
 	}
 }
 
-func TestAddPreChecks(t *testing.T) {
+func TestAddChecks(t *testing.T) {
 	t.Parallel()
 
-	wantPreCheck := &workflow.PreChecks{Actions: []*workflow.Action{{}}}
-	wantBlock := &workflow.Block{
-		PreChecks: wantPreCheck,
-	}
-
-	tests := []struct {
-		name    string
-		bp      func() *BuildPlan
-		actions []*workflow.Action
-		want    *BuildPlan
-		err     bool
-	}{
-		{
-			name: "Error: already emitted",
-			bp: func() *BuildPlan {
-				return &BuildPlan{emitted: true, chain: []any{&workflow.Plan{}}}
-			},
-			err: true,
-		},
-		{
-			name: "Error: no actions",
-			err:  true,
-		},
-		{
-			name:    "Error: an Action was nil",
-			actions: []*workflow.Action{{}, nil},
-			err:     true,
-		},
-		{
-			name: "Error: current() is not a Plan or Block",
-			bp: func() *BuildPlan {
-				return &BuildPlan{chain: []any{&workflow.Action{}}}
-			},
-			actions: []*workflow.Action{{}},
-			err:     true,
-		},
-		{
-			name: "Success: Plan",
-			bp: func() *BuildPlan {
-				return &BuildPlan{chain: []any{&workflow.Plan{}}}
-			},
-			actions: []*workflow.Action{{}},
-			want: &BuildPlan{
-				chain: []any{
-					&workflow.Plan{
-						PreChecks: wantPreCheck,
-					},
-				},
-			},
-		},
-		{
-			name: "Success: Block",
-			bp: func() *BuildPlan {
-				block := &workflow.Block{}
-				return &BuildPlan{
-					chain: []any{
-						&workflow.Plan{
-							Blocks: []*workflow.Block{block},
-						},
-						block,
-					},
-				}
-			},
-			actions: []*workflow.Action{{}},
-			want: &BuildPlan{
-				chain: []any{
-					&workflow.Plan{
-						Blocks: []*workflow.Block{wantBlock},
-					},
-					wantBlock,
-				},
-			},
-		},
-	}
-
-	for _, test := range tests {
-		if test.bp == nil {
-			test.bp = func() *BuildPlan {
-				return &BuildPlan{
-					chain: []any{&workflow.Plan{}},
-				}
-			}
-		}
-		bp := test.bp()
-		err := bp.AddPreChecks(test.actions...)
-
-		switch {
-		case test.err && err == nil:
-			t.Errorf("TestAddPreChecks(%s): got err == nil, want err != nil", test.name)
-			continue
-		case !test.err && err != nil:
-			t.Errorf("TestAddPreChecks(%s): got err != %s, want err == nil", test.name, err)
-			continue
-		case err != nil:
-			continue
-		}
-
-		if diff := pretty.Compare(test.want, bp); diff != "" {
-			t.Errorf("TestAddPreChecks(%s): -want/+got:\n%s", test.name, diff)
-		}
-	}
-}
-
-func TestAddPostChecks(t *testing.T) {
-	t.Parallel()
-
-	wantPostChecks := &workflow.PostChecks{Actions: []*workflow.Action{{}}}
-	wantBlock := &workflow.Block{
-		PostChecks: wantPostChecks,
-	}
-
-	tests := []struct {
-		name    string
-		bp      func() *BuildPlan
-		actions []*workflow.Action
-		want    *BuildPlan
-		err     bool
-	}{
-		{
-			name: "Error: already emitted",
-			bp: func() *BuildPlan {
-				return &BuildPlan{emitted: true, chain: []any{&workflow.Plan{}}}
-			},
-			err: true,
-		},
-		{
-			name: "Error: no actions",
-			err:  true,
-		},
-		{
-			name:    "Error: an Action was nil",
-			actions: []*workflow.Action{{}, nil},
-			err:     true,
-		},
-		{
-			name: "Error: current() is not a Plan or Block",
-			bp: func() *BuildPlan {
-				return &BuildPlan{chain: []any{&workflow.Action{}}}
-			},
-			actions: []*workflow.Action{{}},
-			err:     true,
-		},
-		{
-			name: "Success: Plan",
-			bp: func() *BuildPlan {
-				return &BuildPlan{chain: []any{&workflow.Plan{}}}
-			},
-			actions: []*workflow.Action{{}},
-			want: &BuildPlan{
-				chain: []any{
-					&workflow.Plan{
-						PostChecks: wantPostChecks,
-					},
-				},
-			},
-		},
-		{
-			name: "Success: Block",
-			bp: func() *BuildPlan {
-				block := &workflow.Block{}
-				return &BuildPlan{
-					chain: []any{
-						&workflow.Plan{
-							Blocks: []*workflow.Block{block},
-						},
-						block,
-					},
-				}
-			},
-			actions: []*workflow.Action{{}},
-			want: &BuildPlan{
-				chain: []any{
-					&workflow.Plan{
-						Blocks: []*workflow.Block{wantBlock},
-					},
-					wantBlock,
-				},
-			},
-		},
-	}
-
-	for _, test := range tests {
-		if test.bp == nil {
-			test.bp = func() *BuildPlan {
-				return &BuildPlan{
-					chain: []any{&workflow.Plan{}},
-				}
-			}
-		}
-		bp := test.bp()
-		err := bp.AddPostChecks(test.actions...)
-
-		switch {
-		case test.err && err == nil:
-			t.Errorf("TestAddPostChecks(%s): got err == nil, want err != nil", test.name)
-			continue
-		case !test.err && err != nil:
-			t.Errorf("TestAddPostChecks(%s): got err != %s, want err == nil", test.name, err)
-			continue
-		case err != nil:
-			continue
-		}
-
-		if diff := pretty.Compare(test.want, bp); diff != "" {
-			t.Errorf("TestAddPostChecks(%s): -want/+got:\n%s", test.name, diff)
-		}
-	}
-}
-
-func TestAddContChecks(t *testing.T) {
-	t.Parallel()
-
-	wantContChecks := &workflow.ContChecks{Actions: []*workflow.Action{{}}}
+	wantContChecks := &workflow.Checks{Actions: []*workflow.Action{{}}}
 	wantBlock := &workflow.Block{
 		ContChecks: wantContChecks,
 	}
 
 	tests := []struct {
-		name    string
-		bp      func() *BuildPlan
-		actions []*workflow.Action
-		want    *BuildPlan
-		err     bool
+		name   string
+		bp     func() *BuildPlan
+		checks *workflow.Checks
+		want   *BuildPlan
+		err    bool
 	}{
 		{
 			name: "Error: already emitted",
@@ -372,28 +169,23 @@ func TestAddContChecks(t *testing.T) {
 			err: true,
 		},
 		{
-			name: "Error: no actions",
+			name: "Error: checks is nil",
 			err:  true,
-		},
-		{
-			name:    "Error: an Action was nil",
-			actions: []*workflow.Action{{}, nil},
-			err:     true,
 		},
 		{
 			name: "Error: current() is not a Plan or Block",
 			bp: func() *BuildPlan {
 				return &BuildPlan{chain: []any{&workflow.Action{}}}
 			},
-			actions: []*workflow.Action{{}},
-			err:     true,
+			checks: &workflow.Checks{Actions: []*workflow.Action{{}}},
+			err:    true,
 		},
 		{
 			name: "Success: Plan",
 			bp: func() *BuildPlan {
 				return &BuildPlan{chain: []any{&workflow.Plan{}}}
 			},
-			actions: []*workflow.Action{{}},
+			checks: &workflow.Checks{Actions: []*workflow.Action{{}}},
 			want: &BuildPlan{
 				chain: []any{
 					&workflow.Plan{
@@ -415,7 +207,7 @@ func TestAddContChecks(t *testing.T) {
 					},
 				}
 			},
-			actions: []*workflow.Action{{}},
+			checks: &workflow.Checks{Actions: []*workflow.Action{{}}},
 			want: &BuildPlan{
 				chain: []any{
 					&workflow.Plan{
@@ -436,22 +228,59 @@ func TestAddContChecks(t *testing.T) {
 			}
 		}
 		bp := test.bp()
-		err := bp.AddContChecks(0, test.actions...)
+		bp.AddChecks(ContChecks, test.checks)
+		err := bp.Err()
 
 		switch {
 		case test.err && err == nil:
-			t.Errorf("TestAddContChecks(%s): got err == nil, want err != nil", test.name)
+			t.Errorf("TestAddChecks(%s): got err == nil, want err != nil", test.name)
 			continue
 		case !test.err && err != nil:
-			t.Errorf("TestAddContChecks(%s): got err != %s, want err == nil", test.name, err)
+			t.Errorf("TestAddChecks(%s): got err != %s, want err == nil", test.name, err)
 			continue
 		case err != nil:
 			continue
 		}
 
-		if diff := pretty.Compare(test.want, bp); diff != "" {
-			t.Errorf("TestAddContChecks(%s): -want/+got:\n%s", test.name, diff)
+		if diff := pConfig.Compare(test.want, bp); diff != "" {
+			t.Errorf("TestAddChecks(%s): -want/+got:\n%s", test.name, diff)
 		}
+	}
+}
+
+// TestAddPrePostChecks simply tests that AddChecks() adds Pre and Post checks where they should go.
+// TestAddChecks checks Cont checks and all the rest of the logic.
+func TestAddPrePostChecks(t *testing.T) {
+	wantCheck0 := &workflow.Checks{Actions: []*workflow.Action{{Name: "check0"}}}
+	wantCheck1 := &workflow.Checks{Actions: []*workflow.Action{{Name: "check1"}}}
+
+	builder, err := New("test", "test")
+	if err != nil {
+		panic(err)
+	}
+
+	builder.AddChecks(PreChecks, wantCheck0).Up()
+	builder.AddChecks(PostChecks, wantCheck1).Up()
+	builder.AddBlock(BlockArgs{Name: "test", Descr: "test", Concurrency: 1})
+	builder.AddChecks(PreChecks, wantCheck0).Up()
+	builder.AddChecks(PostChecks, wantCheck1).Up()
+
+	got, err := builder.Plan()
+	if err != nil {
+		t.Fatalf("TestAddPrePostChecks(builer.Plan()): unexpected error: %v", err)
+	}
+
+	if got.PreChecks.Actions[0].Name != "check0" {
+		t.Errorf("TestAddPrePostChecks(Plan.PreChecks): got %s, want check0", got.PreChecks.Actions[0].Name)
+	}
+	if got.PostChecks.Actions[0].Name != "check1" {
+		t.Errorf("TestAddPrePostChecks(Plan.PostChecks): got %s, want check1", got.PostChecks.Actions[0].Name)
+	}
+	if got.Blocks[0].PreChecks.Actions[0].Name != "check0" {
+		t.Errorf("TestAddPrePostChecks(Block.PreChecks): got %s, want check0", got.Blocks[0].PreChecks.Actions[0].Name)
+	}
+	if got.Blocks[0].PostChecks.Actions[0].Name != "check1" {
+		t.Errorf("TestAddPrePostChecks(Block.PostChecks): got %s, want check1", got.Blocks[0].PostChecks.Actions[0].Name)
 	}
 }
 
@@ -524,7 +353,8 @@ func TestAddBlock(t *testing.T) {
 			}
 		}
 		bp := test.bp()
-		err := bp.AddBlock(test.args)
+		bp.AddBlock(test.args)
+		err := bp.Err()
 
 		switch {
 		case test.err && err == nil:
@@ -537,7 +367,7 @@ func TestAddBlock(t *testing.T) {
 			continue
 		}
 
-		if diff := pretty.Compare(test.want, bp); diff != "" {
+		if diff := pConfig.Compare(test.want, bp); diff != "" {
 			t.Errorf("TestAddBlock(%s): -want/+got:\n%s", test.name, diff)
 		}
 	}
@@ -617,7 +447,8 @@ func TestAddSequence(t *testing.T) {
 
 	for _, test := range tests {
 		bp := test.bp()
-		err := bp.AddSequence(test.argName, test.descr)
+		bp.AddSequence(&workflow.Sequence{Name: test.argName, Descr: test.descr})
+		err := bp.Err()
 
 		switch {
 		case test.err && err == nil:
@@ -630,102 +461,13 @@ func TestAddSequence(t *testing.T) {
 			continue
 		}
 
-		if diff := pretty.Compare(test.want(), bp); diff != "" {
+		if diff := pConfig.Compare(test.want(), bp); diff != "" {
 			t.Errorf("TestAddSequence(%s): -want/+got:\n%s", test.name, diff)
 		}
 	}
 }
 
-func TestAddSequenceDirect(t *testing.T) {
-	t.Parallel()
-
-	newPlan := func() *workflow.Plan {
-		block := &workflow.Block{}
-		return &workflow.Plan{Blocks: []*workflow.Block{block}}
-	}
-
-	tests := []struct {
-		name string
-		seq  *workflow.Sequence
-		bp   func() *BuildPlan
-		want func() *BuildPlan
-		err  bool
-	}{
-		{
-			name: "Error: already emitted",
-			seq:  &workflow.Sequence{Name: "test", Descr: "test"},
-			bp: func() *BuildPlan {
-				p := newPlan()
-				return &BuildPlan{emitted: true, chain: []any{p, p.Blocks[0]}}
-			},
-			err: true,
-		},
-		{
-			name: "Error: name is empty",
-			seq:  &workflow.Sequence{Descr: "test"},
-			bp: func() *BuildPlan {
-				p := newPlan()
-				return &BuildPlan{chain: []any{p, p.Blocks[0]}}
-			},
-			err: true,
-		},
-		{
-			name: "Error: description is empty",
-			seq:  &workflow.Sequence{Name: "test"},
-			bp: func() *BuildPlan {
-				p := newPlan()
-				return &BuildPlan{chain: []any{p, p.Blocks[0]}}
-			},
-			err: true,
-		},
-		{
-			name: "Error: current() is not a Block",
-			seq:  &workflow.Sequence{Name: "test", Descr: "test"},
-			bp: func() *BuildPlan {
-				return &BuildPlan{chain: []any{&workflow.Action{}}}
-			},
-			err: true,
-		},
-		{
-			name: "Success",
-			seq:  &workflow.Sequence{Name: "test", Descr: "test", Jobs: []*workflow.Job{{}}},
-			bp: func() *BuildPlan {
-				p := newPlan()
-				return &BuildPlan{chain: []any{p, p.Blocks[0]}}
-			},
-			want: func() *BuildPlan {
-				p := &workflow.Plan{}
-				seq := &workflow.Sequence{Name: "test", Descr: "test", Jobs: []*workflow.Job{{}}}
-				block := &workflow.Block{}
-				block.Sequences = append(block.Sequences, seq)
-				p.Blocks = append(p.Blocks, block)
-				return &BuildPlan{chain: []any{p, block}}
-			},
-		},
-	}
-
-	for _, test := range tests {
-		bp := test.bp()
-		err := bp.AddSequenceDirect(test.seq)
-
-		switch {
-		case test.err && err == nil:
-			t.Errorf("TestAddSequenceDirect(%s): got err == nil, want err != nil", test.name)
-			continue
-		case !test.err && err != nil:
-			t.Errorf("TestAddSequenceDirect(%s): got err != %s, want err == nil", test.name, err)
-			continue
-		case err != nil:
-			continue
-		}
-
-		if diff := pretty.Compare(test.want(), bp); diff != "" {
-			t.Errorf("TestAddSequenceDirect(%s): -want/+got:\n%s", test.name, diff)
-		}
-	}
-}
-
-func TestAddJob(t *testing.T) {
+func TestAddAction(t *testing.T) {
 	t.Parallel()
 
 	newPlan := func() *workflow.Plan {
@@ -735,15 +477,15 @@ func TestAddJob(t *testing.T) {
 	}
 
 	tests := []struct {
-		name string
-		job  *workflow.Job
-		bp   func() *BuildPlan
-		want func() *BuildPlan
-		err  bool
+		name   string
+		action *workflow.Action
+		bp     func() *BuildPlan
+		want   func() *BuildPlan
+		err    bool
 	}{
 		{
-			name: "Error: already emitted",
-			job:  &workflow.Job{Name: "test", Descr: "test", Action: &workflow.Action{}},
+			name:   "Error: already emitted",
+			action: &workflow.Action{Name: "test", Descr: "test", Plugin: "plugin"},
 			bp: func() *BuildPlan {
 				p := newPlan()
 				return &BuildPlan{emitted: true, chain: []any{p, p.Blocks[0], p.Blocks[0].Sequences[0]}}
@@ -751,8 +493,8 @@ func TestAddJob(t *testing.T) {
 			err: true,
 		},
 		{
-			name: "Error: name is empty",
-			job:  &workflow.Job{Descr: "test", Action: &workflow.Action{}},
+			name:   "Error: name is empty",
+			action: &workflow.Action{Descr: "test", Plugin: "plugin"},
 			bp: func() *BuildPlan {
 				p := newPlan()
 				return &BuildPlan{chain: []any{p, p.Blocks[0], p.Blocks[0].Sequences[0]}}
@@ -760,8 +502,8 @@ func TestAddJob(t *testing.T) {
 			err: true,
 		},
 		{
-			name: "Error: description is empty",
-			job:  &workflow.Job{Name: "test", Action: &workflow.Action{}},
+			name:   "Error: description is empty",
+			action: &workflow.Action{Name: "test", Plugin: "plugin"},
 			bp: func() *BuildPlan {
 				p := newPlan()
 				return &BuildPlan{chain: []any{p, p.Blocks[0], p.Blocks[0].Sequences[0]}}
@@ -769,24 +511,33 @@ func TestAddJob(t *testing.T) {
 			err: true,
 		},
 		{
-			name: "Error: current() is not a Sequence",
-			job:  &workflow.Job{Name: "test", Descr: "test", Action: &workflow.Action{}},
+			name:   "Error: plugin is empty",
+			action: &workflow.Action{Name: "test", Descr: "test"},
+			bp: func() *BuildPlan {
+				p := newPlan()
+				return &BuildPlan{chain: []any{p, p.Blocks[0], p.Blocks[0].Sequences[0]}}
+			},
+			err: true,
+		},
+		{
+			name:   "Error: current() is not a Sequence",
+			action: &workflow.Action{Name: "test", Descr: "test", Plugin: "plugin"},
 			bp: func() *BuildPlan {
 				return &BuildPlan{chain: []any{&workflow.Action{}}}
 			},
 			err: true,
 		},
 		{
-			name: "Success",
-			job:  &workflow.Job{Name: "test", Descr: "test", Action: &workflow.Action{}},
+			name:   "Success",
+			action: &workflow.Action{Name: "test", Descr: "test", Plugin: "plugin"},
 			bp: func() *BuildPlan {
 				p := newPlan()
 				return &BuildPlan{chain: []any{p, p.Blocks[0], p.Blocks[0].Sequences[0]}}
 			},
 			want: func() *BuildPlan {
 				p := newPlan()
-				job := &workflow.Job{Name: "test", Descr: "test", Action: &workflow.Action{}}
-				p.Blocks[0].Sequences[0].Jobs = append(p.Blocks[0].Sequences[0].Jobs, job)
+				action := &workflow.Action{Name: "test", Descr: "test"}
+				p.Blocks[0].Sequences[0].Actions = append(p.Blocks[0].Sequences[0].Actions, action)
 				return &BuildPlan{chain: []any{p, p.Blocks[0], p.Blocks[0].Sequences[0]}}
 			},
 		},
@@ -794,20 +545,21 @@ func TestAddJob(t *testing.T) {
 
 	for _, test := range tests {
 		bp := test.bp()
-		err := bp.AddJob(test.job)
+		bp.AddAction(test.action)
+		err := bp.Err()
 
 		switch {
 		case test.err && err == nil:
-			t.Errorf("TestAddJob(%s): got err == nil, want err != nil", test.name)
+			t.Errorf("TestAddAction(%s): got err == nil, want err != nil", test.name)
 			continue
 		case !test.err && err != nil:
-			t.Errorf("TestAddJob(%s): got err != %s, want err == nil", test.name, err)
+			t.Errorf("TestAddAction(%s): got err != %s, want err == nil", test.name, err)
 			continue
 		case err != nil:
 			continue
 		}
 
-		if diff := pretty.Compare(test.want(), bp); diff != "" {
+		if diff := pConfig.Compare(test.want(), bp); diff != "" {
 			t.Errorf("TestAddJob(%s): -want/+got:\n%s", test.name, diff)
 		}
 	}
