@@ -3,9 +3,10 @@ package workflow
 import (
 	"errors"
 	"testing"
-	"time"
 
 	"github.com/element-of-surprise/workstream/plugins"
+	"github.com/element-of-surprise/workstream/plugins/registry"
+	"github.com/gostdlib/ops/retry/exponential"
 
 	"github.com/kylelemons/godebug/pretty"
 )
@@ -14,14 +15,15 @@ func TestPlanValidate(t *testing.T) {
 	t.Parallel()
 
 	goodPlan := func() *Plan {
-		return &Plan{
+		p := &Plan{
 			Name:       "test",
 			Descr:      "test",
-			PreChecks:  &PreChecks{},
-			PostChecks: &PostChecks{},
-			ContChecks: &ContChecks{},
+			PreChecks:  &Checks{},
+			PostChecks: &Checks{},
+			ContChecks: &Checks{},
 			Blocks:     []*Block{{}},
 		}
+		return p.Clone()
 	}
 	expectVals := []validator{
 		goodPlan().PreChecks,
@@ -80,10 +82,10 @@ func TestPlanValidate(t *testing.T) {
 			err: true,
 		},
 		{
-			name: "Error: Internal != nil",
+			name: "Error: State != nil",
 			plan: func() *Plan {
 				p := goodPlan()
-				p.Internal = &State{}
+				p.State = &State{}
 				return p
 			},
 			err: true,
@@ -118,25 +120,25 @@ func TestPlanValidate(t *testing.T) {
 func TestPreCheckValidate(t *testing.T) {
 	t.Parallel()
 
-	goodPreChecks := func() *PreChecks {
-		return &PreChecks{
+	goodPreChecks := func() *Checks {
+		return &Checks{
 			Actions: []*Action{{}},
 		}
 	}
 
 	tests := []struct {
 		name     string
-		preCheck func() *PreChecks
+		preCheck func() *Checks
 		err      bool
 		vals     []validator
 	}{
 		{
 			name:     "Success: PreCheck is nil",
-			preCheck: func() *PreChecks { return nil },
+			preCheck: func() *Checks { return nil },
 		},
 		{
 			name: "Error: Actions is nil",
-			preCheck: func() *PreChecks {
+			preCheck: func() *Checks {
 				p := goodPreChecks()
 				p.Actions = nil
 				return p
@@ -145,7 +147,7 @@ func TestPreCheckValidate(t *testing.T) {
 		},
 		{
 			name: "Error: Actions is empty",
-			preCheck: func() *PreChecks {
+			preCheck: func() *Checks {
 				p := goodPreChecks()
 				p.Actions = []*Action{}
 				return p
@@ -153,10 +155,10 @@ func TestPreCheckValidate(t *testing.T) {
 			err: true,
 		},
 		{
-			name: "Error: Internal != nil",
-			preCheck: func() *PreChecks {
+			name: "Error: State != nil",
+			preCheck: func() *Checks {
 				p := goodPreChecks()
-				p.Internal = &State{}
+				p.State = &State{}
 				return p
 			},
 			err: true,
@@ -191,25 +193,25 @@ func TestPreCheckValidate(t *testing.T) {
 func TestPostCheckValidate(t *testing.T) {
 	t.Parallel()
 
-	goodPostChecks := func() *PostChecks {
-		return &PostChecks{
+	goodPostChecks := func() *Checks {
+		return &Checks{
 			Actions: []*Action{{}},
 		}
 	}
 
 	tests := []struct {
 		name      string
-		postCheck func() *PostChecks
+		postCheck func() *Checks
 		err       bool
 		vals      []validator
 	}{
 		{
 			name:      "Success: PostChecks is nil",
-			postCheck: func() *PostChecks { return nil },
+			postCheck: func() *Checks { return nil },
 		},
 		{
 			name: "Error: Actions is nil",
-			postCheck: func() *PostChecks {
+			postCheck: func() *Checks {
 				p := goodPostChecks()
 				p.Actions = nil
 				return p
@@ -218,7 +220,7 @@ func TestPostCheckValidate(t *testing.T) {
 		},
 		{
 			name: "Error: Actions is empty",
-			postCheck: func() *PostChecks {
+			postCheck: func() *Checks {
 				p := goodPostChecks()
 				p.Actions = []*Action{}
 				return p
@@ -226,10 +228,10 @@ func TestPostCheckValidate(t *testing.T) {
 			err: true,
 		},
 		{
-			name: "Error: Internal != nil",
-			postCheck: func() *PostChecks {
+			name: "Error: State != nil",
+			postCheck: func() *Checks {
 				p := goodPostChecks()
-				p.Internal = &State{}
+				p.State = &State{}
 				return p
 			},
 			err: true,
@@ -264,25 +266,25 @@ func TestPostCheckValidate(t *testing.T) {
 func TestContCheckValidate(t *testing.T) {
 	t.Parallel()
 
-	goodContChecks := func() *ContChecks {
-		return &ContChecks{
+	goodContChecks := func() *Checks {
+		return &Checks{
 			Actions: []*Action{{}},
 		}
 	}
 
 	tests := []struct {
 		name      string
-		contCheck func() *ContChecks
+		contCheck func() *Checks
 		err       bool
 		vals      []validator
 	}{
 		{
 			name:      "Success: ContChecks is nil",
-			contCheck: func() *ContChecks { return nil },
+			contCheck: func() *Checks { return nil },
 		},
 		{
 			name: "Error: Actions is nil",
-			contCheck: func() *ContChecks {
+			contCheck: func() *Checks {
 				p := goodContChecks()
 				p.Actions = nil
 				return p
@@ -291,7 +293,7 @@ func TestContCheckValidate(t *testing.T) {
 		},
 		{
 			name: "Error: Actions is empty",
-			contCheck: func() *ContChecks {
+			contCheck: func() *Checks {
 				p := goodContChecks()
 				p.Actions = []*Action{}
 				return p
@@ -299,10 +301,10 @@ func TestContCheckValidate(t *testing.T) {
 			err: true,
 		},
 		{
-			name: "Error: Internal != nil",
-			contCheck: func() *ContChecks {
+			name: "Error: State != nil",
+			contCheck: func() *Checks {
 				p := goodContChecks()
-				p.Internal = &State{}
+				p.State = &State{}
 				return p
 			},
 			err: true,
@@ -341,12 +343,12 @@ func TestBlockValidate(t *testing.T) {
 		b := &Block{
 			Name:       "block",
 			Descr:      "block description",
-			PreChecks:  &PreChecks{},
-			PostChecks: &PostChecks{},
-			ContChecks: &ContChecks{},
+			PreChecks:  &Checks{},
+			PostChecks: &Checks{},
+			ContChecks: &Checks{},
 			Sequences:  []*Sequence{{}},
 		}
-		return b.defaults()
+		return b.Clone()
 	}
 
 	tests := []struct {
@@ -397,10 +399,10 @@ func TestBlockValidate(t *testing.T) {
 			err: true,
 		},
 		{
-			name: "Error: Internal is non-nil",
+			name: "Error: State is non-nil",
 			block: func() *Block {
 				b := goodBlock()
-				b.Internal = &State{}
+				b.State = &State{}
 				return b
 			},
 			err: true,
@@ -442,9 +444,9 @@ func TestSequenceValidate(t *testing.T) {
 
 	goodSequence := func() *Sequence {
 		return &Sequence{
-			Name:  "sequence",
-			Descr: "sequence description",
-			Jobs:  []*Job{{}},
+			Name:    "sequence",
+			Descr:   "sequence description",
+			Actions: []*Action{{}},
 		}
 	}
 
@@ -478,10 +480,10 @@ func TestSequenceValidate(t *testing.T) {
 			err: true,
 		},
 		{
-			name: "Error: Jobs is nil",
+			name: "Error: Actions is nil",
 			sequence: func() *Sequence {
 				s := goodSequence()
-				s.Jobs = nil
+				s.Actions = nil
 				return s
 			},
 			err: true,
@@ -490,16 +492,16 @@ func TestSequenceValidate(t *testing.T) {
 			name: "Error: Jobs is empty",
 			sequence: func() *Sequence {
 				s := goodSequence()
-				s.Jobs = []*Job{}
+				s.Actions = []*Action{}
 				return s
 			},
 			err: true,
 		},
 		{
-			name: "Error: Internal is non-nil",
+			name: "Error: State is non-nil",
 			sequence: func() *Sequence {
 				s := goodSequence()
-				s.Internal = &State{}
+				s.State = &State{}
 				return s
 			},
 			err: true,
@@ -507,7 +509,7 @@ func TestSequenceValidate(t *testing.T) {
 		{
 			name:     "Success",
 			sequence: goodSequence,
-			vals:     []validator{goodSequence().Jobs[0]},
+			vals:     []validator{goodSequence().Actions[0]},
 		},
 	}
 
@@ -531,144 +533,16 @@ func TestSequenceValidate(t *testing.T) {
 	}
 }
 
-type checkPlugin struct {
-	plugins.Plugin
-	isCheck bool
-}
-
-func (c checkPlugin) IsCheck() bool {
-	return c.isCheck
-}
-
-func TestJobValidate(t *testing.T) {
-	t.Parallel()
-
-	goodJob := func() *Job {
-		return (&Job{
-			Name:  "job",
-			Descr: "job description",
-			Action: &Action{
-				plugin: checkPlugin{},
-			},
-		}).defaults()
-	}
-
-	tests := []struct {
-		name string
-		job  func() *Job
-		err  bool
-		vals []validator
-	}{
-		{
-			name: "Error: Job is nil",
-			job:  func() *Job { return nil },
-			err:  true,
-		},
-		{
-			name: "Error: Name is empty",
-			job: func() *Job {
-				j := goodJob()
-				j.Name = ""
-				return j
-			},
-			err: true,
-		},
-		{
-			name: "Error: Descr is empty",
-			job: func() *Job {
-				j := goodJob()
-				j.Descr = ""
-				return j
-			},
-			err: true,
-		},
-		{
-			name: "Error: Action is nil",
-			job: func() *Job {
-				j := goodJob()
-				j.Action = nil
-				return j
-			},
-			err: true,
-		},
-		{
-			name: "Error: Timeout is < 5 seconds",
-			job: func() *Job {
-				j := goodJob()
-				j.Timeout = 4 * time.Second
-				return j
-			},
-			err: true,
-		},
-		{
-			name: "Error: Internal is non-nil",
-			job: func() *Job {
-				j := goodJob()
-				j.Internal = &State{}
-				return j
-			},
-			err: true,
-		},
-		{
-			name: "Error: Action is nil",
-			job: func() *Job {
-				j := goodJob()
-				j.Action = nil
-				return j
-			},
-			err: true,
-		},
-		{
-			name: "Error: Action is a Check Action",
-			job: func() *Job {
-				j := goodJob()
-				j.Action = &Action{
-					plugin: checkPlugin{isCheck: true},
-				}
-				return j
-			},
-			err: true,
-		},
-		{
-			name: "Success",
-			job:  goodJob,
-			vals: []validator{goodJob().Action},
-		},
-	}
-
-	for _, test := range tests {
-		j := test.job()
-		gotValidators, err := j.validate()
-		switch {
-		case test.err && err == nil:
-			t.Errorf("TestJobValidate(%s): got err == nil, want err != nil", test.name)
-			continue
-		case !test.err && err != nil:
-			t.Errorf("TestJobValidate(%s): got err != %s, want err == nil", test.name, err)
-			continue
-		case err != nil:
-			continue
-		}
-
-		if diff := pretty.Compare(test.vals, gotValidators); diff != "" {
-			t.Errorf("TestJobValidate(%s): returned validators: -want/+got:\n%s", test.name, diff)
-		}
-	}
-}
-
-type falseRegister struct {
-	m map[string]plugins.Plugin
-}
-
-func (f falseRegister) Get(name string) plugins.Plugin {
-	if f.m == nil {
-		return nil
-	}
-	return f.m[name]
-}
-
 type validatePlugin struct {
 	plugins.Plugin
+}
+
+func (validatePlugin) Name() string {
+	return "validatePlugin"
+}
+
+func (validatePlugin) RetryPolicy() exponential.Policy {
+	return plugins.FastRetryPolicy()
 }
 
 func (v validatePlugin) ValidateReq(req any) error {
@@ -684,17 +558,14 @@ func (v validatePlugin) ValidateReq(req any) error {
 func TestActionValidate(t *testing.T) {
 	t.Parallel()
 
-	reg := falseRegister{
-		m: map[string]plugins.Plugin{
-			"myPlugin": validatePlugin{},
-		},
-	}
+	reg := registry.New()
+	reg.Register(validatePlugin{})
 
 	goodAction := func() *Action {
 		return &Action{
 			Name:     "goodAction",
 			Descr:    "goodAction",
-			Plugin:   "myPlugin",
+			Plugin:   "validatePlugin",
 			Req:      "goodAction",
 			register: reg,
 		}
@@ -740,10 +611,10 @@ func TestActionValidate(t *testing.T) {
 			err: true,
 		},
 		{
-			name: "Error: Internal is not nil",
+			name: "Error: State is not nil",
 			action: func() *Action {
 				a := goodAction()
-				a.Internal = &State{}
+				a.State = &State{}
 				return a
 			},
 			err: true,

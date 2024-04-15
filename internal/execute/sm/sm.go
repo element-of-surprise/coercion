@@ -174,11 +174,20 @@ func (s *States) ExecuteBlock(req statemachine.Request[Data]) statemachine.Reque
 
 	h := req.Data.blocks[0]
 
-	h.block.State.Status = workflow.Running
-	if err := s.store.UpdateBlock(req.Ctx, h.block); err != nil {
-		log.Printf("failed to write Block: %v", err)
+	defer func() {
+		if err := s.store.UpdateBlock(req.Ctx, h.block); err != nil {
+			log.Fatalf("failed to write Block: %v", err)
+		}
+	}()
+
+	if err := after(req.Ctx, h.block.EntranceDelay); err != nil {
+		h.block.State.Status = workflow.Stopped
+		req.Data.err = err
+		req.Next = s.End
 		return req
 	}
+
+	h.block.State.Status = workflow.Running
 	req.Next = s.BlockPreChecks
 	return req
 }
@@ -328,10 +337,11 @@ func (s *States) BlockPostChecks(req statemachine.Request[Data]) statemachine.Re
 func (s *States) BlockEnd(req statemachine.Request[Data]) statemachine.Request[Data] {
 	h := req.Data.blocks[0]
 
-	if err := s.store.UpdateBlock(req.Ctx, h.block); err != nil {
-		log.Fatalf("failed to write Block: %v", err)
-		return req
-	}
+	defer func() {
+		if err := s.store.UpdateBlock(req.Ctx, h.block); err != nil {
+			log.Fatalf("failed to write Block: %v", err)
+		}
+	}()
 
 	// For safety reasons, we always check this so we don't get goroutine leaks.
 	if h.contCancel != nil {
@@ -358,6 +368,13 @@ func (s *States) BlockEnd(req statemachine.Request[Data]) statemachine.Request[D
 		h.block.State.Status = workflow.Completed
 	}else{
 		h.block.State.Status = workflow.Failed
+		req.Next = s.End
+		return req
+	}
+
+	if err := after(req.Ctx, h.block.ExitDelay); err != nil {
+		h.block.State.Status = workflow.Stopped
+		req.Data.err = err
 		req.Next = s.End
 		return req
 	}
@@ -616,4 +633,20 @@ func resetActions(actions []*workflow.Action) {
 
 func isType(a, b interface{}) bool {
     return reflect.TypeOf(a) == reflect.TypeOf(b)
+}
+
+func after(ctx context.Context, d time.Duration) error {
+	if d <= 0 {
+		return nil
+	}
+
+	t := time.NewTimer(d)
+	defer t.Stop()
+
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-t.C:
+	}
+	return nil
 }

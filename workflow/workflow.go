@@ -208,6 +208,9 @@ func (p *Plan) validate() ([]validator, error) {
 	if p.ID != uuid.Nil {
 		return nil, fmt.Errorf("id should not be set by the user")
 	}
+	if p.State != nil {
+		return nil, fmt.Errorf("state should not be set by the user")
+	}
 
 	if strings.TrimSpace(p.Name) == "" {
 		return nil, fmt.Errorf("name is required")
@@ -463,10 +466,6 @@ func (b *Block) validate() ([]validator, error) {
 
 	if strings.TrimSpace(b.Descr) == "" {
 		return nil, fmt.Errorf("description is required")
-	}
-
-	if b.Concurrency < 1 {
-		return nil, fmt.Errorf("concurrency must be at least 1")
 	}
 
 	if b.State != nil {
