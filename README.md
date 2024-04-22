@@ -74,6 +74,7 @@ type Plugin interface {
 - Response - Returns an empty response object. If a plugin returns a response that isn't the same as this, the plugin is considered to have failed.
 - IsCheck - Returns true if the plugin is a check plugin. A check plugin should not have side effects and can only be used in one of the check actions. A check plugin cannot be used in a Job.
 - RetryPlan - Returns the retry plan for the plugin. This is the plan for how the plugin should be retried. The number of retries is set in the `Job` object. This RetryPlan uses exponential backoff that you define for SRE best practices.
+- Init - Validates that the environment that the plugin currently operates in is valid for the plugin. If this fails, the plugin cannot be used. For example, if this leverages an external binary, this can check for the existence of that binary.
 
 ### Workflow Heirarchy
 
@@ -89,24 +90,18 @@ The workflow is defined in a hierarchy of objects:
   - Only 1 `Block` can be executed at a time.
   - If a `Block` fails, the `Plan` fails.
 - Sequence - A sequence of `Job` objects.
-  - Has a set of `Job` objects.
+  - Has a set of `Action` objects.
   - Represents a set of work to be done, usually related.
-  - Each `Job` is executed in order.
-  - If a `Job` fails, the `Sequence` fails.
-  - Only one `Job` can be executed at a time.
-- Job - A single `Action` object.
-  - Represents a single unit of work.
-  - If a `Job` fails, the `Sequence` fails.
-  - Only one `Job` can be executed at a time.
-  - Sets the number of retries for the `Action`.
-  - Sets the timeout for an `Action`.
+  - Each `Action` is executed in order.
+  - If an `Action` fails, the `Sequence` fails.
+  - Only one `Action` can be executed at a time.
 - Action - A single `Plugin` object.
-  - If an `Action` fails, the `Job` fails.
+  - If an `Action` fails, the object it belongs to fails.
   - Holds the name of the `Plugin` to execute.
   - Holds the request object for the `Plugin`.
   - Holds the response object for the `Plugin`.
 
-All objects have a field called `Internal` that holds the internal state of the object. This is used by the system to track the state of the object. It cannot be set by the user.
+All objects have a field called `State` that holds the internal state of the object. This is used by the system to track the state of the object. It cannot be set by the user.
 
 ### Builder Package
 
