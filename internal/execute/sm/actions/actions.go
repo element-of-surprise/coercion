@@ -160,11 +160,11 @@ func (r Runner) exec(ctx context.Context, action *workflow.Action, plugin plugin
 
 	if plugResp.timeout {
 		attempt.Err = &plugins.Error{
-			Message: pluginTimeoutMsg,
+			Message:   pluginTimeoutMsg,
 			Permanent: false,
 		}
 		return attempt.Err
-	}else{
+	} else {
 		attempt.Resp = plugResp.Resp
 		attempt.Err = plugResp.Err
 	}
@@ -178,7 +178,7 @@ func (r Runner) exec(ctx context.Context, action *workflow.Action, plugin plugin
 			return nil
 		}
 		attempt.Err = &plugins.Error{
-			Message: unexpectedTypeMsg(plugin, attempt.Resp, expect),
+			Message:   unexpectedTypeMsg(plugin, attempt.Resp, expect),
 			Permanent: true,
 		}
 		attempt.Resp = nil
@@ -201,8 +201,8 @@ func (r Runner) now() time.Time {
 }
 
 type plugResp struct {
-	Resp any
-	Err *plugins.Error
+	Resp    any
+	Err     *plugins.Error
 	timeout bool
 }
 
@@ -217,7 +217,7 @@ func run(ctx context.Context, plugin plugins.Plugin, req any) plugResp {
 		ch <- plugResp
 	}()
 
-	select{
+	select {
 	case <-ctx.Done():
 		return plugResp{timeout: true}
 	case resp := <-ch:
@@ -226,5 +226,5 @@ func run(ctx context.Context, plugin plugins.Plugin, req any) plugResp {
 }
 
 func isType(a, b interface{}) bool {
-    return reflect.TypeOf(a) == reflect.TypeOf(b)
+	return reflect.TypeOf(a) == reflect.TypeOf(b)
 }

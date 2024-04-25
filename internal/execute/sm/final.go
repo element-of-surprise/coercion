@@ -12,14 +12,14 @@ import (
 type finalStates struct{}
 
 // start is simply the starting place for the statemachine. It does nothing.
-func (f finalStates) start(req statemachine.Request[Data]) statemachine.Request[Data]{
+func (f finalStates) start(req statemachine.Request[Data]) statemachine.Request[Data] {
 	req.Next = f.planChecks
 	return req
 }
 
 // planChecks looks through all the checks in the Plan and fails the Plan if any of the checks failed
 // and records the failure reason.
-func (f finalStates) planChecks(req statemachine.Request[Data]) statemachine.Request[Data]{
+func (f finalStates) planChecks(req statemachine.Request[Data]) statemachine.Request[Data] {
 	plan := req.Data.Plan
 
 	r, err := f.examineChecks([3]*workflow.Checks{plan.PreChecks, plan.ContChecks, plan.PostChecks})
@@ -59,9 +59,9 @@ func (f finalStates) blocks(req statemachine.Request[Data]) statemachine.Request
 
 // end records a Plan as Completed.
 func (f finalStates) end(req statemachine.Request[Data]) statemachine.Request[Data] {
-		plan := req.Data.Plan
-		plan.State.Status = workflow.Completed
-		return req
+	plan := req.Data.Plan
+	plan.State.Status = workflow.Completed
+	return req
 }
 
 // examineChecks Pre/Cont/Post checks passed and returns a failure reason and an error if one of them failed.
@@ -86,7 +86,7 @@ func (f finalStates) examineChecks(checks [3]*workflow.Checks) (workflow.Failure
 			r = workflow.FRPostCheck
 		}
 
-		switch check.State.Status{
+		switch check.State.Status {
 		case workflow.Completed:
 			continue
 		case workflow.Failed:

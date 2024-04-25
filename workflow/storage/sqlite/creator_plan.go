@@ -36,7 +36,7 @@ const insertPlan = `
 var zeroTime = time.Unix(0, 0)
 
 // commitPlan commits a plan to the database. This commits the entire plan and all sub-objects.
-func commitPlan(ctx context.Context, conn *sqlite.Conn, p *workflow.Plan) (err error){
+func commitPlan(ctx context.Context, conn *sqlite.Conn, p *workflow.Plan) (err error) {
 	if p == nil {
 		return fmt.Errorf("planToSQL: plan cannot be nil")
 	}
@@ -77,7 +77,6 @@ func commitPlan(ctx context.Context, conn *sqlite.Conn, p *workflow.Plan) (err e
 		stmt.SetInt64("$submit_time", p.SubmitTime.UnixNano())
 	}
 	stmt.SetInt64("$reason", int64(p.Reason))
-
 
 	_, err = stmt.Step()
 	if err != nil {
@@ -330,7 +329,7 @@ func commitAction(ctx context.Context, conn *sqlite.Conn, planID uuid.UUID, pos 
 }
 
 // encodeAttempts encodes a slice of attempts into a JSON array hodling JSON encoded attempts as byte slices.
-func encodeAttempts (attempts []*workflow.Attempt) ([]byte, error) {
+func encodeAttempts(attempts []*workflow.Attempt) ([]byte, error) {
 	if len(attempts) == 0 {
 		return nil, nil
 	}
@@ -370,13 +369,13 @@ type ider interface {
 	GetID() uuid.UUID
 }
 
-func idsToJSON[T any] (objs []T) ([]byte, error) {
+func idsToJSON[T any](objs []T) ([]byte, error) {
 	ids := make([]string, 0, len(objs))
 	for _, o := range objs {
 		if ider, ok := any(o).(ider); ok {
 			id := ider.GetID()
 			ids = append(ids, id.String())
-		}else{
+		} else {
 			return nil, fmt.Errorf("idsToJSON: object %T does not implement ider", o)
 		}
 	}

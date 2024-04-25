@@ -67,20 +67,20 @@ func TestPlanPreChecks(t *testing.T) {
 	states := &States{} // Used to get the method name of a state for wantNextState
 
 	tests := []struct {
-		name string
-		plan  *workflow.Plan
-		checksRunner checksRunner
+		name          string
+		plan          *workflow.Plan
+		checksRunner  checksRunner
 		wantNextState statemachine.State[Data]
 	}{
 		{
-			name: "PreChecks and ContChecks are nil",
-			plan: &workflow.Plan{},
+			name:          "PreChecks and ContChecks are nil",
+			plan:          &workflow.Plan{},
 			wantNextState: states.PlanStartContChecks,
 		},
 		{
 			name: "PreChecks and ContChecks succeed",
 			plan: &workflow.Plan{
-				PreChecks: &workflow.Checks{},
+				PreChecks:  &workflow.Checks{},
 				ContChecks: &workflow.Checks{},
 			},
 			checksRunner: func(ctx context.Context, checks *workflow.Checks) error {
@@ -91,7 +91,7 @@ func TestPlanPreChecks(t *testing.T) {
 		{
 			name: "PreChecks or ContChecks fail",
 			plan: &workflow.Plan{
-				PreChecks: &workflow.Checks{},
+				PreChecks:  &workflow.Checks{},
 				ContChecks: &workflow.Checks{},
 			},
 			checksRunner: func(ctx context.Context, checks *workflow.Checks) error {
@@ -126,7 +126,7 @@ func TestPlanStartContChecks(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		name string
+		name   string
 		action *workflow.Action
 	}{
 		{
@@ -137,15 +137,15 @@ func TestPlanStartContChecks(t *testing.T) {
 			action: &workflow.Action{
 				Plugin: plugins.Name,
 				// This error forces a response on a channel that let's us know the action was executed.
-				Req: plugins.Req{Arg: "error"},
+				Req:   plugins.Req{Arg: "error"},
 				State: &workflow.State{},
 			},
 		},
 	}
 
 	plug := &plugins.Plugin{AlwaysRespond: true, IsCheckPlugin: true}
-   	reg := registry.New()
-    reg.Register(plug)
+	reg := registry.New()
+	reg.Register(plug)
 
 	for _, test := range tests {
 		plug.ResetCounts()
@@ -156,7 +156,7 @@ func TestPlanStartContChecks(t *testing.T) {
 		if test.action != nil {
 			contChecks = &workflow.Checks{
 				Actions: []*workflow.Action{test.action},
-				State: &workflow.State{},
+				State:   &workflow.State{},
 			}
 		}
 
@@ -189,12 +189,12 @@ func TestExecuteBlocks(t *testing.T) {
 	states := &States{} // Used to get the method name of a state for wantNextState
 
 	tests := []struct {
-		name string
-		block block
+		name          string
+		block         block
 		wantNextState statemachine.State[Data]
 	}{
 		{
-			name: "No more blocks",
+			name:          "No more blocks",
 			wantNextState: states.PlanPostChecks,
 		},
 		{
@@ -236,21 +236,21 @@ func TestBlockPreChecks(t *testing.T) {
 	states := &States{} // Used to get the method name of a state for wantNextState
 
 	tests := []struct {
-		name string
-		block *workflow.Block
-		checksRunner checksRunner
+		name            string
+		block           *workflow.Block
+		checksRunner    checksRunner
 		wantBlockStatus workflow.Status
-		wantNextState statemachine.State[Data]
+		wantNextState   statemachine.State[Data]
 	}{
 		{
-			name: "PreChecks and ContChecks are nil",
-			block: &workflow.Block{},
+			name:          "PreChecks and ContChecks are nil",
+			block:         &workflow.Block{},
 			wantNextState: states.BlockStartContChecks,
 		},
 		{
 			name: "PreChecks and ContChecks succeed",
 			block: &workflow.Block{
-				PreChecks: &workflow.Checks{},
+				PreChecks:  &workflow.Checks{},
 				ContChecks: &workflow.Checks{},
 			},
 			checksRunner: func(ctx context.Context, checks *workflow.Checks) error {
@@ -261,14 +261,14 @@ func TestBlockPreChecks(t *testing.T) {
 		{
 			name: "PreChecks or ContChecks fail",
 			block: &workflow.Block{
-				PreChecks: &workflow.Checks{},
+				PreChecks:  &workflow.Checks{},
 				ContChecks: &workflow.Checks{},
 			},
 			checksRunner: func(ctx context.Context, checks *workflow.Checks) error {
 				return fmt.Errorf("error")
 			},
 			wantBlockStatus: workflow.Failed,
-			wantNextState: states.BlockEnd,
+			wantNextState:   states.BlockEnd,
 		},
 	}
 
@@ -301,7 +301,7 @@ func TestBlockStartContChecks(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		name string
+		name   string
 		action *workflow.Action
 	}{
 		{
@@ -312,15 +312,15 @@ func TestBlockStartContChecks(t *testing.T) {
 			action: &workflow.Action{
 				Plugin: plugins.Name,
 				// This error forces a response on a channel that let's us know the action was executed.
-				Req: plugins.Req{Arg: "error"},
+				Req:   plugins.Req{Arg: "error"},
 				State: &workflow.State{},
 			},
 		},
 	}
 
 	plug := &plugins.Plugin{AlwaysRespond: true, IsCheckPlugin: true}
-   	reg := registry.New()
-    reg.Register(plug)
+	reg := registry.New()
+	reg.Register(plug)
 
 	for _, test := range tests {
 		plug.ResetCounts()
@@ -331,7 +331,7 @@ func TestBlockStartContChecks(t *testing.T) {
 		if test.action != nil {
 			contChecks = &workflow.Checks{
 				Actions: []*workflow.Action{test.action},
-				State: &workflow.State{},
+				State:   &workflow.State{},
 			}
 		}
 
@@ -370,19 +370,19 @@ func TestExecuteSequences(t *testing.T) {
 	successAction := &workflow.Action{Plugin: plugins.Name, Timeout: 10 * time.Second, Req: plugins.Req{Sleep: 10 * time.Millisecond, Arg: "success"}}
 	sequenceWithSuccess := &workflow.Sequence{Actions: []*workflow.Action{successAction}}
 
-	tests := []struct{
-		name string
-		block *workflow.Block
-		contCheckFail bool
+	tests := []struct {
+		name            string
+		block           *workflow.Block
+		contCheckFail   bool
 		wantPluginCalls int
-		wantStatus workflow.Status
-		wantErr bool
+		wantStatus      workflow.Status
+		wantErr         bool
 	}{
 		{
 			name: "Success: Tolerated Failures are unlimited, everything fails",
 			block: &workflow.Block{
 				ToleratedFailures: -1,
-				Concurrency: 1,
+				Concurrency:       1,
 				Sequences: []*workflow.Sequence{
 					sequenceWithFailure.Clone(),
 					sequenceWithFailure.Clone(),
@@ -395,7 +395,7 @@ func TestExecuteSequences(t *testing.T) {
 			name: "Error: Exceed tolerated failures by after success 1",
 			block: &workflow.Block{
 				ToleratedFailures: 1,
-				Concurrency: 1,
+				Concurrency:       1,
 				Sequences: []*workflow.Sequence{
 					sequenceWithFailure.Clone(),
 					sequenceWithSuccess.Clone(),
@@ -403,14 +403,14 @@ func TestExecuteSequences(t *testing.T) {
 				},
 			},
 			wantPluginCalls: 3,
-			wantStatus: workflow.Failed,
-			wantErr: true,
+			wantStatus:      workflow.Failed,
+			wantErr:         true,
 		},
 		{
 			name: "Error: Exceed tolerated failures before success",
 			block: &workflow.Block{
 				ToleratedFailures: 1,
-				Concurrency: 1,
+				Concurrency:       1,
 				Sequences: []*workflow.Sequence{
 					sequenceWithFailure.Clone(),
 					sequenceWithFailure.Clone(), // We should die after this.
@@ -418,27 +418,27 @@ func TestExecuteSequences(t *testing.T) {
 				},
 			},
 			wantPluginCalls: 2,
-			wantStatus: workflow.Failed,
-			wantErr: true,
+			wantStatus:      workflow.Failed,
+			wantErr:         true,
 		},
 		{
 			name: "Error: Continuous Checks fail",
 			block: &workflow.Block{
 				ToleratedFailures: 1,
-				Concurrency: 1,
+				Concurrency:       1,
 				Sequences: []*workflow.Sequence{
 					sequenceWithSuccess.Clone(), // Never should be called.
 				},
 			},
 			contCheckFail: true,
-			wantStatus: workflow.Failed,
-			wantErr: true,
+			wantStatus:    workflow.Failed,
+			wantErr:       true,
 		},
 		{
 			name: "Success",
 			block: &workflow.Block{
 				ToleratedFailures: 0,
-				Concurrency: 1,
+				Concurrency:       1,
 				Sequences: []*workflow.Sequence{
 					sequenceWithSuccess.Clone(),
 					sequenceWithSuccess.Clone(),
@@ -450,39 +450,38 @@ func TestExecuteSequences(t *testing.T) {
 	}
 
 	plug := &plugins.Plugin{AlwaysRespond: true}
-   	reg := registry.New()
-    reg.Register(plug)
-
+	reg := registry.New()
+	reg.Register(plug)
 
 	for _, test := range tests {
 		plug.ResetCounts()
 
 		states := States{
-    		registry: reg,
-      		store: &fakeUpdater{},
-    	}
+			registry: reg,
+			store:    &fakeUpdater{},
+		}
 
-     	req := statemachine.Request[Data]{
-      	 		Ctx: context.Background(),
-      	}
-       	req.Data.blocks = []block{{block: test.block}}
-        test.block.State = &workflow.State{}
-        if test.contCheckFail {
-        	req.Data.contCheckResult = make(chan error, 1)
-         	req.Data.contCheckResult <- fmt.Errorf("error")
-          	close(req.Data.contCheckResult)
-        }
+		req := statemachine.Request[Data]{
+			Ctx: context.Background(),
+		}
+		req.Data.blocks = []block{{block: test.block}}
+		test.block.State = &workflow.State{}
+		if test.contCheckFail {
+			req.Data.contCheckResult = make(chan error, 1)
+			req.Data.contCheckResult <- fmt.Errorf("error")
+			close(req.Data.contCheckResult)
+		}
 
-	    for _, seq := range test.block.Sequences {
-		    seq.State = &workflow.State{}
-		    for _, action := range seq.Actions {
+		for _, seq := range test.block.Sequences {
+			seq.State = &workflow.State{}
+			for _, action := range seq.Actions {
 				action.State = &workflow.State{}
-		  	}
-	    }
-     	req = states.ExecuteSequences(req)
-      	if test.wantErr != (req.Data.err != nil) {
-        	t.Errorf("TestExecuteSequences(%s): got err == %v, wantErr == %v", test.name, req.Data.err, test.wantErr)
-	  	}
+			}
+		}
+		req = states.ExecuteSequences(req)
+		if test.wantErr != (req.Data.err != nil) {
+			t.Errorf("TestExecuteSequences(%s): got err == %v, wantErr == %v", test.name, req.Data.err, test.wantErr)
+		}
 		if test.wantStatus != test.block.State.Status {
 			t.Errorf("TestExecuteSequences(%s): got status == %v, wantStatus == %v", test.name, test.block.State.Status, test.wantStatus)
 		}
@@ -496,80 +495,80 @@ func TestExecuteSequences(t *testing.T) {
 func TestExecuteSequencesConcurrency(t *testing.T) {
 	t.Parallel()
 
- 	build, err := builder.New("test", "test")
-    if err != nil {
-    	panic(err)
-    }
+	build, err := builder.New("test", "test")
+	if err != nil {
+		panic(err)
+	}
 
-  	build.AddBlock(
-   		builder.BlockArgs{
-     		Name: "block0",
-       		Descr: "block0",
-         	Concurrency: 3,
-     	},
-   )
+	build.AddBlock(
+		builder.BlockArgs{
+			Name:        "block0",
+			Descr:       "block0",
+			Concurrency: 3,
+		},
+	)
 
-   for i := 0; i < 10; i++ {
-   		build.AddSequence(
-     		&workflow.Sequence{
-       			Name: "seq",
-          		Descr: "seq",
-       		},
-     	)
-     	build.AddAction(
-      		&workflow.Action{
-        		Name: "action",
-          		Descr: "action",
-            	Plugin: plugins.Name,
-             	Timeout: 10 * time.Second,
-              	Req: plugins.Req{Sleep: 100 * time.Millisecond},
-        	},
-      	)
-      	build.Up()
-   }
+	for i := 0; i < 10; i++ {
+		build.AddSequence(
+			&workflow.Sequence{
+				Name:  "seq",
+				Descr: "seq",
+			},
+		)
+		build.AddAction(
+			&workflow.Action{
+				Name:    "action",
+				Descr:   "action",
+				Plugin:  plugins.Name,
+				Timeout: 10 * time.Second,
+				Req:     plugins.Req{Sleep: 100 * time.Millisecond},
+			},
+		)
+		build.Up()
+	}
 
-   plug := &plugins.Plugin{AlwaysRespond: true}
-   reg := registry.New()
-   reg.Register(plug)
+	plug := &plugins.Plugin{AlwaysRespond: true}
+	reg := registry.New()
+	reg.Register(plug)
 
-   states := States{
-   		registry: reg,
-     	store: &fakeUpdater{},
-   }
+	states := States{
+		registry: reg,
+		store:    &fakeUpdater{},
+	}
 
-   p, err := build.Plan()
-   if err != nil {
-   		panic(err)
-   }
+	p, err := build.Plan()
+	if err != nil {
+		panic(err)
+	}
 
-   for _, seq := range p.Blocks[0].Sequences {
-   		seq.State = &workflow.State{}
-     	for _, action := range seq.Actions {
-      		action.State = &workflow.State{}
-	  	}
-   }
+	for _, seq := range p.Blocks[0].Sequences {
+		seq.State = &workflow.State{}
+		for _, action := range seq.Actions {
+			action.State = &workflow.State{}
+		}
+	}
 
-   req := statemachine.Request[Data]{
-   		Ctx: context.Background(),
-     	Data: Data{
-      		Plan: p,
-        	blocks: []block{{block: p.Blocks[0]}},
-      	},
-    }
-   req = states.ExecuteSequences(req)
+	req := statemachine.Request[Data]{
+		Ctx: context.Background(),
+		Data: Data{
+			Plan:   p,
+			blocks: []block{{block: p.Blocks[0]}},
+		},
+	}
+	req = states.ExecuteSequences(req)
 
-   if plug.MaxCount.Load() != 3 {
-   		t.Errorf("TestExecuteSequencesConcurrency: expected MaxCount == 3, got %d", plug.MaxCount.Load())
-   }
+	if plug.MaxCount.Load() != 3 {
+		t.Errorf("TestExecuteSequencesConcurrency: expected MaxCount == 3, got %d", plug.MaxCount.Load())
+	}
 }
 
 func TestBlockPostChecks(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		name 	 string
-		block block
-		wantErr  bool
+		name       string
+		block      block
+		wantErr    bool
 		wantStatus workflow.Status
 	}{
 		{
@@ -587,7 +586,7 @@ func TestBlockPostChecks(t *testing.T) {
 				},
 			},
 			wantStatus: workflow.Failed,
-			wantErr: true,
+			wantErr:    true,
 		},
 		{
 			name: "Success: Post checks succeed",
@@ -635,13 +634,13 @@ func TestBlockEnd(t *testing.T) {
 	states := &States{}
 
 	tests := []struct {
-		name     string
-		data    Data
+		name            string
+		data            Data
 		contCheckResult error
-		wantErr  bool
+		wantErr         bool
 		wantBlockStatus workflow.Status
-		wantNextState statemachine.State[Data]
-		wantBlocksLen int
+		wantNextState   statemachine.State[Data]
+		wantBlocksLen   int
 	}{
 		{
 			name: "Error: contchecks failure",
@@ -649,10 +648,10 @@ func TestBlockEnd(t *testing.T) {
 				blocks: []block{{block: &workflow.Block{ContChecks: &workflow.Checks{}}}},
 			},
 			contCheckResult: fmt.Errorf("error"),
-			wantErr: true,
+			wantErr:         true,
 			wantBlockStatus: workflow.Failed,
-			wantNextState: states.End,
-			wantBlocksLen: 1,
+			wantNextState:   states.End,
+			wantBlocksLen:   1,
 		},
 		{
 			name: "Success: no more blocks",
@@ -660,8 +659,8 @@ func TestBlockEnd(t *testing.T) {
 				blocks: []block{{}},
 			},
 			wantBlockStatus: workflow.Completed,
-			wantNextState: states.ExecuteBlock,
-			wantBlocksLen: 0,
+			wantNextState:   states.ExecuteBlock,
+			wantBlocksLen:   0,
 		},
 		{
 			name: "Success: more blocks",
@@ -669,8 +668,8 @@ func TestBlockEnd(t *testing.T) {
 				blocks: []block{{}, {}},
 			},
 			wantBlockStatus: workflow.Completed,
-			wantNextState: states.ExecuteBlock,
-			wantBlocksLen: 1,
+			wantNextState:   states.ExecuteBlock,
+			wantBlocksLen:   1,
 		},
 	}
 
@@ -681,7 +680,7 @@ func TestBlockEnd(t *testing.T) {
 		for i, block := range test.data.blocks {
 			if block.block == nil {
 				block.block = &workflow.Block{State: &workflow.State{Status: workflow.Running}}
-			}else{
+			} else {
 				block.block.State = &workflow.State{Status: workflow.Running}
 			}
 			test.data.blocks[i] = block
@@ -690,7 +689,7 @@ func TestBlockEnd(t *testing.T) {
 		ctx, test.data.blocks[0].contCancel = context.WithCancel(context.Background())
 
 		req := statemachine.Request[Data]{
-			Ctx: context.Background(),
+			Ctx:  context.Background(),
 			Data: test.data,
 		}
 
@@ -731,10 +730,10 @@ func TestPlanPostChecks(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		name 	 string
-		plan 	 *workflow.Plan
+		name            string
+		plan            *workflow.Plan
 		contCheckResult error
-		wantErr  bool
+		wantErr         bool
 	}{
 		{
 			name: "Success: No post checks",
@@ -745,8 +744,8 @@ func TestPlanPostChecks(t *testing.T) {
 			plan: &workflow.Plan{
 				ContChecks: &workflow.Checks{},
 			},
-			contCheckResult:  fmt.Errorf("error"),
-			wantErr: true,
+			contCheckResult: fmt.Errorf("error"),
+			wantErr:         true,
 		},
 		{
 			name: "Error: PostChecks fail",
@@ -785,9 +784,9 @@ func TestPlanPostChecks(t *testing.T) {
 		req := statemachine.Request[Data]{
 			Ctx: context.Background(),
 			Data: Data{
-				Plan: test.plan,
+				Plan:            test.plan,
 				contCheckResult: results,
-				contCancel: cancel,
+				contCancel:      cancel,
 			},
 		}
 
@@ -813,7 +812,7 @@ func TestEnd(t *testing.T) {
 			State: &workflow.State{Status: workflow.Running},
 		},
 		contCancel: cancel,
-		err: dataErr,
+		err:        dataErr,
 	}
 
 	states := &States{

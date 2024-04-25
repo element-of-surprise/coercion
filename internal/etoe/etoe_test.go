@@ -18,15 +18,15 @@ import (
 
 var pConfig = pretty.Config{
 	IncludeUnexported: false,
-	PrintStringers: true,
-	SkipZeroFields: true,
+	PrintStringers:    true,
+	SkipZeroFields:    true,
 }
 
 func TestEtoE(t *testing.T) {
 	plugCheck := &testplugin.Plugin{
 		AlwaysRespond: true,
 		IsCheckPlugin: true,
-		PlugName:          "check",
+		PlugName:      "check",
 	}
 
 	plugAction := &testplugin.Plugin{
@@ -113,7 +113,7 @@ func TestEtoE(t *testing.T) {
 	}
 
 	var result workstream.Result[*workflow.Plan]
-	for result = range ws.Status(ctx, id, 5 * time.Second) {
+	for result = range ws.Status(ctx, id, 5*time.Second) {
 		if result.Err != nil {
 			panic(result.Err)
 		}
