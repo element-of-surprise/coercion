@@ -445,7 +445,7 @@ func TestExec(t *testing.T) {
 
 	sm := Runner{nower: nower}
 	for _, test := range tests {
-		rw, err := sqlite.New(context.Background(), "", sqlite.WithInMemory())
+		rw, err := sqlite.New(context.Background(), "", reg, sqlite.WithInMemory())
 		if err != nil {
 			t.Fatalf("TestExec(%s): failed to create writer: %v", test.name, err)
 		}

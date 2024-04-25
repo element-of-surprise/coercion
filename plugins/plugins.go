@@ -46,7 +46,8 @@ func (e *Error) Unwrap() error {
 
 // Plugin is the interface that must be implemented by all plugins.
 type Plugin interface {
-	// Name returns the name of the plugin.
+	// Name returns the name of the plugin. This must be unique in the registry.
+	// The name should include the package path to avoid name collisions.
 	Name() string
 	// Execute executes the plugin.
 	Execute(ctx context.Context, req any) (any, *Error)

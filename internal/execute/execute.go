@@ -48,8 +48,9 @@ type Plans struct {
 }
 
 // New creates a new Executor. This should only be created once.
-func New(ctx context.Context, store storage.Vault) (*Plans, error) {
+func New(ctx context.Context, store storage.Vault, reg *registry.Register) (*Plans, error) {
 	e := &Plans{
+		registry: reg,
 		store:    store,
 		stoppers: map[uuid.UUID]context.CancelFunc{},
 		runner:   statemachine.Run[sm.Data],
@@ -82,10 +83,6 @@ func (e *Plans) addValidators() {
 // initPlugins initializes all plugins in the registry to make sure they
 // meet the preconditions for execution.
 func (e *Plans) initPlugins(ctx context.Context) error {
-	if e.registry == nil {
-		e.registry = registry.Plugins
-	}
-
 	g := wait.Group{}
 	for plugin := range e.registry.Plugins() {
 		plugin := plugin

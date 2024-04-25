@@ -33,8 +33,9 @@ func TestEtoE(t *testing.T) {
 		AlwaysRespond: true,
 	}
 
-	registry.Plugins.Register(plugCheck)
-	registry.Plugins.Register(plugAction)
+	reg := registry.New()
+	reg.Register(plugCheck)
+	reg.Register(plugAction)
 
 	checks := &workflow.Checks{
 		Delay: 2 * time.Second,
@@ -92,12 +93,12 @@ func TestEtoE(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	vault, err := sqlite.New(ctx, "", sqlite.WithInMemory())
+	vault, err := sqlite.New(ctx, "", reg, sqlite.WithInMemory())
 	if err != nil {
 		panic(err)
 	}
 
-	ws, err := workstream.New(ctx, vault)
+	ws, err := workstream.New(ctx, reg, vault)
 	if err != nil {
 		panic(err)
 	}

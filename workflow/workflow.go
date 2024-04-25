@@ -659,7 +659,7 @@ type Action struct {
 	// State represents settings that should not be set by the user, but users can query.
 	State *State
 
-	register *registry.Register
+	register *registry.Register `json:"-"`
 }
 
 // GetID is a getter for the ID field.
@@ -721,6 +721,15 @@ func (a *Action) Defaults() {
 	}
 }
 
+func (a *Action) HasRegister() bool {
+	return a.register != nil
+}
+
+// SetRegister sets the register for the Action. This should not be used by the user.
+func (a *Action) SetRegister(r *registry.Register) {
+	a.register = r
+}
+
 func (a *Action) validate() ([]validator, error) {
 	if a == nil {
 		return nil, fmt.Errorf("cannot have a nil Action")
@@ -758,12 +767,8 @@ func (a *Action) validate() ([]validator, error) {
 		a.Retries = 0
 	}
 
-	var plug  plugins.Plugin
-	if a.register == nil {
-		plug = registry.Plugins.Plugin(a.Plugin)
-	} else {
-		plug = a.register.Plugin(a.Plugin)
-	}
+	plug := a.register.Plugin(a.Plugin)
+
 	if plug == nil {
 		return nil, fmt.Errorf("plugin %q not found", a.Plugin)
 	}
