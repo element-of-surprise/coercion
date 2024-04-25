@@ -119,11 +119,11 @@ func (f *fakeStore) Read(ctx context.Context, id uuid.UUID) (*workflow.Plan, err
 
 type fakeRunner struct {
 	called bool
-	req statemachine.Request[sm.Data]
-	ran chan struct{}
+	req    statemachine.Request[sm.Data]
+	ran    chan struct{}
 }
 
-func (r *fakeRunner) Run(name string, req statemachine.Request[sm.Data], options ...statemachine.Option[sm.Data]) (statemachine.Request[sm.Data], error){
+func (r *fakeRunner) Run(name string, req statemachine.Request[sm.Data], options ...statemachine.Option[sm.Data]) (statemachine.Request[sm.Data], error) {
 	defer close(r.ran)
 	r.called = true
 	r.req = req
@@ -137,24 +137,24 @@ func TestStart(t *testing.T) {
 
 	tests := []struct {
 		name    string
-		id uuid.UUID
-		plan *workflow.Plan
+		id      uuid.UUID
+		plan    *workflow.Plan
 		wantErr bool
 	}{
 		{
-			name: "no plan could be found",
-			id: uuid.New(),
+			name:    "no plan could be found",
+			id:      uuid.New(),
 			wantErr: true,
 		},
 		{
-			name: "plan is invalid",
-			id: storedID,
-			plan: &workflow.Plan{}, //  plan is invalid, has no ID
+			name:    "plan is invalid",
+			id:      storedID,
+			plan:    &workflow.Plan{}, //  plan is invalid, has no ID
 			wantErr: true,
 		},
 		{
 			name: "plan starts execution",
-			id: storedID,
+			id:   storedID,
 			plan: &workflow.Plan{
 				ID: storedID,
 				State: &workflow.State{
@@ -186,7 +186,7 @@ func TestStart(t *testing.T) {
 			continue
 		}
 
-		select{
+		select {
 		case <-time.After(2 * time.Second):
 			t.Errorf("TestStart(%s): runner was not called", test.name)
 		case <-fr.ran:
@@ -208,12 +208,12 @@ func TestValidateStartState(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		name string
-		plan *workflow.Plan
+		name    string
+		plan    *workflow.Plan
 		wantErr bool
 	}{
 		{
-			name: "plan is nil",
+			name:    "plan is nil",
 			wantErr: true,
 		},
 		{
@@ -239,8 +239,8 @@ func TestValidatePlan(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		name string
-		item walk.Item
+		name    string
+		item    walk.Item
 		wantErr bool
 	}{
 		{
@@ -261,7 +261,7 @@ func TestValidatePlan(t *testing.T) {
 			item: walk.Item{
 				Value: &workflow.Plan{
 					SubmitTime: time.Now(),
-					Reason: workflow.FRBlock,
+					Reason:     workflow.FRBlock,
 				},
 			},
 			wantErr: true,
@@ -299,9 +299,9 @@ func TestValidateAction(t *testing.T) {
 	reg.Register(&testplugins.Plugin{})
 	reg.Register(&testplugins.Plugin{PlugName: checkPlugin, IsCheckPlugin: true})
 
-	tests := []struct{
-		name string
-		item walk.Item
+	tests := []struct {
+		name    string
+		item    walk.Item
 		wantErr bool
 	}{
 		{
@@ -384,7 +384,7 @@ func TestValidateID(t *testing.T) {
 		&workflow.Action{ID: id},
 	}
 
-	for _, tIDer := range iders{
+	for _, tIDer := range iders {
 		p := &Plans{}
 		p.addValidators()
 
@@ -403,8 +403,8 @@ func TestValidateState(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		name string
-		item walk.Item
+		name    string
+		item    walk.Item
 		wantErr bool
 	}{
 		{

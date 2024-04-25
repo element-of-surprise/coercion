@@ -31,13 +31,13 @@ type Result[T any] struct {
 	// Data is the data to be returned.
 	Data T
 	// Err is an error in the stream. Data will be its type's zero value.
-	Err  error
+	Err error
 }
 
 // Workstream provides a way to submit and execute workflow.Plans. You only need one Workstream
 // per application. It is safe to use concurrently.
 type Workstream struct {
-	reg *registry.Register
+	reg   *registry.Register
 	exec  *execute.Plans
 	store storage.Vault
 }
@@ -73,7 +73,6 @@ func New(ctx context.Context, reg *registry.Register, store storage.Vault, optio
 type defaulter interface {
 	Defaults()
 }
-
 
 // Submit submits a workflow.Plan to the Workstream for execution. It returns the UUID of the plan.
 // If the plan is invalid, an error is returned. The plan is not executed on Submit(), you must use
@@ -139,7 +138,7 @@ func (w *Workstream) Status(ctx context.Context, id uuid.UUID, interval time.Dur
 			case <-t.C:
 				plan, err := w.store.Read(ctx, id)
 				if err != nil {
-					ch <-Result[*workflow.Plan]{Data: nil, Err: err}
+					ch <- Result[*workflow.Plan]{Data: nil, Err: err}
 					return
 				}
 				ch <- Result[*workflow.Plan]{Data: plan, Err: nil}

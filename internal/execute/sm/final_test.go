@@ -14,11 +14,11 @@ func TestPlanChecks(t *testing.T) {
 	finals := finalStates{}
 
 	tests := []struct {
-		name        string
-		checks 	[3]*workflow.Checks
-		wantNext  statemachine.State[Data]
+		name       string
+		checks     [3]*workflow.Checks
+		wantNext   statemachine.State[Data]
 		wantReason workflow.FailureReason
-		wantErr  bool
+		wantErr    bool
 	}{
 		{
 			name: "all checks pass",
@@ -34,18 +34,18 @@ func TestPlanChecks(t *testing.T) {
 			checks: [3]*workflow.Checks{
 				{State: &workflow.State{Status: workflow.Failed}},
 			},
-			wantErr: true,
-			wantNext: finals.end,
+			wantErr:    true,
+			wantNext:   finals.end,
 			wantReason: workflow.FRPreCheck,
 		},
 	}
 
 	for _, test := range tests {
 		plan := &workflow.Plan{
-			PreChecks: test.checks[0],
+			PreChecks:  test.checks[0],
 			ContChecks: test.checks[1],
 			PostChecks: test.checks[2],
-			State: &workflow.State{Status: workflow.Running},
+			State:      &workflow.State{Status: workflow.Running},
 		}
 
 		req := finals.planChecks(statemachine.Request[Data]{Data: Data{Plan: plan}})
@@ -73,25 +73,25 @@ func TestBlocks(t *testing.T) {
 
 	tests := []struct {
 		name        string
-		block      *workflow.Block
-		wantNext  statemachine.State[Data]
-		wantErr  bool
+		block       *workflow.Block
+		wantNext    statemachine.State[Data]
+		wantErr     bool
 		internalErr bool
 	}{
 		{
-			name: "block is completed",
-			block: &workflow.Block{State: &workflow.State{Status: workflow.Completed}},
+			name:     "block is completed",
+			block:    &workflow.Block{State: &workflow.State{Status: workflow.Completed}},
 			wantNext: finals.end,
 		},
 		{
-			name: "block is failed",
-			block: &workflow.Block{State: &workflow.State{Status: workflow.Failed}},
+			name:    "block is failed",
+			block:   &workflow.Block{State: &workflow.State{Status: workflow.Failed}},
 			wantErr: true,
 		},
 		{
-			name: "block is in an invalid state",
-			block: &workflow.Block{State: &workflow.State{Status: workflow.Running}},
-			wantErr: true,
+			name:        "block is in an invalid state",
+			block:       &workflow.Block{State: &workflow.State{Status: workflow.Running}},
+			wantErr:     true,
 			internalErr: true,
 		},
 	}
@@ -99,7 +99,7 @@ func TestBlocks(t *testing.T) {
 	for _, test := range tests {
 		plan := &workflow.Plan{
 			Blocks: []*workflow.Block{test.block},
-			State: &workflow.State{Status: workflow.Running},
+			State:  &workflow.State{Status: workflow.Running},
 		}
 
 		req := finals.blocks(statemachine.Request[Data]{Data: Data{Plan: plan}})

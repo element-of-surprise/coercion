@@ -70,7 +70,7 @@ func TestStart(t *testing.T) {
 
 	wantAction := &workflow.Action{
 		State: &workflow.State{
-			Start: now,
+			Start:  now,
 			Status: workflow.Running,
 		},
 	}
@@ -105,8 +105,8 @@ func TestGetPlugin(t *testing.T) {
 	reg.Register(&testplugin.Plugin{})
 
 	tests := []struct {
-		name string
-		data Data
+		name     string
+		data     Data
 		wantData Data
 		wantNext string
 	}{
@@ -169,19 +169,19 @@ func TestExecute(t *testing.T) {
 	}
 
 	tests := []struct {
-		name         string
-		data         Data
-		wantData	 Data
+		name     string
+		data     Data
+		wantData Data
 	}{
 		{
 			name: "Failed after a retry",
 			data: Data{
 				Action: &workflow.Action{
-					State: &workflow.State{},
-					Plugin: testplugin.Name,
+					State:   &workflow.State{},
+					Plugin:  testplugin.Name,
 					Timeout: 1 * time.Second,
 					Retries: 1,
-					Req: testplugin.Req{},
+					Req:     testplugin.Req{},
 				},
 				plugin: &testplugin.Plugin{
 					Responses: []any{pluginErr, pluginErr},
@@ -189,21 +189,21 @@ func TestExecute(t *testing.T) {
 			},
 			wantData: Data{
 				Action: &workflow.Action{
-					State: &workflow.State{},
-					Plugin: testplugin.Name,
+					State:   &workflow.State{},
+					Plugin:  testplugin.Name,
 					Timeout: 1 * time.Second,
 					Retries: 1,
-					Req: testplugin.Req{},
+					Req:     testplugin.Req{},
 					Attempts: []*workflow.Attempt{
 						{
-							Err: &plugins.Error{Message: pluginErr.Error()},
+							Err:   &plugins.Error{Message: pluginErr.Error()},
 							Start: now,
-							End: now,
+							End:   now,
 						},
 						{
-							Err: &plugins.Error{Message: pluginErr.Error()},
+							Err:   &plugins.Error{Message: pluginErr.Error()},
 							Start: now,
-							End: now,
+							End:   now,
 						},
 					},
 				},
@@ -214,11 +214,11 @@ func TestExecute(t *testing.T) {
 			name: "Success after retry",
 			data: Data{
 				Action: &workflow.Action{
-					State: &workflow.State{},
-					Plugin: testplugin.Name,
+					State:   &workflow.State{},
+					Plugin:  testplugin.Name,
 					Timeout: 1 * time.Second,
 					Retries: 1,
-					Req: testplugin.Req{},
+					Req:     testplugin.Req{},
 				},
 				plugin: &testplugin.Plugin{
 					Responses: []any{pluginErr, testplugin.Resp{Arg: "ok"}},
@@ -226,21 +226,21 @@ func TestExecute(t *testing.T) {
 			},
 			wantData: Data{
 				Action: &workflow.Action{
-					State: &workflow.State{},
-					Plugin: testplugin.Name,
+					State:   &workflow.State{},
+					Plugin:  testplugin.Name,
 					Timeout: 1 * time.Second,
 					Retries: 1,
-					Req: testplugin.Req{},
+					Req:     testplugin.Req{},
 					Attempts: []*workflow.Attempt{
 						{
-							Err: &plugins.Error{Message: pluginErr.Error()},
+							Err:   &plugins.Error{Message: pluginErr.Error()},
 							Start: now,
-							End: now,
+							End:   now,
 						},
 						{
-							Resp: testplugin.Resp{Arg: "ok"},
+							Resp:  testplugin.Resp{Arg: "ok"},
 							Start: now,
-							End: now,
+							End:   now,
 						},
 					},
 				},
@@ -260,7 +260,7 @@ func TestExecute(t *testing.T) {
 		if diff := pretty.Compare(test.wantData, req.Data); diff != "" {
 			t.Errorf("TestExecute(%s): -want +got):\n%s", test.name, diff)
 		}
-		if methodName(req.Next)  != methodName(sm.End) {
+		if methodName(req.Next) != methodName(sm.End) {
 			t.Errorf("TestExecute(%s): -want +got):\n%s", test.name, "Next method is not End state")
 		}
 		if req.Err != nil {
@@ -560,7 +560,6 @@ func TestIsType(t *testing.T) {
 		}
 	}
 }
-
 
 // methodName returns the name of the method of the given value.
 func methodName(method any) string {

@@ -14,7 +14,7 @@ import (
 )
 
 // Filters is a filter for searching Plans.
-type Filters struct{
+type Filters struct {
 	// ByIDs is a list of Plan IDs to search by.
 	ByIDs []uuid.UUID
 	// ByGroupIDs is a list of Group IDs to search by.
@@ -25,7 +25,7 @@ type Filters struct{
 
 // Validate validates the search filter.
 func (f Filters) Validate() error {
-	if len(f.ByIDs) + len(f.ByGroupIDs) + len(f.ByStatus) == 0 {
+	if len(f.ByIDs)+len(f.ByGroupIDs)+len(f.ByStatus) == 0 {
 		return fmt.Errorf("at least one search filter must be provided")
 	}
 	return nil
@@ -36,7 +36,7 @@ type Stream[T any] struct {
 	// Result is a result in the stream.
 	Result T
 	// Err is an error in the stream.
-	Err    error
+	Err error
 }
 
 // ListResult is a result from a List operation.

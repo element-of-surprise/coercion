@@ -31,7 +31,7 @@ type Plans struct {
 	// registry is the registry of plugins that can be used to execute Plans.
 	registry *registry.Register
 	// store is the storage backend for the Plans.
-	store    storage.Vault
+	store storage.Vault
 
 	// states is the statemachine that runs the Plans.
 	states *sm.States

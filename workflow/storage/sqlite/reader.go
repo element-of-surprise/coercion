@@ -70,7 +70,7 @@ func (r reader) Search(ctx context.Context, filters storage.Filters) (chan stora
 			r.conn,
 			q,
 			&sqlitex.ExecOptions{
-				Args:       args,
+				Args:  args,
 				Named: named,
 				ResultFunc: func(stmt *sqlite.Stmt) error {
 					r, err := r.listResultsFunc(stmt)

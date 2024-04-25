@@ -23,10 +23,10 @@ import (
 var ErrInternalFailure = errors.New("internal failure")
 
 // block is a wrapper around a workflow.Block that contains additional information for the statemachine.
-type block struct  {
+type block struct {
 	block *workflow.Block
 
-	contCancel context.CancelFunc
+	contCancel      context.CancelFunc
 	contCheckResult chan error
 }
 
@@ -79,7 +79,7 @@ type actionsParallelRunner func(ctx context.Context, actions []*workflow.Action)
 
 // States is the statemachine that handles the execution of a Plan.
 type States struct {
-	store storage.Vault
+	store    storage.Vault
 	registry *registry.Register
 
 	actionsSM actions.Runner
@@ -103,7 +103,7 @@ func New(store storage.Vault, registry *registry.Register) (*States, error) {
 		return nil, fmt.Errorf("store is required")
 	}
 	s := &States{
-		store: store,
+		store:    store,
 		registry: registry,
 	}
 	return s, nil
@@ -232,7 +232,7 @@ func (s *States) BlockStartContChecks(req statemachine.Request[Data]) statemachi
 }
 
 // ExecuteSequences executes the sequences of the current block.
-func (s *States) ExecuteSequences(req statemachine.Request[Data]) statemachine.Request[Data ]{
+func (s *States) ExecuteSequences(req statemachine.Request[Data]) statemachine.Request[Data] {
 	h := req.Data.blocks[0]
 	failures := atomic.Int64{}
 
@@ -281,7 +281,7 @@ func (s *States) ExecuteSequences(req statemachine.Request[Data]) statemachine.R
 		g.Go(
 			req.Ctx,
 			func(ctx context.Context) error {
-				defer func() {<-limiter}()
+				defer func() { <-limiter }()
 
 				// Defense in depth to make sure we don't run more than we should.
 				if exceededFailures() {
@@ -299,7 +299,6 @@ func (s *States) ExecuteSequences(req statemachine.Request[Data]) statemachine.R
 
 	waitCtx := context.WithoutCancel(req.Ctx)
 	g.Wait(waitCtx) // We don't care about the error here, we just want to wait for all sequences to finish.'
-
 
 	// Need to recheck in case the last sequence failed and sent us over the edge.
 	if h.block.ToleratedFailures >= 0 && failures.Load() > int64(h.block.ToleratedFailures) {
@@ -364,9 +363,9 @@ func (s *States) BlockEnd(req statemachine.Request[Data]) statemachine.Request[D
 		}
 	}
 
-	if h.block.State.Status == workflow.Running{
+	if h.block.State.Status == workflow.Running {
 		h.block.State.Status = workflow.Completed
-	}else{
+	} else {
 		h.block.State.Status = workflow.Failed
 		req.Next = s.End
 		return req
@@ -381,7 +380,7 @@ func (s *States) BlockEnd(req statemachine.Request[Data]) statemachine.Request[D
 
 	if len(req.Data.blocks) == 1 {
 		req.Data.blocks = nil
-	}else{
+	} else {
 		req.Data.blocks = req.Data.blocks[1:]
 	}
 	req.Next = s.ExecuteBlock
@@ -463,13 +462,13 @@ func (s *States) runPreChecks(ctx context.Context, preChecks *workflow.Checks, c
 	g := wait.Group{}
 
 	if preChecks != nil {
-		g.Go(ctx, func(ctx context.Context) error{
+		g.Go(ctx, func(ctx context.Context) error {
 			return s.runChecksOnce(ctx, preChecks)
 		})
 	}
 
 	if contChecks != nil {
-		g.Go(ctx, func(ctx context.Context) error{
+		g.Go(ctx, func(ctx context.Context) error {
 			return s.runChecksOnce(ctx, contChecks)
 		})
 	}
@@ -599,8 +598,8 @@ func (s *States) runAction(ctx context.Context, action *workflow.Action, updater
 	req := statemachine.Request[actions.Data]{
 		Ctx: ctx,
 		Data: actions.Data{
-			Action: action,
-			Updater: updater,
+			Action:   action,
+			Updater:  updater,
 			Registry: s.registry,
 		},
 		Next: s.actionsSM.Start,
@@ -632,7 +631,7 @@ func resetActions(actions []*workflow.Action) {
 }
 
 func isType(a, b interface{}) bool {
-    return reflect.TypeOf(a) == reflect.TypeOf(b)
+	return reflect.TypeOf(a) == reflect.TypeOf(b)
 }
 
 func after(ctx context.Context, d time.Duration) error {

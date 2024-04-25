@@ -250,10 +250,10 @@ func (p *Plan) Clone() *Plan {
 	copy(meta, p.Meta)
 
 	np := &Plan{
-		Name: p.Name,
-		Descr: p.Descr,
+		Name:    p.Name,
+		Descr:   p.Descr,
 		GroupID: p.GroupID,
-		Meta: meta,
+		Meta:    meta,
 	}
 
 	if p.PreChecks != nil {
@@ -492,11 +492,11 @@ func (b *Block) validate() ([]validator, error) {
 // to their Clone() method.
 func (b *Block) Clone() *Block {
 	n := &Block{
-		Name: 		   b.Name,
-		Descr: 		   b.Descr,
-		EntranceDelay: b.EntranceDelay,
-		ExitDelay:     b.ExitDelay,
-		Concurrency:   b.Concurrency,
+		Name:              b.Name,
+		Descr:             b.Descr,
+		EntranceDelay:     b.EntranceDelay,
+		ExitDelay:         b.ExitDelay,
+		Concurrency:       b.Concurrency,
 		ToleratedFailures: b.ToleratedFailures,
 	}
 
@@ -612,8 +612,8 @@ func (s *Sequence) Clone() *Sequence {
 		return nil
 	}
 	ns := &Sequence{
-		Name:   s.Name,
-		Descr:  s.Descr,
+		Name:    s.Name,
+		Descr:   s.Descr,
 		Actions: make([]*Action, len(s.Actions)),
 	}
 	for i, a := range s.Actions {
@@ -633,7 +633,7 @@ type Attempt struct {
 	// Start is the time the attempt started.
 	Start time.Time
 	// End is the time the attempt ended.
-	End   time.Time
+	End time.Time
 }
 
 // Action represents a single action that is executed by a plugin.
@@ -692,9 +692,9 @@ func (a *Action) Clone() *Action {
 		return nil
 	}
 	na := &Action{
-		Name:   a.Name,
-		Descr:  a.Descr,
-		Plugin: a.Plugin,
+		Name:    a.Name,
+		Descr:   a.Descr,
+		Plugin:  a.Plugin,
 		Timeout: a.Timeout,
 		Retries: a.Retries,
 		Req:     a.Req,
@@ -782,7 +782,7 @@ func (a *Action) validate() ([]validator, error) {
 
 type queue[T any] struct {
 	items []T
-	mu   sync.Mutex
+	mu    sync.Mutex
 }
 
 func (q *queue[T]) push(items ...T) {
