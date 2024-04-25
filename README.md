@@ -4,7 +4,7 @@
 [![Go Report Card](https://goreportcard.com/badge/github.com/element-of-surprise/workstream)](https://goreportcard.com/report/github.com/element-of-surprise/workstream)
 
 <p align="center">
-  <img src="./docs/imgs/gopher_river.jpeg"  width="500">
+  <img src="./docs/img/gopher_river.jpeg"  width="500">
 </p>
 
 ## Introduction
