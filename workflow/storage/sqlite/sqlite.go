@@ -55,7 +55,7 @@ func WithInMemory() Option {
 
 // New is the constructor for *ReadWriter. root is the root path for the storage.
 // If the root path does not exist, it will be created.
-func New(ctx context.Context, root string, options ...Option) (*Vault, error) {
+func New(ctx context.Context, root string, reg *registry.Register, options ...Option) (*Vault, error) {
 	ctx = context.WithoutCancel(ctx)
 
 	r := &Vault{
@@ -103,7 +103,7 @@ func New(ctx context.Context, root string, options ...Option) (*Vault, error) {
 	mu := &sync.Mutex{}
 
 	r.conn = conn
-	r.reader = reader{conn: conn, reg: registry.Plugins}
+	r.reader = reader{conn: conn, reg: reg}
 	r.creator = creator{mu: mu, conn: conn, reader: r.reader}
 	r.updater = newUpdater(mu, conn)
 	r.closer = closer{conn: conn}

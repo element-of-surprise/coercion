@@ -3,7 +3,6 @@ package sqlite
 import (
 	"context"
 	"fmt"
-	"log"
 	"time"
 
 	"github.com/element-of-surprise/workstream/plugins"
@@ -49,15 +48,20 @@ func commitPlan(ctx context.Context, conn *sqlite.Conn, p *workflow.Plan) (err e
 		return fmt.Errorf("planToSQL(insertPlan): %w", err)
 	}
 
-	log.Println("plan ID is: ", p.ID.String())
 	stmt.SetText("$id", p.ID.String())
 	stmt.SetText("$group_id", p.GroupID.String())
 	stmt.SetText("$name", p.Name)
 	stmt.SetText("$descr", p.Descr)
 	stmt.SetBytes("$meta", p.Meta)
-	stmt.SetText("$prechecks", p.PreChecks.ID.String())
-	stmt.SetText("$postchecks", p.PostChecks.ID.String())
-	stmt.SetText("$contchecks", p.ContChecks.ID.String())
+	if p.PreChecks != nil {
+		stmt.SetText("$prechecks", p.PreChecks.ID.String())
+	}
+	if p.PostChecks != nil {
+		stmt.SetText("$postchecks", p.PostChecks.ID.String())
+	}
+	if p.ContChecks != nil {
+		stmt.SetText("$contchecks", p.ContChecks.ID.String())
+	}
 
 	blocks, err := idsToJSON(p.Blocks)
 	if err != nil {

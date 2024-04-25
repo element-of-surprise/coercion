@@ -1,27 +1,23 @@
 /*
-package registry provides the global registry of plugins. This is used to register plugins
-during plugin initialization.
+package registry provides a registry of plugins. This is used to register plugins
+that will be used by a workstream plan.
 
-Usage should happen in a plugin during init():
+Usage:
 
-	package myplugin
+	package main
 
 	import (
-		"github.com/element-of-surprise/workstream/plugins"
+		"github.com/element-of-surprise/plugins/github" // Doesn't really exist, example name
 		"github.com/element-of-surprise/workstream/registry"
-		...
 	)
 
-	func init() {
-		registry.Plugins.Register(&myPlugin{})
-	}
-
-	var _ plugins.Plugin = &myPlugin{}
-
-	type myPlugin struct {
+	func main() {
+		reg := registry.New()
+		if err := reg.Register(github.New()); err != nil {
+			// handle error
+		}
 		...
 	}
-	...
 */
 package registry
 
@@ -33,10 +29,6 @@ import (
 	"github.com/element-of-surprise/workstream/plugins"
 	"github.com/gostdlib/ops/retry/exponential"
 )
-
-// Plugins is the global registry of plugins. It is only intended to be used
-// during initialization by the user (aka inside an init() for the plugin), any other use can result in undefined behavior.
-var Plugins = New()
 
 // Register provides a Register for plugins. This should not be used directly by the user,
 // but instead via the Registry variable. Use of this type directly is not supported.
@@ -54,28 +46,37 @@ func New() *Register {
 // Register registers a plugin by name. It panics if the name is empty, the plugin is nil,
 // or a plugin is already registered with the same name. This can only be called during
 // init, otherwise the behavior is undefined. Not safe for concurrent use.
-func (r *Register) Register(p plugins.Plugin) {
+func (r *Register) Register(p plugins.Plugin) error {
 	if p == nil {
-		panic("plugin is nil")
+		return fmt.Errorf("plugin is nil")
 	}
 
 	if strings.TrimSpace(p.Name()) == "" {
-		panic("name is empty")
+		return fmt.Errorf("name is empty")
 	}
 
 	if r.m == nil {
-		panic("bug: Registry not initialized")
+		return fmt.Errorf("bug: Registry not initialized")
 	}
 
 	if _, ok := r.m[p.Name()]; ok {
-		panic(fmt.Sprintf("plugin(%s) already registered", p.Name()))
+		return fmt.Errorf("plugin(%s) already registered", p.Name())
 	}
 
 	if err := validatePolicy(p.RetryPolicy()); err != nil {
-		panic(fmt.Sprintf("plugin(%s) has invalid retry plan: %v", p.Name(), err))
+		return fmt.Errorf("plugin(%s) has invalid retry plan: %v", p.Name(), err)
 	}
 
 	r.m[p.Name()] = p
+	return nil
+}
+
+// MustRegister registers a plugin by name. It panics if their is an error
+// registering the plugin.
+func (r *Register) MustRegister(p plugins.Plugin) {
+	if err := r.Register(p); err != nil {
+		panic(err)
+	}
 }
 
 // Plugins returns a channel of all the plugins in the registry.

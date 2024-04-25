@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/element-of-surprise/workstream/internal/execute"
+	"github.com/element-of-surprise/workstream/plugins/registry"
 	"github.com/element-of-surprise/workstream/workflow"
 	"github.com/element-of-surprise/workstream/workflow/storage"
 	"github.com/element-of-surprise/workstream/workflow/utils/walk"
@@ -36,21 +37,37 @@ type Result[T any] struct {
 // Workstream provides a way to submit and execute workflow.Plans. You only need one Workstream
 // per application. It is safe to use concurrently.
 type Workstream struct {
+	reg *registry.Register
 	exec  *execute.Plans
 	store storage.Vault
 }
 
+// Option is an optional argument for New(). For future use.
+type Option func(*Workstream) error
+
 // New creates a new Workstream.
-func New(ctx context.Context, store storage.Vault) (*Workstream, error) {
+func New(ctx context.Context, reg *registry.Register, store storage.Vault, options ...Option) (*Workstream, error) {
 	if store == nil {
 		return nil, fmt.Errorf("storage is required")
 	}
-	exec, err := execute.New(ctx, store)
+	if reg == nil {
+		return nil, fmt.Errorf("registry is required")
+	}
+
+	ws := &Workstream{reg: reg, store: store}
+	for _, o := range options {
+		if err := o(ws); err != nil {
+			return nil, err
+		}
+	}
+
+	exec, err := execute.New(ctx, store, reg)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create executor: %w", err)
 	}
+	ws.exec = exec
 
-	return &Workstream{exec: exec, store: store}, nil
+	return ws, nil
 }
 
 type defaulter interface {
@@ -63,6 +80,9 @@ type defaulter interface {
 // Start() to begin execution. Using the Plan object after submitting it results in undefined behavior.
 // To get the status of the plan, use the Status method.
 func (w *Workstream) Submit(ctx context.Context, plan *workflow.Plan) (uuid.UUID, error) {
+	if err := w.populateRegistry(ctx, plan); err != nil {
+		return uuid.Nil, err
+	}
 	if err := workflow.Validate(plan); err != nil {
 		return uuid.Nil, fmt.Errorf("Plan did not validate: %s", err)
 	}
@@ -79,6 +99,19 @@ func (w *Workstream) Submit(ctx context.Context, plan *workflow.Plan) (uuid.UUID
 	}
 
 	return plan.ID, nil
+}
+
+func (w *Workstream) populateRegistry(ctx context.Context, plan *workflow.Plan) error {
+	for item := range walk.Plan(ctx, plan) {
+		if item.Value.Type() == workflow.OTAction {
+			a := item.Action()
+			if a.HasRegister() {
+				return fmt.Errorf("action(%s) had register set, which is not allowed", a.Name)
+			}
+			a.SetRegister(w.reg)
+		}
+	}
+	return nil
 }
 
 // Start begins execution of a plan with the given id. The plan must have been submitted to the workstream.
