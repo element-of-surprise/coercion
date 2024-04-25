@@ -105,7 +105,7 @@ type Plugin interface {
 - Response - Returns an empty response object. If a plugin returns a response that isn't the same as this, the plugin is considered to have failed.
 - IsCheck - Returns true if the plugin is a check plugin. A check plugin should not have side effects and can only be used in one of the check actions. A check plugin cannot be used in a Job.
 - RetryPlan - Returns the retry plan for the plugin. This is the plan for how the plugin should be retried. The number of retries is set in the `Job` object. This RetryPlan uses exponential backoff that you define for SRE best practices.
-- Init - This is run after the registry is loaded. The plugin should do any necessary checks to ensure that it is ready to be used. If the plugin is not ready, it should return an error. This is useful for plugins that require local resources like a command line application to be installed.
+- Init - Validates that the environment that the plugin currently operates in is valid for the plugin. If this fails, the plugin cannot be used. For example, if this leverages an external binary, this can check for the existence of that binary.
 
 A plugin is registered in a plugin registry. The registry is used to look up plugins by name, where all plugin names must be unique within a registry.
 
