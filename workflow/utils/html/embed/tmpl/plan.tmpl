@@ -1,0 +1,364 @@
+{{$top := .}}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="cache-control" content="no-cache" />
+
+    <title>Coersion</title>
+    <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;500;700;900&display=swap" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+    <script src="https://unpkg.com/htmx.org"></script>
+    <style>
+        .title {
+            display: flex;
+            align-items: center;
+            font-family: 'Orbitron', sans-serif;
+            font-size: 5rem;
+            margin-top: 1rem;
+        }
+
+        .progress {
+    height: 1.5em; /* Maintains the height of the progress bar */
+    width: 200px; /* Sets the width of the progress bar */
+    background-color: #c9c9c9; /* Light gray background for the unfilled part */
+    position: relative; /* Needed for positioning the label */
+    border-radius: 0.75em; /* Adds rounded ends to the progress bar */
+    overflow: hidden; /* Ensures the inner elements do not overflow */
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1); /* Optional: adds a subtle shadow for depth */
+}
+
+.progress:before {
+    content: attr(data-label); /* Pulls the label from the data-label attribute */
+    font-size: 0.8em; /* Sets the size of the font inside the progress bar */
+    position: absolute; /* Ensures the label is positioned relative to the progress bar */
+    text-align: center; /* Centers the label text */
+    top: 0; /* Aligns the top of the label with the top of the progress bar */
+    left: 0; /* Aligns the left side of the label with the left side of the progress bar */
+    right: 0; /* Aligns the right side of the label with the right side of the progress bar */
+    line-height: 1.5em; /* Centers the text vertically by matching line height to the progress bar's height */
+    color: #333; /* Optional: changes the text color for better readability */
+}
+
+.progress .value {
+    background-color: #7cc4ff; /* Bright blue color for the filled part of the progress bar */
+    display: block; /* Changes from inline-block to block for better control over width and position */
+    height: 100%; /* Ensures the filled part matches the height of the progress bar */
+    border-radius: 0.75em; /* Rounded corners on the filled part */
+    transition: width 0.3s ease; /* Smooth transition for changes in width */
+}
+
+        .summary table {
+            border-collapse: collapse;
+            box-shadow: 0 4px 8px 0 rgba(0,0,0,0.2), 0 6px 20px 0 rgba(0,0,0,0.19); /* Added box shadow */
+        }
+        .summary table th {
+            font-family: 'Orbitron', sans-serif;
+            background-color: #474747; /* Graphite */
+            color: white; /*#B5F8FA;*/ /*#daf8fb;  Ice Blue */
+            padding: 10px;
+            border: 1px solid #ddd;
+        }
+        .summary table td {
+            background-color: #F9F9F9; /* Snow White */
+            color: #474747; /* Graphite */
+            padding: 10px;
+            border: 1px solid #ddd;
+        }
+
+        .section-row {
+            justify-content: space-between;
+
+            font-family: 'Orbitron', sans-serif;
+            background-color: #474747; /* Graphite */
+            color: white;
+            border: 1px solid #ddd;
+            padding: 10px;
+
+            box-shadow: 0 4px 8px 0 rgba(0,0,0,0.2), 0 6px 20px 0 rgba(0,0,0,0.19); /* Added box shadow */
+        }
+
+    </style>
+</head>
+<body>
+    <div id="banner" class="title text-white bg-black p-5 text-xl">
+        {{banner}}
+        <span style="margin-left:20px">Coersion</span>
+    </div>
+
+    <div class="m-5 p-5 bg-gray-600 rounded-md">
+        <div class="summary m-5 p-5">
+            <table>
+                <tr><th colspan="2" class="header">Plan Summary</th></tr>
+                <tr>
+                    <th>ID</th>
+                    <td class="hover:bg-yellow-400">{{.ID}}</td>
+                </tr>
+                {{if .GroupID }}
+                <tr>
+                    <th>Group ID</th>
+                    <td class="hover:bg-yellow-400">{{.GroupID}}</td>
+                </tr>
+                {{end}}
+                <tr>
+                    <th>Name</th>
+                    <td class="hover:bg-yellow-400">{{.Name}}</td>
+                </tr>
+                <tr>
+                    <th>Description</th>
+                    <td class="hover:bg-yellow-400">{{.Descr}}</td>
+                </tr>
+                <tr>
+                    <th>Submission Time</th>
+                    <td class="hover:bg-yellow-400">{{time .SubmitTime}}</td>
+                </tr>
+                <tr>
+                    <th>Status</th>
+                    <td class="hover:bg-yellow-400"><span style="color:{{statusColor .State.Status}}">{{.State.Status}}</span></td>
+                </tr>
+
+            </table>
+        </div>
+    
+
+    {{with .PreChecks}}
+    {{$completed := completedChecks .}}
+        <div class="m-5 p-5 pb-0">
+            <div class="section-row flex sitems-center">
+                <div>PreChecks</div>
+                <div>
+                    <div class="progress" data-label="{{$completed.Done}}/{{$completed.Total}}" style="margin-left: auto;">
+                        <span class="value" style="width:{{$completed.Percent}}%; background-color:{{$completed.Color}};"></span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="summary m-5 p-5 pt-1">
+            <table class="w-full">
+                <tr>
+                    <th class="header text-left">Name</th>
+                    <th class="header text-left">Description</th>
+                    <th class="header text-left">Status</th>
+                </tr>
+                {{range .Actions}}
+                    <tr>
+                        <td>{{.Name}}</td>
+                        <td>{{.Descr}}</td>
+                        <td><span style="color:{{statusColor .State.Status}}">{{.State.Status}}</span></td>
+                    </tr>
+                {{end}}
+            </table>
+        </div>
+    {{end}}
+
+    {{with .ContChecks}}
+    {{$completed := completedChecks .}}
+        <div class="m-5 p-5 pb-0">
+            <div class="section-row flex sitems-center">
+                <div>ContChecks (Delay: {{.Delay}})</div>
+                <div>
+                    <div class="progress" data-label="{{$completed.Done}}/{{$completed.Total}}" style="margin-left: auto;">
+                        <span class="value" style="width:{{$completed.Percent}}%; background-color:{{$completed.Color}};"></span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="summary m-5 p-5 pt-1">
+            <table class="w-full">
+                <tr>
+                    <th class="header text-left">Name</th>
+                    <th class="header text-left">Description</th>
+                    <th class="header text-left">Status</th>
+                </tr>
+                {{range .Actions}}
+                    <tr>
+                        <td>{{.Name}}</td>
+                        <td>{{.Descr}}</td>
+                        <td><span style="color:{{statusColor .State.Status}}">{{.State.Status}}</span></td>
+                    </tr>
+                {{end}}
+            </table>
+        </div>
+    {{end}}
+
+    {{with .PostChecks}}
+    {{$completed := completedChecks .}}
+        <div class="m-5 p-5 pb-0">
+            <div class="section-row flex sitems-center">
+                <div>PostChecks</div>
+                <div>
+                    <div class="progress" data-label="{{$completed.Done}}/{{$completed.Total}}" style="margin-left: auto;">
+                        <span class="value" style="width:{{$completed.Percent}}%; background-color:{{$completed.Color}};"></span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="summary m-5 p-5 pt-1">
+            <table class="w-full">
+                <tr>
+                    <th class="header text-left">Name</th>
+                    <th class="header text-left">Description</th>
+                    <th class="header text-left">Status</th>
+                </tr>
+                {{range .Actions}}
+                    <tr>
+                        <td>{{.Name}}</td>
+                        <td>{{.Descr}}</td>
+                        <td><span style="color:{{statusColor .State.Status}}">{{.State.Status}}</span></td>
+                    </tr>
+                {{end}}
+            </table>
+        </div>
+    {{end}}
+    </div>
+
+    {{range $index, $block := .Blocks}}
+        {{$completed := completedBlock .}}
+        {{if mod $index}}
+        <div class="m-5 p-5 bg-gray-600 rounded-md">
+        {{else}}
+        <div class="m-5 p-5 bg-gray-200 rounded-md">
+        {{end}}
+            <div class="m-5 p-5 pb-0">
+                <div class="section-row flex sitems-center">
+                    <div>Block: {{.Name}}</div>
+                    <div>
+                        <div class="progress" data-label="{{$completed.Done}}/{{$completed.Total}}" style="margin-left: auto;">
+                            <span class="value" style="width:{{$completed.Percent}}%; background-color:{{$completed.Color}};"></span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            {{with .PreChecks}}
+                {{$completed := completedChecks .}}
+                <div class="m-5 p-5 pb-0">
+                    <div class="section-row flex sitems-center">
+                        <div>PreChecks</div>
+                        <div>
+                            <div class="progress" data-label="{{$completed.Done}}/{{$completed.Total}}" style="margin-left: auto;">
+                                <span class="value" style="width:{{$completed.Percent}}%; background-color:{{$completed.Color}};"></span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="summary m-5 p-5 pt-1">
+                    <table class="w-full">
+                        <tr>
+                            <th class="header text-left">Name</th>
+                            <th class="header text-left">Description</th>
+                            <th class="header text-left">Status</th>
+                        </tr>
+                        {{range .Actions}}
+                            <tr>
+                                <td>{{.Name}}</td>
+                                <td>{{.Descr}}</td>
+                                <td><span style="color:{{statusColor .State.Status}}">{{.State.Status}}</span></td>
+                            </tr>
+                        {{end}}
+                    </table>
+                </div>
+            {{end}}
+
+            {{with .ContChecks}}
+                {{$completed := completedChecks .}}
+                <div class="m-5 p-5 pb-0">
+                    <div class="section-row flex sitems-center">
+                        <div>ContChecks (Delay: {{.Delay}})</div>
+                        <div>
+                            <div class="progress" data-label="{{$completed.Done}}/{{$completed.Total}}" style="margin-left: auto;">
+                                <span class="value" style="width:{{$completed.Percent}}%; background-color:{{$completed.Color}};"></span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="summary m-5 p-5 pt-1">
+                    <table class="w-full">
+                        <tr>
+                            <th class="header text-left">Name</th>
+                            <th class="header text-left">Description</th>
+                            <th class="header text-left">Status</th>
+                        </tr>
+                        {{range .Actions}}
+                            <tr>
+                                <td>{{.Name}}</td>
+                                <td>{{.Descr}}</td>
+                                <td><span style="color:{{statusColor .State.Status}}">{{.State.Status}}</span></td>
+                            </tr>
+                        {{end}}
+                    </table>
+                </div>
+            {{end}}
+
+            {{with .PostChecks}}
+                {{$completed := completedChecks .}}
+                <div class="m-5 p-5 pb-0">
+                    <div class="section-row flex sitems-center">
+                        <div>PostChecks</div>
+                        <div>
+                            <div class="progress" data-label="{{$completed.Done}}/{{$completed.Total}}" style="margin-left: auto;">
+                                <span class="value" style="width:{{$completed.Percent}}%; background-color:{{$completed.Color}};"></span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="summary m-5 p-5 pt-1">
+                    <table class="w-full">
+                        <tr>
+                            <th class="header text-left">Name</th>
+                            <th class="header text-left">Description</th>
+                            <th class="header text-left">Status</th>
+                        </tr>
+                        {{range .Actions}}
+                            <tr>
+                                <td>{{.Name}}</td>
+                                <td>{{.Descr}}</td>
+                                <td><span style="color:{{statusColor .State.Status}}">{{.State.Status}}</span></td>
+                            </tr>
+                        {{end}}
+                    </table>
+                </div>
+            {{end}}
+
+            {{$completed := completedSequences .Sequences}}
+            <div class="m-5 p-5 pb-0">
+                <div class="section-row flex sitems-center">
+                    <div>Sequences (Concurrency: {{.Concurrency}}, ToleratedFailures: {{.ToleratedFailures}})</div>
+                    <div>
+                        <div class="progress" data-label="{{$completed.Done}}/{{$completed.Total}}" style="margin-left: auto;">
+                            <span class="value" style="width:{{$completed.Percent}}%; background-color:{{$completed.Color}};"></span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="summary m-5 p-5 pt-1">
+                <table class="w-full">
+                    <tr>
+                        <th class="header text-left">Name</th>
+                        <th class="header text-left">Description</th>
+                        <th class="header text-left">Status</th>
+                    </tr>
+
+                    {{range .Sequences}}
+                        <tr>
+                            <td>{{.Name}}</td>
+                            <td>{{.Descr}}</td>
+                            <td><span style="color:{{statusColor .State.Status}}">{{.State.Status}}</span></td>
+                        </tr>
+                    {{end}}
+                </table>
+            </div>
+        </div> {{/*<div class="m-5 p-5 bg-yellow-50 rounded-md">*/}}
+    {{end}} {{/*{{range .Blocks}}*/}}
+
+
+</body>
+</html>
