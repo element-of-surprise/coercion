@@ -1,0 +1,70 @@
+<style>
+    .title {
+        display: flex;
+        align-items: center;
+        font-family: 'Orbitron', sans-serif;
+        font-size: 5rem;
+        margin-top: 1rem;
+    }
+
+    .progress {
+        height: 1.5em; 
+        width: 200px; 
+        background-color: #c9c9c9; 
+        position: relative; 
+        border-radius: 0.75em; 
+        overflow: hidden; 
+        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
+
+    .progress:before {
+        content: attr(data-label); 
+        font-size: 0.8em; 
+        position: absolute; 
+        text-align: center; 
+        top: 0; 
+        left: 0; 
+        right: 0; 
+        line-height: 1.5em; 
+        color: #333; 
+    }
+
+    .progress .value {
+        background-color: #7cc4ff; 
+        display: block; 
+        height: 100%;
+        border-radius: 0.75em; 
+        transition: width 0.3s ease;
+    }
+
+    .summary table {
+        border-collapse: collapse;
+        box-shadow: 0 4px 8px 0 rgba(0,0,0,0.2), 0 6px 20px 0 rgba(0,0,0,0.19); /* Added box shadow */
+    }
+    .summary table th {
+        font-family: 'Orbitron', sans-serif;
+        background-color: #474747; /* Graphite */
+        color: white; /*#B5F8FA;*/ /*#daf8fb;  Ice Blue */
+        padding: 10px;
+        border: 1px solid #ddd;
+    }
+    .summary table td {
+        background-color: #F9F9F9; /* Snow White */
+        color: #474747; /* Graphite */
+        padding: 10px;
+        border: 1px solid #ddd;
+    }
+
+    .section-row {
+        justify-content: space-between;
+
+        font-family: 'Orbitron', sans-serif;
+        background-color: #474747; /* Graphite */
+        color: white;
+        border: 1px solid #ddd;
+        padding: 10px;
+
+        box-shadow: 0 4px 8px 0 rgba(0,0,0,0.2), 0 6px 20px 0 rgba(0,0,0,0.19); /* Added box shadow */
+    }
+
+</style>

@@ -11,13 +11,13 @@ import (
 // to it. Based on calling Value.Type(), you can call the appropriate method to
 // get the object without using reflection.
 type Item struct {
+	// Value is the value of the Item.
+	Value workflow.Object
 	// Chain is the chain of objects that led to this object. This will be empty
 	// for the Plan object. While modifying an Object in the chain is fine,
 	// the slice itself should not be modified. Otherwise the results will be
 	// unpredictable.
 	Chain []workflow.Object
-	// Value is the value of the Item.
-	Value workflow.Object
 }
 
 // IsZero returns true if the Item is the zero value.

@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="en">
+{{template "head.tmpl"}}
+
+<body>
+    {{template "banner.tmpl"}}
+
+    {{$completed := completedSequence .}}
+    <div class="m-5 p-5 bg-gray-200 rounded-md">
+        <div class="summary m-5 p-5">
+            <table>
+                <tr><th colspan="2" class="header">Sequence Details</th></tr>
+                <tr>
+                    <th>ID</th>
+                    <td class="hover:bg-yellow-400">{{.ID}}</td>
+                </tr>
+                <tr>
+                    <th>Name</th>
+                    <td class="hover:bg-yellow-400">{{.Name}}</td>
+                </tr>
+                <tr>
+                    <th>Description</th>
+                    <td class="hover:bg-yellow-400">{{.Descr}}</td>
+                </tr>
+                <tr>
+                    <th>Number of Actions</th>
+                    <td class="hover:bg-yellow-400">{{len .Actions}}</td>
+                </tr>
+                <tr>
+                    <th>Started</th>
+                    <td class="hover:bg-yellow-400">{{time .State.Start}}</td>
+                </tr>
+                <tr>
+                    <th>End</th>
+                    <td class="hover:bg-yellow-400">{{time .State.End}}</td>
+                </tr>
+                <tr>
+                    <th>Status</th>
+                    <td class="hover:bg-yellow-400"><span style="color:{{statusColor .State.Status}}">{{.State.Status}}</span></td>
+                </tr>
+            </table>
+        </div>
+    
+       <div class="m-5 mb-0 p-5 pb-0">
+            <div class="section-row flex sitems-center">
+                <div>Actions</div>
+                <div>
+                    <div class="progress" data-label="{{$completed.Done}}/{{$completed.Total}}" style="margin-left: auto;">
+                        <span class="value" style="width:{{$completed.Percent}}%; background-color:{{$completed.Color}};"></span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="summary m-5 mt-0 p-5 pt-0">
+            <table class="w-full">
+                <tr>
+                    <th class="header text-left">Name</th>
+                    <th class="header text-left">Description</th>
+                    <th class="header text-left">Status</th>
+                </tr>
+                {{range .Actions}}
+                    <tr class="group">
+                        <td class="group-hover:bg-yellow-400"><a href="/actions/{{.ID}}.html">{{.Name}}</a></td>
+                        <td class="group-hover:bg-yellow-400">{{.Descr}}</td>
+                        <td class="group-hover:bg-yellow-400"><span style="color:{{statusColor .State.Status}}">{{.State.Status}}</span></td>
+                    </tr>
+                {{end}}
+            </table>
+        </div>
+    </div>
+</body>
+</html>

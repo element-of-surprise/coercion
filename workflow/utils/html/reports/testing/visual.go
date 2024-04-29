@@ -1,13 +1,23 @@
 package main
 
 import (
+	"bytes"
+	"context"
+	"flag"
+	"io"
 	"net/http"
+	"os"
 	"time"
 
 	"github.com/element-of-surprise/workstream/workflow"
-	html "github.com/element-of-surprise/workstream/workflow/utils/html"
+	html "github.com/element-of-surprise/workstream/workflow/utils/html/reports"
+	"github.com/gofiber/fiber/v2"
+	"github.com/gofiber/fiber/v2/middleware/filesystem"
 	"github.com/google/uuid"
 )
+
+var port = flag.String("port", ":8080", "port to listen on")
+var download = flag.Bool("download", false, "if true, will download the report instead of serving it.")
 
 type Resp struct {
 	FieldA string
@@ -25,6 +35,7 @@ func makePlan() *workflow.Plan {
 			}
 		}
 		return &workflow.Action{
+			ID:   uuid.New(),
 			Name: name,
 			State: &workflow.State{
 				Status: status,
@@ -42,11 +53,13 @@ func makePlan() *workflow.Plan {
 		SubmitTime: time.Now(),
 		State:      &workflow.State{Status: workflow.Running},
 		PreChecks: &workflow.Checks{
+			ID: uuid.New(),
 			Actions: []*workflow.Action{
 				actionWithAttempts("Verify User Permissions", workflow.Completed, 3),
 			},
 		},
 		ContChecks: &workflow.Checks{
+			ID: uuid.New(),
 			Actions: []*workflow.Action{
 				actionWithAttempts("Check Site is Reliable", workflow.Completed, 1),
 				actionWithAttempts("Check Network Connectivity", workflow.Completed, 1),
@@ -54,9 +67,11 @@ func makePlan() *workflow.Plan {
 		},
 		Blocks: []*workflow.Block{
 			{
+				ID:    uuid.New(),
 				Name:  "Initialize Environment",
 				State: &workflow.State{Status: workflow.Running},
 				PreChecks: &workflow.Checks{
+					ID:    uuid.New(),
 					State: &workflow.State{Status: workflow.Completed},
 					Actions: []*workflow.Action{
 						actionWithAttempts("Check Cloud Credentials", workflow.Completed, 2),
@@ -64,6 +79,7 @@ func makePlan() *workflow.Plan {
 				},
 				Sequences: []*workflow.Sequence{
 					{
+						ID:    uuid.New(),
 						Name:  "Setup Kubernetes Cluster",
 						State: &workflow.State{Status: workflow.Completed},
 						Actions: []*workflow.Action{
@@ -72,6 +88,7 @@ func makePlan() *workflow.Plan {
 					},
 				},
 				PostChecks: &workflow.Checks{
+					ID:    uuid.New(),
 					State: &workflow.State{Status: workflow.Completed},
 					Actions: []*workflow.Action{
 						actionWithAttempts("Validate Cluster Configuration", workflow.Completed, 1),
@@ -80,6 +97,7 @@ func makePlan() *workflow.Plan {
 			},
 		},
 		PostChecks: &workflow.Checks{
+			ID:      uuid.New(),
 			State:   &workflow.State{Status: workflow.Completed},
 			Actions: []*workflow.Action{actionWithAttempts("Cleanup Temporary Files", workflow.Completed, 1)},
 		},
@@ -88,14 +106,37 @@ func makePlan() *workflow.Plan {
 }
 
 func main() {
-	b, err := html.Render(makePlan())
+	flag.Parse()
+
+	if *download {
+		os.Remove(("report.tar.gz"))
+
+		f, err := os.Create("report.tar.gz")
+		if err != nil {
+			panic(err)
+		}
+		defer f.Close()
+
+		b, err := html.Download(context.Background(), makePlan())
+		if err != nil {
+			panic(err)
+		}
+		if _, err = io.Copy(f, bytes.NewReader(b)); err != nil {
+			panic(err)
+		}
+		return
+	}
+
+	fs, err := html.Render(context.Background(), makePlan())
 	if err != nil {
 		panic(err)
 	}
 
-	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		w.Write(b.Bytes())
-	})
+	app := fiber.New()
+	app.Use("/", filesystem.New(filesystem.Config{
+		Root:  http.FS(fs),
+		Index: "plan.html",
+	}))
+	app.Listen(*port)
 
-	http.ListenAndServe(":8080", nil)
 }
