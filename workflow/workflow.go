@@ -4,6 +4,7 @@ package workflow
 import (
 	"errors"
 	"fmt"
+	"reflect"
 	"strings"
 	"sync"
 	"time"
@@ -825,4 +826,37 @@ func Validate(p *Plan) error {
 		}
 	}
 	return nil
+}
+
+// Secure sets all fields in anywhere in the Plan that are tagged with `coerce:"secure"` to their zero value.
+func Secure(v *Plan) {
+	secure(v)
+}
+
+func secure(v any) {
+	val := reflect.ValueOf(v)
+	if val.Kind() == reflect.Ptr {
+		val = val.Elem()
+	}
+	if val.Kind() != reflect.Struct {
+		return
+	}
+
+	typ := val.Type()
+	for i := 0; i < val.NumField(); i++ {
+		field := val.Field(i)
+		if !field.CanSet() {
+			field = field.Addr()
+		}
+		tag := typ.Field(i).Tag.Get("coerce")
+		if tag == "secure" {
+			field.Set(reflect.Zero(field.Type()))
+			continue
+		}
+
+		// Recursively coerce nested structs
+		if field.Kind() == reflect.Struct || (field.Kind() == reflect.Ptr && field.Elem().Kind() == reflect.Struct) {
+			secure(field.Addr().Interface())
+		}
+	}
 }

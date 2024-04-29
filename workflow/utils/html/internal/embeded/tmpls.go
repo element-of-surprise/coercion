@@ -1,106 +1,61 @@
-package html
+package embeded
 
 import (
-	"bytes"
+	"encoding/json"
+	"fmt"
 	"html/template"
+	"io/fs"
 	"log"
-	"reflect"
-	"sync"
+	"path/filepath"
 	"time"
+	"unsafe"
 
 	"github.com/element-of-surprise/workstream/workflow"
-
-	_ "embed"
 )
 
-//go:embed embed/tmpl/plan.tmpl
-var tmplText string
-
-//go:embed embed/imgs/banner_img.svg
-var bannerSVG string
-
-var tmpl *template.Template
+// Tmpls is a collection of templates that are embedded in the binary.
+var Tmpls = template.New("")
 
 func init() {
-	var err error
-	tmpl, err = template.New("").Funcs(
-		template.FuncMap{
-			"completedPlan":      calcCompleted[*workflow.Plan],
-			"completedBlock":     calcCompleted[*workflow.Block],
-			"completedChecks":    calcCompleted[*workflow.Checks],
-			"completedSequences": calcCompleted[[]*workflow.Sequence],
-			"completedSequence":  calcCompleted[*workflow.Sequence],
-			"attemptStatus":      attemptStatus,
-			"banner":             banner,
-			"time":               timeOutput,
-			"statusColor":        statusColor,
-			"mod":                mod,
+	walkErr := fs.WalkDir(
+		FS,
+		"tmpl",
+		func(path string, d fs.DirEntry, err error) error {
+			if d.IsDir() {
+				return nil
+			}
+
+			tmplText, err := fs.ReadFile(FS, path)
+			if err != nil {
+				return fmt.Errorf("reading embedded template failed(%s): %w", path, err)
+			}
+
+			log.Println(filepath.Base(path))
+			Tmpls, err = Tmpls.New(filepath.Base(path)).Funcs(
+				template.FuncMap{
+					"completedPlan":      calcCompleted[*workflow.Plan],
+					"completedBlock":     calcCompleted[*workflow.Block],
+					"completedChecks":    calcCompleted[*workflow.Checks],
+					"completedSequences": calcCompleted[[]*workflow.Sequence],
+					"completedSequence":  calcCompleted[*workflow.Sequence],
+					"attemptStatus":      attemptStatus,
+					"banner":             banner,
+					"time":               timeOutput,
+					"statusColor":        statusColor,
+					"mod":                mod,
+					"isZeroTime":         isZeroTime,
+					"jsonMarshal":        jsonMarshal,
+				},
+			).Parse(string(tmplText))
+			if err != nil {
+				return fmt.Errorf("parsing template failed(%s): %w", path, err)
+			}
+			return nil
 		},
-	).Parse(tmplText)
-	if err != nil {
-		panic(err)
+	)
+	if walkErr != nil {
+		panic(walkErr)
 	}
-}
-
-// BufPool is a pool of *bytes.Buffer objects. You may use this to loweer
-// the number of allocations when rendering Plans
-type BufPool struct {
-	pool sync.Pool
-}
-
-// Get returns a *bytes.Buffer from the pool. The buffer will be reset.
-func (bp *BufPool) Get() *bytes.Buffer {
-	return bp.pool.Get().(*bytes.Buffer)
-}
-
-// Put returns a *bytes.Buffer to the pool. The buffer is reset.
-func (bp *BufPool) Put(b *bytes.Buffer) {
-	b.Reset()
-
-	bp.pool.Put(b)
-}
-
-type renderOptions struct {
-	// bufPool is the buffer pool to use for rendering.
-	bufPool *BufPool
-}
-
-// Option is an optional argument for Render.
-type Option func(renderOptions) (renderOptions, error)
-
-// WithBufPool sets a buffer pool to use for rendering.
-func WithBufPool(bp *BufPool) Option {
-	return func(o renderOptions) (renderOptions, error) {
-		o.bufPool = bp
-		return o, nil
-	}
-}
-
-// Render renders a workflow.Plan to an HTML document. This may alter the Plan object to
-// eliminate Request and Response fields that have fields marked with the `coerce:"secure"` tag.
-func Render(plan *workflow.Plan, options ...Option) (*bytes.Buffer, error) {
-	opts := renderOptions{}
-	for _, opt := range options {
-		var err error
-		opts, err = opt(opts)
-		if err != nil {
-			return nil, err
-		}
-	}
-
-	var b *bytes.Buffer
-	if opts.bufPool == nil {
-		b = &bytes.Buffer{}
-	} else {
-		b = opts.bufPool.Get()
-	}
-
-	coerceSecure(plan)
-
-	if err := tmpl.Execute(b, plan); err != nil {
-		panic(err)
-	}
-	return b, nil
 }
 
 type supportedCalcs interface {
@@ -218,7 +173,11 @@ func attemptStatus(a *workflow.Attempt) string {
 }
 
 func banner() template.HTML {
-	return template.HTML(bannerSVG)
+	b, err := FS.ReadFile("imgs/banner_img.svg")
+	if err != nil {
+		panic(err)
+	}
+	return template.HTML(b)
 }
 
 func timeOutput(t time.Time) string {
@@ -243,33 +202,23 @@ func mod(a int) int {
 	return a % 2
 }
 
-// coerceSecure sets all fields in a struct that are tagged with `coerce:"secure"` to their zero value.
-// You must pass a pointer to the struct you want to coerce.
-func coerceSecure(v interface{}) {
-	val := reflect.ValueOf(v)
-	if val.Kind() == reflect.Ptr {
-		val = val.Elem()
-	}
-	if val.Kind() != reflect.Struct {
-		return
+func isZeroTime(t time.Time) bool {
+	return t.IsZero()
+}
+
+func jsonMarshal(v any) string {
+	if v == nil {
+		return ""
 	}
 
-	typ := val.Type()
-	for i := 0; i < val.NumField(); i++ {
-		field := val.Field(i)
-		if !field.CanSet() {
-			field = field.Addr()
-		}
-		tag := typ.Field(i).Tag.Get("coerce")
-		if tag == "secure" {
-			field.Set(reflect.Zero(field.Type()))
-			continue
-		}
-
-		// Recursively coerce nested structs
-		if field.Kind() == reflect.Struct || (field.Kind() == reflect.Ptr && field.Elem().Kind() == reflect.Struct) {
-			coerceSecure(field.Addr().Interface())
-		}
-
+	b, err := json.Marshal(v)
+	if err != nil {
+		return fmt.Sprintf("error marshalling JSON: %v", err)
 	}
+
+	return bytesToStr(b)
+}
+
+func bytesToStr(b []byte) string {
+	return unsafe.String(unsafe.SliceData(b), len(b))
 }

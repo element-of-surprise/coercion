@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="en">
+{{template "head.tmpl"}}
+
+<body>
+    {{template "banner.tmpl"}}
+     <div class="m-5 p-5 bg-gray-200 rounded-md">
+        <div class="summary m-5 p-5">
+            <table>
+                <tr><th colspan="2" class="header">Action Details</th></tr>
+                <tr>
+                    <th>ID</th>
+                    <td class="hover:bg-yellow-400">{{.ID}}</td>
+                </tr>
+                <tr>
+                    <th>Name</th>
+                    <td class="hover:bg-yellow-400">{{.Name}}</td>
+                </tr>
+                <tr>
+                    <th>Description</th>
+                    <td class="hover:bg-yellow-400">{{.Descr}}</td>
+                </tr>
+                <tr>
+                    <th>Plugin</th>
+                    <td class="hover:bg-yellow-400">{{.Plugin}}</td>
+                </tr>
+                <tr>
+                    <th>Timeout</th>
+                    <td class="hover:bg-yellow-400">{{.Timeout}}</td>
+                </tr>
+                <tr>
+                    <th>Request</th>
+                    <td class="hover:bg-yellow-400">{{jsonMarshal .Req}}</td>
+                </tr>
+                <tr>
+                    <th>Start</th>
+                    <td class="hover:bg-yellow-400">{{time .State.Start}}</td>
+                </tr>
+                <tr>
+                    <th>End</th>
+                    <td class="hover:bg-yellow-400">{{time .State.End}}</td>
+                </tr>
+                <tr>
+                    <th>Status</th>
+                    <td class="hover:bg-yellow-400"><span style="color:{{statusColor .State.Status}}">{{.State.Status}}</span></td>
+                </tr>
+            </table>
+        </div>
+
+        <div class="m-5 mb-0 p-5 pb-0">
+            <div class="section-row flex sitems-center">
+                <div>Attempts</div>
+            </div>
+        </div>
+
+        <div class="summary m-5 mt-0 p-5 pt-0">
+            <table class="w-full">
+                <tr>
+                    <th class="header text-left">Number</th>
+                    <th class="header text-left">Response</th>
+                    <th class="header text-left">Status</th>
+                </tr>
+                {{range $i, $attempt := .Attempts}}
+                    <tr class="group">
+                        <td class="group-hover:bg-yellow-400">{{$i}}</td>
+                        {{if .Err}}
+                            <td class="group-hover:bg-yellow-400">{{jsonMarshal .Err}}</td>
+                            <td class="group-hover:bg-yellow-400"><span style="color:red">Error</span></td>
+                        {{else}}
+                            <td class="group-hover:bg-yellow-400">{{jsonMarshal .Resp}}</td>
+                            <td class="group-hover:bg-yellow-400"><span style="color:green">Success</span></td>
+                        {{end}}
+                    </tr>
+                {{end}}
+            </table>
+        </div>
+    </div>
+</body>
+</html>
