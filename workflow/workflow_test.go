@@ -537,6 +537,14 @@ type validatePlugin struct {
 	plugins.Plugin
 }
 
+func (validatePlugin) Request() any {
+	return struct{}{}
+}
+
+func (validatePlugin) Response() any {
+	return struct{}{}
+}
+
 func (validatePlugin) Name() string {
 	return "validatePlugin"
 }
