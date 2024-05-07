@@ -38,6 +38,14 @@ func (b badPlugin) RetryPolicy() exponential.Policy {
 	return pluginsLib.FastRetryPolicy()
 }
 
+func (b badPlugin) Request() any {
+	return struct{}{}
+}
+
+func (b badPlugin) Response() any {
+	return struct{}{}
+}
+
 type goodPlugin struct {
 	name string
 
@@ -54,6 +62,14 @@ func (g goodPlugin) Init() error {
 
 func (g goodPlugin) RetryPolicy() exponential.Policy {
 	return pluginsLib.FastRetryPolicy()
+}
+
+func (g goodPlugin) Request() any {
+	return struct{}{}
+}
+
+func (g goodPlugin) Response() any {
+	return struct{}{}
 }
 
 func TestInitPlugins(t *testing.T) {

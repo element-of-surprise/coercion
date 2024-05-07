@@ -848,8 +848,9 @@ func secure(v any) {
 		if !field.CanSet() {
 			field = field.Addr()
 		}
-		tag := typ.Field(i).Tag.Get("coerce")
-		if tag == "secure" {
+
+		tags := getTags(typ.Field(i))
+		if tags.hasTag("secure") {
 			field.Set(reflect.Zero(field.Type()))
 			continue
 		}
@@ -859,4 +860,27 @@ func secure(v any) {
 			secure(field.Addr().Interface())
 		}
 	}
+}
+
+// tags is a set of tags for a field.
+type tags map[string]bool
+func (t tags) hasTag(tag string) bool {
+	if t == nil {
+		return false
+	}
+	return t[tag]
+}
+
+// getTags returns the tags for a field.
+func getTags(f reflect.StructField) tags {
+	strTags := f.Tag.Get("coerce")
+	if strings.TrimSpace(strTags) == "" {
+		return nil
+	}
+	t := make(tags)
+	for _, tag := range strings.Split(strTags, ",") {
+		tag = strings.TrimSpace(strings.ToLower(tag))
+		t[tag] = true
+	}
+	return t
 }
