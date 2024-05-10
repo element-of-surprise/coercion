@@ -604,7 +604,7 @@ func (s *States) runAction(ctx context.Context, action *workflow.Action, updater
 		},
 		Next: s.actionsSM.Start,
 	}
-	req, err := statemachine.Run("run action statemachine", req)
+	_, err := statemachine.Run("run action statemachine", req)
 	if err != nil {
 		return err
 	}

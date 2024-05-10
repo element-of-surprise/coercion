@@ -35,6 +35,9 @@ func (p reader) fetchPlan(ctx context.Context, id uuid.UUID) (*workflow.Plan, er
 						plan.GroupID = uuid.Nil
 					} else {
 						plan.GroupID, err = uuid.Parse(stmt.GetText("group_id"))
+						if err != nil {
+							return fmt.Errorf("couldn't convert GroupID to UUID: %w", err)
+						}
 					}
 					plan.Name = stmt.GetText("name")
 					plan.Descr = stmt.GetText("descr")

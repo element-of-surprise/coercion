@@ -137,7 +137,7 @@ func Download(ctx context.Context, plan *workflow.Plan, options ...Option) (b []
 
 	reporterName := "reporter"
 	if runtime.GOOS == "windows" {
-		reporterName += ".exe"
+		reporterName = reporterName + ".exe"
 	}
 
 	const rootDir = "reports"
