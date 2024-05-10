@@ -137,7 +137,7 @@ func Download(ctx context.Context, plan *workflow.Plan, options ...Option) (b []
 
 	reporterName := "reporter"
 	if runtime.GOOS == "windows" {
-		reporterName = reporterName + ".exe"
+		reporterName += ".exe"
 	}
 
 	const rootDir = "reports"
@@ -158,7 +158,7 @@ func Download(ctx context.Context, plan *workflow.Plan, options ...Option) (b []
 	// Write our reporter binary.
 	tarWriter.WriteHeader(
 		&tar.Header{
-			Name: filepath.Join(rootDir, "reporter"),
+			Name: filepath.Join(rootDir, reporterName),
 			Size: int64(len(embedded.Reporter)),
 			Mode: 0770,
 		},
