@@ -6,7 +6,7 @@ import (
 	"reflect"
 	"time"
 
-	"github.com/element-of-surprise/workstream/workflow"
+	"github.com/element-of-surprise/coercion/workflow"
 	"github.com/go-json-experiment/json"
 	"github.com/google/uuid"
 	"zombiezen.com/go/sqlite"

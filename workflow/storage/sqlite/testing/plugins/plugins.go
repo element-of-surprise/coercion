@@ -4,12 +4,12 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/element-of-surprise/workstream/plugins"
+	"github.com/element-of-surprise/coercion/plugins"
 	"github.com/gostdlib/ops/retry/exponential"
 )
 
-const HelloPluginName = "github.com/element-of-surprise/workstream/workflow/storage/sqlite/testing/plugins.HelloPlugin"
-const CheckPluginName = "github.com/element-of-surprise/workstream/workflow/storage/sqlite/testing/plugins.CheckPlugin"
+const HelloPluginName = "github.com/element-of-surprise/coercion/workflow/storage/sqlite/testing/plugins.HelloPlugin"
+const CheckPluginName = "github.com/element-of-surprise/coercion/workflow/storage/sqlite/testing/plugins.CheckPlugin"
 
 type HelloReq struct {
 	Say string

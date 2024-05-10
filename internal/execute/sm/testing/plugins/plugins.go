@@ -6,12 +6,12 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/element-of-surprise/workstream/plugins"
+	"github.com/element-of-surprise/coercion/plugins"
 	"github.com/gostdlib/ops/retry/exponential"
 )
 
 // Name is the name of the testing plugin.
-const Name = "github.com/element-of-surprise/workstream/internal/execute/sm/testing/plugins.Testing"
+const Name = "github.com/element-of-surprise/coercion/internal/execute/sm/testing/plugins.Testing"
 
 type Req struct {
 	// Arg is a placeholder.

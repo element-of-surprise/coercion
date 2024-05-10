@@ -9,8 +9,8 @@ import (
 	"os"
 	"time"
 
-	"github.com/element-of-surprise/workstream/workflow"
-	html "github.com/element-of-surprise/workstream/workflow/utils/html/reports"
+	"github.com/element-of-surprise/coercion/workflow"
+	html "github.com/element-of-surprise/coercion/workflow/utils/html/reports"
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/fiber/v2/middleware/filesystem"
 	"github.com/google/uuid"

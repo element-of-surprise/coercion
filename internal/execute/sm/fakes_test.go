@@ -4,8 +4,8 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/element-of-surprise/workstream/workflow"
-	"github.com/element-of-surprise/workstream/workflow/storage"
+	"github.com/element-of-surprise/coercion/workflow"
+	"github.com/element-of-surprise/coercion/workflow/storage"
 )
 
 func fakeActionRunner(ctx context.Context, action *workflow.Action, updater storage.ActionUpdater) error {

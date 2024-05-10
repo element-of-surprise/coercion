@@ -10,10 +10,10 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/element-of-surprise/workstream/internal/execute/sm/actions"
-	"github.com/element-of-surprise/workstream/plugins/registry"
-	"github.com/element-of-surprise/workstream/workflow"
-	"github.com/element-of-surprise/workstream/workflow/storage"
+	"github.com/element-of-surprise/coercion/internal/execute/sm/actions"
+	"github.com/element-of-surprise/coercion/plugins/registry"
+	"github.com/element-of-surprise/coercion/workflow"
+	"github.com/element-of-surprise/coercion/workflow/storage"
 
 	"github.com/gostdlib/concurrency/goroutines/pooled"
 	"github.com/gostdlib/concurrency/prim/wait"

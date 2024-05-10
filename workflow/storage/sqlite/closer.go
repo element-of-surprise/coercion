@@ -3,7 +3,7 @@ package sqlite
 import (
 	"context"
 
-	"github.com/element-of-surprise/workstream/internal/private"
+	"github.com/element-of-surprise/coercion/internal/private"
 	"zombiezen.com/go/sqlite"
 )
 

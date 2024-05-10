@@ -8,7 +8,7 @@ Usage:
 
 	import (
 		"github.com/element-of-surprise/plugins/github" // Doesn't really exist, example name
-		"github.com/element-of-surprise/workstream/registry"
+		"github.com/element-of-surprise/coercion/registry"
 	)
 
 	func main() {
@@ -28,7 +28,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/element-of-surprise/workstream/plugins"
+	"github.com/element-of-surprise/coercion/plugins"
 	"github.com/gostdlib/ops/retry/exponential"
 )
 

@@ -4,7 +4,7 @@ package walk
 import (
 	"context"
 
-	"github.com/element-of-surprise/workstream/workflow"
+	"github.com/element-of-surprise/coercion/workflow"
 )
 
 // Item represents an object in the workflow and the chain of objects that led

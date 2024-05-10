@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/element-of-surprise/workstream/internal/private"
-	"github.com/element-of-surprise/workstream/workflow"
+	"github.com/element-of-surprise/coercion/internal/private"
+	"github.com/element-of-surprise/coercion/workflow"
 	"github.com/google/uuid"
 	"zombiezen.com/go/sqlite"
 )
