@@ -11,7 +11,7 @@ Usage is simple:
 
 	// This a fictional plan to upgrade a service in various clusters.
 	// We have a continuous check to ensure the service is healthy cluster-wide.
-	// We have a block level continous check to ensure the cluster is healthy.
+	// We have a block level continuous check to ensure the cluster is healthy.
 	// We tolderate 1 failure in the block, but we may have up to 5 machines upgrading at once,
 	// so there could be up to 5 failures in the block.
 	// We leave the Sequence that each machine goes through to your imagination.
@@ -278,7 +278,7 @@ func (b *BuildPlan) AddChecks(cType ChecksType, check *workflow.Checks) *BuildPl
 	return b
 }
 
-// BlockArgs are arguements for AddBlock that define a Block in the Plan.
+// BlockArgs are arguments for AddBlock that define a Block in the Plan.
 type BlockArgs struct {
 	Name                     string
 	Descr                    string

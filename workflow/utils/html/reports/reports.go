@@ -15,7 +15,7 @@ import (
 	"sync"
 
 	"github.com/element-of-surprise/coercion/workflow"
-	"github.com/element-of-surprise/coercion/workflow/utils/html/internal/embeded"
+	"github.com/element-of-surprise/coercion/workflow/utils/html/internal/embedded"
 	"github.com/element-of-surprise/coercion/workflow/utils/walk"
 
 	"github.com/spf13/afero"
@@ -75,7 +75,7 @@ func Render(ctx context.Context, plan *workflow.Plan, options ...Option) (fs.Rea
 
 	fs := afero.NewMemMapFs()
 
-	if err := embeded.Tmpls.ExecuteTemplate(b, "plan.tmpl", plan); err != nil {
+	if err := embedded.Tmpls.ExecuteTemplate(b, "plan.tmpl", plan); err != nil {
 		return nil, err
 	}
 
@@ -90,7 +90,7 @@ func Render(ctx context.Context, plan *workflow.Plan, options ...Option) (fs.Rea
 		switch item.Value.Type() {
 		case workflow.OTSequence:
 			seq := item.Sequence()
-			if err := embeded.Tmpls.ExecuteTemplate(b, "sequence.tmpl", seq); err != nil {
+			if err := embedded.Tmpls.ExecuteTemplate(b, "sequence.tmpl", seq); err != nil {
 				return nil, err
 			}
 			fs.Mkdir("sequences", 0755)
@@ -99,7 +99,7 @@ func Render(ctx context.Context, plan *workflow.Plan, options ...Option) (fs.Rea
 			}
 		case workflow.OTAction:
 			act := item.Action()
-			if err := embeded.Tmpls.ExecuteTemplate(b, "action.tmpl", act); err != nil {
+			if err := embedded.Tmpls.ExecuteTemplate(b, "action.tmpl", act); err != nil {
 				return nil, err
 			}
 			fs.Mkdir("actions", 0755)
@@ -159,12 +159,12 @@ func Download(ctx context.Context, plan *workflow.Plan, options ...Option) (b []
 	tarWriter.WriteHeader(
 		&tar.Header{
 			Name: filepath.Join(rootDir, "reporter"),
-			Size: int64(len(embeded.Reporter)),
+			Size: int64(len(embedded.Reporter)),
 			Mode: 0770,
 		},
 	)
 
-	_, err = tarWriter.Write(embeded.Reporter)
+	_, err = tarWriter.Write(embedded.Reporter)
 	if err != nil {
 		return nil, err
 	}

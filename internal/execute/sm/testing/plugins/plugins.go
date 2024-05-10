@@ -147,7 +147,7 @@ func (h *Plugin) RetryPolicy() exponential.Policy {
 	return plugins.FastRetryPolicy()
 }
 
-// InitCheck is run after the registery is loaded. The plugin should do any necessary checks
+// InitCheck is run after the registry is loaded. The plugin should do any necessary checks
 // to ensure that it is ready to be used. If the plugin is not ready, it should return an error.
 // This is useful for plugins that require local resources like a command line application to
 // be installed.

@@ -1,4 +1,4 @@
-package embeded
+package embedded
 
 import (
 	"encoding/json"
