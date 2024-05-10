@@ -13,7 +13,7 @@ import (
 	"github.com/element-of-surprise/coercion/workflow"
 )
 
-// Tmpls is a collection of templates that are embedded in the binary.
+// Tmpls is a collection of templates that were embedded in the binary.
 var Tmpls = template.New("")
 
 func init() {
