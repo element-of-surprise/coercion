@@ -864,6 +864,7 @@ func secure(v any) {
 
 // tags is a set of tags for a field.
 type tags map[string]bool
+
 func (t tags) hasTag(tag string) bool {
 	if t == nil {
 		return false

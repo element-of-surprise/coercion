@@ -123,7 +123,7 @@ func (r reader) buildSearchQuery(filters storage.Filters) (string, []any, map[st
 		if numFilters > 0 {
 			build.WriteString(" AND")
 		}
-		numFilters++
+		numFilters++ // I know this says inEffectual assignment and it is, but it is here for completeness.
 		for i, s := range filters.ByStatus {
 			name := fmt.Sprintf("$status%d", i)
 			named[name] = int64(s)
