@@ -1,5 +1,5 @@
-// Package embeded provides embeded files for multiple packages.
-package embeded
+// Package embedded provides embeded files for multiple packages.
+package embedded
 
 import "embed"
 
