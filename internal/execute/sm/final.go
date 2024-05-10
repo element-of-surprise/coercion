@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"log"
 
-	"github.com/element-of-surprise/workstream/workflow"
+	"github.com/element-of-surprise/coercion/workflow"
 	"github.com/gostdlib/ops/statemachine"
 )
 

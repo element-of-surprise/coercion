@@ -13,11 +13,11 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/element-of-surprise/workstream/internal/execute"
-	"github.com/element-of-surprise/workstream/plugins/registry"
-	"github.com/element-of-surprise/workstream/workflow"
-	"github.com/element-of-surprise/workstream/workflow/storage"
-	"github.com/element-of-surprise/workstream/workflow/utils/walk"
+	"github.com/element-of-surprise/coercion/internal/execute"
+	"github.com/element-of-surprise/coercion/plugins/registry"
+	"github.com/element-of-surprise/coercion/workflow"
+	"github.com/element-of-surprise/coercion/workflow/storage"
+	"github.com/element-of-surprise/coercion/workflow/utils/walk"
 	"github.com/google/uuid"
 )
 

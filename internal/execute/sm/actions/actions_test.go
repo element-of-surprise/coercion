@@ -9,12 +9,12 @@ import (
 	"testing"
 	"time"
 
-	testplugin "github.com/element-of-surprise/workstream/internal/execute/sm/testing/plugins"
-	"github.com/element-of-surprise/workstream/internal/private"
-	"github.com/element-of-surprise/workstream/plugins"
-	"github.com/element-of-surprise/workstream/plugins/registry"
-	"github.com/element-of-surprise/workstream/workflow"
-	"github.com/element-of-surprise/workstream/workflow/storage/sqlite"
+	testplugin "github.com/element-of-surprise/coercion/internal/execute/sm/testing/plugins"
+	"github.com/element-of-surprise/coercion/internal/private"
+	"github.com/element-of-surprise/coercion/plugins"
+	"github.com/element-of-surprise/coercion/plugins/registry"
+	"github.com/element-of-surprise/coercion/workflow"
+	"github.com/element-of-surprise/coercion/workflow/storage/sqlite"
 
 	"github.com/gostdlib/ops/retry/exponential"
 	"github.com/gostdlib/ops/statemachine"

@@ -10,7 +10,7 @@ import (
 	"time"
 	"unsafe"
 
-	"github.com/element-of-surprise/workstream/workflow"
+	"github.com/element-of-surprise/coercion/workflow"
 )
 
 // Tmpls is a collection of templates that are embedded in the binary.

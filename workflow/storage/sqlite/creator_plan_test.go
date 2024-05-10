@@ -7,12 +7,12 @@ import (
 	"testing"
 	"time"
 
-	pluglib "github.com/element-of-surprise/workstream/plugins"
-	"github.com/element-of-surprise/workstream/plugins/registry"
-	"github.com/element-of-surprise/workstream/workflow"
-	"github.com/element-of-surprise/workstream/workflow/builder"
-	"github.com/element-of-surprise/workstream/workflow/storage/sqlite/testing/plugins"
-	"github.com/element-of-surprise/workstream/workflow/utils/walk"
+	pluglib "github.com/element-of-surprise/coercion/plugins"
+	"github.com/element-of-surprise/coercion/plugins/registry"
+	"github.com/element-of-surprise/coercion/workflow"
+	"github.com/element-of-surprise/coercion/workflow/builder"
+	"github.com/element-of-surprise/coercion/workflow/storage/sqlite/testing/plugins"
+	"github.com/element-of-surprise/coercion/workflow/utils/walk"
 
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/uuid"

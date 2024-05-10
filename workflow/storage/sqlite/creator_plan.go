@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/element-of-surprise/workstream/plugins"
-	"github.com/element-of-surprise/workstream/workflow"
+	"github.com/element-of-surprise/coercion/plugins"
+	"github.com/element-of-surprise/coercion/workflow"
 
 	"github.com/go-json-experiment/json"
 	"github.com/google/uuid"

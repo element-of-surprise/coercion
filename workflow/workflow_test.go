@@ -4,8 +4,8 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/element-of-surprise/workstream/plugins"
-	"github.com/element-of-surprise/workstream/plugins/registry"
+	"github.com/element-of-surprise/coercion/plugins"
+	"github.com/element-of-surprise/coercion/plugins/registry"
 	"github.com/gostdlib/ops/retry/exponential"
 
 	"github.com/kylelemons/godebug/pretty"

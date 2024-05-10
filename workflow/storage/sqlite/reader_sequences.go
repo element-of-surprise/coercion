@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/element-of-surprise/workstream/workflow"
+	"github.com/element-of-surprise/coercion/workflow"
 	"github.com/google/uuid"
 	"zombiezen.com/go/sqlite"
 	"zombiezen.com/go/sqlite/sqlitex"

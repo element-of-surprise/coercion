@@ -3,7 +3,7 @@ package builder
 import (
 	"testing"
 
-	"github.com/element-of-surprise/workstream/workflow"
+	"github.com/element-of-surprise/coercion/workflow"
 
 	"github.com/kylelemons/godebug/pretty"
 )

@@ -6,14 +6,14 @@ import (
 	"testing"
 	"time"
 
-	"github.com/element-of-surprise/workstream"
-	"github.com/element-of-surprise/workstream/plugins/registry"
-	"github.com/element-of-surprise/workstream/workflow"
-	"github.com/element-of-surprise/workstream/workflow/builder"
-	"github.com/element-of-surprise/workstream/workflow/storage/sqlite"
+	workstream "github.com/element-of-surprise/coercion"
+	"github.com/element-of-surprise/coercion/plugins/registry"
+	"github.com/element-of-surprise/coercion/workflow"
+	"github.com/element-of-surprise/coercion/workflow/builder"
+	"github.com/element-of-surprise/coercion/workflow/storage/sqlite"
 	"github.com/kylelemons/godebug/pretty"
 
-	testplugin "github.com/element-of-surprise/workstream/internal/execute/sm/testing/plugins"
+	testplugin "github.com/element-of-surprise/coercion/internal/execute/sm/testing/plugins"
 )
 
 var pConfig = pretty.Config{

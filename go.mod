@@ -1,4 +1,4 @@
-module github.com/element-of-surprise/workstream
+module github.com/element-of-surprise/coercion
 
 go 1.22.2
 

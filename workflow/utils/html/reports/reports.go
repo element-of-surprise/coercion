@@ -14,9 +14,9 @@ import (
 	"runtime"
 	"sync"
 
-	"github.com/element-of-surprise/workstream/workflow"
-	"github.com/element-of-surprise/workstream/workflow/utils/html/internal/embeded"
-	"github.com/element-of-surprise/workstream/workflow/utils/walk"
+	"github.com/element-of-surprise/coercion/workflow"
+	"github.com/element-of-surprise/coercion/workflow/utils/html/internal/embeded"
+	"github.com/element-of-surprise/coercion/workflow/utils/walk"
 
 	"github.com/spf13/afero"
 
