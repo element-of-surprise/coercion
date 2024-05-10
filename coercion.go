@@ -1,12 +1,12 @@
 /*
-Package workstream provides a workflow engine that can execute complex workflows using
+Package coercion provides a workflow engine that can execute complex workflows using
 reusable plugins. This is designed for localized workflows and not workflows on shared mediums.
 Aka, there are no policy engines, emergency stop systems or centralization mechanisms that keep
 teams from running over each other.
 
 [TBD: Add more details]
 */
-package workstream
+package coercion
 
 import (
 	"context"

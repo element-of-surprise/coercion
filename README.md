@@ -1,7 +1,7 @@
-# Workstream - A script workflow framework
+# Coercion - A script workflow framework
 
-[![Go Reference](https://pkg.go.dev/badge/github.com/element-of-surprise/workstream/workstream.svg)](https://pkg.go.dev/github.com/element-of-surprise/workstream)
-[![Go Report Card](https://goreportcard.com/badge/github.com/element-of-surprise/workstream)](https://goreportcard.com/report/github.com/element-of-surprise/workstream)
+[![Go Reference](https://pkg.go.dev/badge/github.com/element-of-surprise/coercion/coercion.svg)](https://pkg.go.dev/github.com/element-of-surprise/coercion)
+[![Go Report Card](https://goreportcard.com/badge/github.com/element-of-surprise/coercion)](https://goreportcard.com/report/github.com/element-of-surprise/coercion)
 
 <p align="center">
   <img src="./docs/img/gopher_river.jpeg"  width="500">
@@ -9,7 +9,7 @@
 
 ## Introduction
 
-Workstream is a programatic workflow framework that allows you to define a complex series of prechecks, postchecks, continuous checks, blocks of actions, a plugin system, etc... with a simple and easy to read methodology.
+Coercion is a programatic workflow framework that allows you to define a complex series of prechecks, postchecks, continuous checks, blocks of actions, a plugin system, etc... with a simple and easy to read methodology.
 
 ## Prior Art
 
@@ -118,7 +118,7 @@ package main
 
 import (
 	"github.com/element-of-surprise/plugins/git/github" // Not real, would hold a plugin
-	"github.com/element-of-surprise/workstream/plugins/registry"
+	"github.com/element-of-surprise/coercion/plugins/registry"
 )
 
 func main() {
@@ -133,7 +133,7 @@ func main() {
 
 	...
 
-	ws, err := workstream.New(storage, reg)
+	ws, err := coercion.New(storage, reg)
 	...
 }
 ```
@@ -319,7 +319,7 @@ If it fails, we print out the Plan. We could do more complex operations here, li
 // reg is the registry of plugins, like we created above.
 store := sqlite.New("", reg, sqlite.WithInMemory())
 
-ws, err := workstream.New(store, reg)
+ws, err := coercion.New(store, reg)
 if err != nil {
 	log.Fatalf("Error creating workstream: %v", err)
 }
