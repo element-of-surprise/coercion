@@ -722,11 +722,12 @@ func (a *Action) Defaults() {
 	}
 }
 
+// HasRegister determines if a Register has been set.
 func (a *Action) HasRegister() bool {
 	return a.register != nil
 }
 
-// SetRegister sets the register for the Action. This should not be used by the user.
+// SetRegister sets the register for the Action. This should not be used by the user except in tests.
 func (a *Action) SetRegister(r *registry.Register) {
 	a.register = r
 }
