@@ -3,6 +3,7 @@ module github.com/element-of-surprise/coercion
 go 1.22.2
 
 require (
+	github.com/brunoga/deep v1.2.3
 	github.com/fatih/color v1.16.0
 	github.com/go-git/go-git/v5 v5.12.0
 	github.com/go-json-experiment/json v0.0.0-20231102232822-2e55bd4e08b0
