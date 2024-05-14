@@ -11,10 +11,13 @@ import (
 	"github.com/element-of-surprise/coercion/workflow"
 	"github.com/element-of-surprise/coercion/workflow/builder"
 	"github.com/element-of-surprise/coercion/workflow/storage/sqlite"
+	"github.com/element-of-surprise/coercion/workflow/utils/clone"
 	"github.com/kylelemons/godebug/pretty"
 
 	testplugin "github.com/element-of-surprise/coercion/internal/execute/sm/testing/plugins"
 )
+
+var cloneOpts = []clone.Option{clone.WithKeepSecrets(), clone.WithKeepState()}
 
 var pConfig = pretty.Config{
 	IncludeUnexported: false,
@@ -23,6 +26,8 @@ var pConfig = pretty.Config{
 }
 
 func TestEtoE(t *testing.T) {
+	ctx := context.Background()
+
 	plugCheck := &testplugin.Plugin{
 		AlwaysRespond: true,
 		IsCheckPlugin: true,
@@ -69,9 +74,9 @@ func TestEtoE(t *testing.T) {
 		panic(err)
 	}
 
-	build.AddChecks(builder.PreChecks, checks.Clone()).Up()
-	build.AddChecks(builder.PostChecks, checks.Clone()).Up()
-	build.AddChecks(builder.ContChecks, checks.Clone()).Up()
+	build.AddChecks(builder.PreChecks, clone.Checks(ctx, checks, cloneOpts...)).Up()
+	build.AddChecks(builder.PostChecks, clone.Checks(ctx, checks, cloneOpts...)).Up()
+	build.AddChecks(builder.ContChecks, clone.Checks(ctx, checks, cloneOpts...)).Up()
 
 	build.AddBlock(
 		builder.BlockArgs{
@@ -82,17 +87,16 @@ func TestEtoE(t *testing.T) {
 			Concurrency:   2,
 		},
 	)
-	build.AddSequence(seqs.Clone()).Up()
-	build.AddSequence(seqs.Clone()).Up()
-	build.AddSequence(seqs.Clone()).Up()
-	build.AddSequence(seqs.Clone()).Up()
+	build.AddSequence(clone.Sequence(ctx, seqs, cloneOpts...)).Up()
+	build.AddSequence(clone.Sequence(ctx, seqs, cloneOpts...)).Up()
+	build.AddSequence(clone.Sequence(ctx, seqs, cloneOpts...)).Up()
+	build.AddSequence(clone.Sequence(ctx, seqs, cloneOpts...)).Up()
 
 	plan, err := build.Plan()
 	if err != nil {
 		panic(err)
 	}
 
-	ctx := context.Background()
 	vault, err := sqlite.New(ctx, "", reg, sqlite.WithInMemory())
 	if err != nil {
 		panic(err)

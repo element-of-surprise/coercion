@@ -74,19 +74,6 @@ func (s *State) Reset() {
 	s.End = time.Time{}
 }
 
-// Clone returns a copy of the state. This is not used by any object Clone method,
-// but can be used in testing.
-func (s *State) Clone() *State {
-	if s == nil {
-		return nil
-	}
-	return &State{
-		Status: s.Status,
-		Start:  s.Start,
-		End:    s.End,
-	}
-}
-
 // validator is a type that validates its own fields. If the validator has sub-types that
 // need validation, it returns a list of validators that need to be validated.
 // This allows tests to be more modular instead of a super test of the entire object tree.
@@ -240,40 +227,6 @@ func (p *Plan) validate() ([]validator, error) {
 	return vals, nil
 }
 
-// Clone clones a plan with no ID, State, SubmitTime or Reason. It also clones
-// all of the sub-objects according to their Clone() method.
-func (p *Plan) Clone() *Plan {
-	if p == nil {
-		return nil
-	}
-
-	meta := make([]byte, len(p.Meta))
-	copy(meta, p.Meta)
-
-	np := &Plan{
-		Name:    p.Name,
-		Descr:   p.Descr,
-		GroupID: p.GroupID,
-		Meta:    meta,
-	}
-
-	if p.PreChecks != nil {
-		np.PreChecks = p.PreChecks.Clone()
-	}
-	if p.ContChecks != nil {
-		np.ContChecks = p.ContChecks.Clone()
-	}
-	if p.PostChecks != nil {
-		np.PostChecks = p.PostChecks.Clone()
-	}
-
-	np.Blocks = make([]*Block, len(p.Blocks))
-	for i, b := range p.Blocks {
-		np.Blocks[i] = b.Clone()
-	}
-	return np
-}
-
 // Checks represents a set of actions that are executed before the workflow starts.
 type Checks struct {
 	// ID is a unique identifier for the object. Should not be set by the user.
@@ -330,25 +283,6 @@ func (c *Checks) Defaults() {
 	c.State = &State{
 		Status: NotStarted,
 	}
-}
-
-// Clone clones the Checks object. This does not copy the ID or the State object.
-// All actions are cloned according to their Clone() method.
-func (c *Checks) Clone() *Checks {
-	if c == nil {
-		return nil
-	}
-
-	clone := &Checks{
-		Delay:   c.Delay,
-		Actions: make([]*Action, len(c.Actions)),
-	}
-
-	for i := 0; i < len(c.Actions); i++ {
-		clone.Actions[i] = c.Actions[i].Clone()
-	}
-
-	return clone
 }
 
 func (c *Checks) validate() ([]validator, error) {
@@ -489,36 +423,6 @@ func (b *Block) validate() ([]validator, error) {
 	return vals, nil
 }
 
-// Clone makes a copy of the block, but without an ID or State. All checks and sequences are cloned acccording
-// to their Clone() method.
-func (b *Block) Clone() *Block {
-	n := &Block{
-		Name:              b.Name,
-		Descr:             b.Descr,
-		EntranceDelay:     b.EntranceDelay,
-		ExitDelay:         b.ExitDelay,
-		Concurrency:       b.Concurrency,
-		ToleratedFailures: b.ToleratedFailures,
-	}
-
-	if b.PreChecks != nil {
-		n.PreChecks = b.PreChecks.Clone()
-	}
-	if b.ContChecks != nil {
-		n.ContChecks = b.ContChecks.Clone()
-	}
-	if b.PostChecks != nil {
-		n.PostChecks = b.PostChecks.Clone()
-	}
-
-	n.Sequences = make([]*Sequence, len(b.Sequences))
-	for i, seq := range b.Sequences {
-		n.Sequences[i] = seq.Clone()
-	}
-
-	return n
-}
-
 // Sequence represents a set of Actions that are executed in sequence. Any error will cause the workflow to fail.
 type Sequence struct {
 	// ID is a unique identifier for the object. Should not be set by the user.
@@ -606,23 +510,6 @@ func (s *Sequence) validate() ([]validator, error) {
 	return vals, nil
 }
 
-// Clone clones an Sequence with no ID and no State. Also clones all the Actions
-// following the cloning rules of the Action.Clone() method.
-func (s *Sequence) Clone() *Sequence {
-	if s == nil {
-		return nil
-	}
-	ns := &Sequence{
-		Name:    s.Name,
-		Descr:   s.Descr,
-		Actions: make([]*Action, len(s.Actions)),
-	}
-	for i, a := range s.Actions {
-		ns.Actions[i] = a.Clone()
-	}
-	return ns
-}
-
 // Attempt is the result of an action that is executed by a plugin.
 // Nothing in Attempt should be set by the user.
 type Attempt struct {
@@ -685,22 +572,6 @@ func (a *Action) GetState() *State {
 // SetState is a setter for the State settings.
 func (a *Action) SetState(state *State) {
 	a.State = state
-}
-
-// Clone clones an Action with no ID, no Attempts and no State.
-func (a *Action) Clone() *Action {
-	if a == nil {
-		return nil
-	}
-	na := &Action{
-		Name:    a.Name,
-		Descr:   a.Descr,
-		Plugin:  a.Plugin,
-		Timeout: a.Timeout,
-		Retries: a.Retries,
-		Req:     a.Req,
-	}
-	return na
 }
 
 // Type implements the Object.Type().
