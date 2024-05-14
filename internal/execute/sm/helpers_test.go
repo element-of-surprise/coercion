@@ -132,8 +132,8 @@ func TestRunChecksOnce(t *testing.T) {
 		if test.wantErr != (err != nil) {
 			t.Errorf("TestRunChecksOnce(%s): got err == %v, want err == %v", test.name, err, test.wantErr)
 		}
-		if updater.calls != 2 {
-			t.Errorf("TestRunChecksOnce(%s): updater got %d calls, want 2", test.name, updater.calls)
+		if updater.calls.Load() != 2 {
+			t.Errorf("TestRunChecksOnce(%s): updater got %d calls, want 2", test.name, updater.calls.Load())
 		}
 	}
 }

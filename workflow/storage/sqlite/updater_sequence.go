@@ -8,7 +8,7 @@ import (
 	"github.com/element-of-surprise/coercion/internal/private"
 	"github.com/element-of-surprise/coercion/workflow"
 	"github.com/element-of-surprise/coercion/workflow/storage"
-	"zombiezen.com/go/sqlite"
+	"zombiezen.com/go/sqlite/sqlitex"
 )
 
 var _ storage.SequenceUpdater = sequenceUpdater{}
@@ -16,7 +16,7 @@ var _ storage.SequenceUpdater = sequenceUpdater{}
 // sequenceUpdater implements the storage.sequenceUpdater interface.
 type sequenceUpdater struct {
 	mu   *sync.Mutex
-	conn *sqlite.Conn
+	pool *sqlitex.Pool
 
 	private.Storage
 }
@@ -26,7 +26,13 @@ func (s sequenceUpdater) UpdateSequence(ctx context.Context, seq *workflow.Seque
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	stmt, err := s.conn.Prepare(updateSequence)
+	conn, err := s.pool.Take(context.WithoutCancel(ctx))
+	if err != nil {
+		return fmt.Errorf("couldn't get a connection from the pool: %w", err)
+	}
+	defer s.pool.Put(conn)
+
+	stmt, err := conn.Prepare(updateSequence)
 	if err != nil {
 		return fmt.Errorf("SequenceWriter.Write(updateAction): %w", err)
 	}

@@ -4,15 +4,15 @@ import (
 	"context"
 
 	"github.com/element-of-surprise/coercion/internal/private"
-	"zombiezen.com/go/sqlite"
+	"zombiezen.com/go/sqlite/sqlitex"
 )
 
 type closer struct {
-	conn *sqlite.Conn
+	pool *sqlitex.Pool
 
 	private.Storage
 }
 
 func (c *closer) Close(ctx context.Context) error {
-	return c.conn.Close()
+	return c.pool.Close()
 }

@@ -3,6 +3,8 @@ package sm
 import (
 	"context"
 	"fmt"
+	"sync"
+	"sync/atomic"
 
 	"github.com/element-of-surprise/coercion/workflow"
 	"github.com/element-of-surprise/coercion/workflow/storage"
@@ -28,19 +30,23 @@ func fakeParallelActionRunner(ctx context.Context, actions []*workflow.Action) e
 }
 
 type fakeUpdater struct {
+	lock    sync.Mutex
 	create  []*workflow.Plan
 	plans   []*workflow.Plan
 	blocks  []*workflow.Block
 	seqs    []*workflow.Sequence
 	actions []*workflow.Action
 	checks  []*workflow.Checks
-	calls   int
+	calls   atomic.Int32
 
 	storage.Vault
 }
 
 func (f *fakeUpdater) Create(ctx context.Context, plan *workflow.Plan) error {
-	f.calls++
+	f.calls.Add(1)
+
+	f.lock.Lock()
+	defer f.lock.Unlock()
 
 	n := clone.Plan(ctx, plan, cloneOpts...)
 	f.create = append(f.create, n)
@@ -48,7 +54,10 @@ func (f *fakeUpdater) Create(ctx context.Context, plan *workflow.Plan) error {
 }
 
 func (f *fakeUpdater) UpdatePlan(ctx context.Context, plan *workflow.Plan) error {
-	f.calls++
+	f.calls.Add(1)
+
+	f.lock.Lock()
+	defer f.lock.Unlock()
 
 	n := clone.Plan(ctx, plan, cloneOpts...)
 	f.plans = append(f.plans, n)
@@ -56,7 +65,10 @@ func (f *fakeUpdater) UpdatePlan(ctx context.Context, plan *workflow.Plan) error
 }
 
 func (f *fakeUpdater) UpdateBlock(ctx context.Context, block *workflow.Block) error {
-	f.calls++
+	f.calls.Add(1)
+
+	f.lock.Lock()
+	defer f.lock.Unlock()
 
 	n := clone.Block(ctx, block, cloneOpts...)
 	f.blocks = append(f.blocks, n)
@@ -64,7 +76,10 @@ func (f *fakeUpdater) UpdateBlock(ctx context.Context, block *workflow.Block) er
 }
 
 func (f *fakeUpdater) UpdateChecks(ctx context.Context, checks *workflow.Checks) error {
-	f.calls++
+	f.calls.Add(1)
+
+	f.lock.Lock()
+	defer f.lock.Unlock()
 
 	n := clone.Checks(ctx, checks, cloneOpts...)
 	f.checks = append(f.checks, n)
@@ -72,7 +87,10 @@ func (f *fakeUpdater) UpdateChecks(ctx context.Context, checks *workflow.Checks)
 }
 
 func (f *fakeUpdater) UpdateAction(ctx context.Context, action *workflow.Action) error {
-	f.calls++
+	f.calls.Add(1)
+
+	f.lock.Lock()
+	defer f.lock.Unlock()
 
 	n := clone.Action(ctx, action, cloneOpts...)
 	f.actions = append(f.actions, n)
@@ -80,8 +98,10 @@ func (f *fakeUpdater) UpdateAction(ctx context.Context, action *workflow.Action)
 }
 
 func (f *fakeUpdater) UpdateSequence(ctx context.Context, seq *workflow.Sequence) error {
-	f.calls++
+	f.calls.Add(1)
 
+	f.lock.Lock()
+	defer f.lock.Unlock()
 	n := clone.Sequence(ctx, seq, cloneOpts...)
 	f.seqs = append(f.seqs, n)
 	return nil

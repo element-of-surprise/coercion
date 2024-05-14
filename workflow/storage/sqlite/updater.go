@@ -5,7 +5,7 @@ import (
 
 	"github.com/element-of-surprise/coercion/internal/private"
 	"github.com/element-of-surprise/coercion/workflow/storage"
-	"zombiezen.com/go/sqlite"
+	"zombiezen.com/go/sqlite/sqlitex"
 )
 
 var _ storage.Updater = updater{}
@@ -21,12 +21,12 @@ type updater struct {
 	private.Storage
 }
 
-func newUpdater(mu *sync.Mutex, conn *sqlite.Conn) updater {
+func newUpdater(mu *sync.Mutex, pool *sqlitex.Pool) updater {
 	return updater{
-		planUpdater:     planUpdater{mu: mu, conn: conn},
-		checksUpdater:   checksUpdater{mu: mu, conn: conn},
-		blockUpdater:    blockUpdater{mu: mu, conn: conn},
-		sequenceUpdater: sequenceUpdater{mu: mu, conn: conn},
-		actionUpdater:   actionUpdater{mu: mu, conn: conn},
+		planUpdater:     planUpdater{mu: mu, pool: pool},
+		checksUpdater:   checksUpdater{mu: mu, pool: pool},
+		blockUpdater:    blockUpdater{mu: mu, pool: pool},
+		sequenceUpdater: sequenceUpdater{mu: mu, pool: pool},
+		actionUpdater:   actionUpdater{mu: mu, pool: pool},
 	}
 }

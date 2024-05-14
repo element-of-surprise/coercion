@@ -54,7 +54,7 @@ func TestPlanStart(t *testing.T) {
 		t.Errorf("TestPlanStart: Plan.State.Start did not get set")
 	}
 
-	if vault.calls != 1 {
+	if vault.calls.Load() != 1 {
 		t.Errorf("TestPlanStart: storage.Create() did not get called")
 	}
 	if methodName(req.Next) != methodName(states.PlanPreChecks) {
@@ -723,7 +723,7 @@ func TestBlockEnd(t *testing.T) {
 		if ctx.Err() == nil {
 			t.Errorf("TestBlockEnd(%s): context for continuous checks should have been cancelled", test.name)
 		}
-		if states.store.(*fakeUpdater).calls != 1 {
+		if states.store.(*fakeUpdater).calls.Load() != 1 {
 			t.Errorf("TestBlockEnd(%s): got store calls == %v, want store calls == 1", test.name, states.store.(*fakeUpdater).calls)
 		}
 	}
@@ -840,7 +840,7 @@ func TestEnd(t *testing.T) {
 	if req.Next != nil {
 		t.Errorf("TestEnd: next state should have been nil")
 	}
-	if states.store.(*fakeUpdater).calls != 1 {
+	if states.store.(*fakeUpdater).calls.Load() != 1 {
 		t.Errorf("TestEnd: store.UpdatePlan() should have been called")
 	}
 }

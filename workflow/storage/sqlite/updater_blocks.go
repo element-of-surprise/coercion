@@ -8,7 +8,7 @@ import (
 	"github.com/element-of-surprise/coercion/internal/private"
 	"github.com/element-of-surprise/coercion/workflow"
 	"github.com/element-of-surprise/coercion/workflow/storage"
-	"zombiezen.com/go/sqlite"
+	"zombiezen.com/go/sqlite/sqlitex"
 )
 
 var _ storage.BlockUpdater = blockUpdater{}
@@ -16,7 +16,7 @@ var _ storage.BlockUpdater = blockUpdater{}
 // blockUpdater implements the storage.blockUpdater interface.
 type blockUpdater struct {
 	mu   *sync.Mutex
-	conn *sqlite.Conn
+	pool *sqlitex.Pool
 
 	private.Storage
 }
@@ -26,7 +26,13 @@ func (b blockUpdater) UpdateBlock(ctx context.Context, action *workflow.Block) e
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
-	stmt, err := b.conn.Prepare(updateBlock)
+	conn, err := b.pool.Take(context.WithoutCancel(ctx))
+	if err != nil {
+		return fmt.Errorf("couldn't get a connection from the pool: %w", err)
+	}
+	defer b.pool.Put(conn)
+
+	stmt, err := conn.Prepare(updateBlock)
 	if err != nil {
 		return fmt.Errorf("BlockWriter.Write: %w", err)
 	}

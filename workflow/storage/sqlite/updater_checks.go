@@ -8,7 +8,7 @@ import (
 	"github.com/element-of-surprise/coercion/internal/private"
 	"github.com/element-of-surprise/coercion/workflow"
 	"github.com/element-of-surprise/coercion/workflow/storage"
-	"zombiezen.com/go/sqlite"
+	"zombiezen.com/go/sqlite/sqlitex"
 )
 
 var _ storage.ChecksUpdater = checksUpdater{}
@@ -16,7 +16,7 @@ var _ storage.ChecksUpdater = checksUpdater{}
 // checksUpdater implements the storage.checksUpdater interface.
 type checksUpdater struct {
 	mu   *sync.Mutex
-	conn *sqlite.Conn
+	pool *sqlitex.Pool
 
 	private.Storage
 }
@@ -26,7 +26,13 @@ func (c checksUpdater) UpdateChecks(ctx context.Context, check *workflow.Checks)
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	stmt, err := c.conn.Prepare(updateChecks)
+	conn, err := c.pool.Take(context.WithoutCancel(ctx))
+	if err != nil {
+		return fmt.Errorf("couldn't get a connection from the pool: %w", err)
+	}
+	defer c.pool.Put(conn)
+
+	stmt, err := conn.Prepare(updateChecks)
 	if err != nil {
 		return fmt.Errorf("ChecksWriter.Checks: %w", err)
 	}

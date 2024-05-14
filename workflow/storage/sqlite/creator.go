@@ -8,13 +8,13 @@ import (
 	"github.com/element-of-surprise/coercion/internal/private"
 	"github.com/element-of-surprise/coercion/workflow"
 	"github.com/google/uuid"
-	"zombiezen.com/go/sqlite"
+	"zombiezen.com/go/sqlite/sqlitex"
 )
 
 // creator implements the storage.creator interface.
 type creator struct {
 	mu     *sync.Mutex
-	conn   *sqlite.Conn
+	pool   *sqlitex.Pool
 	reader reader
 
 	private.Storage
@@ -38,5 +38,11 @@ func (u creator) Create(ctx context.Context, plan *workflow.Plan) error {
 		return fmt.Errorf("plan with ID(%s) already exists", plan.ID)
 	}
 
-	return commitPlan(ctx, u.conn, plan)
+	conn, err := u.pool.Take(ctx)
+	if err != nil {
+		return fmt.Errorf("couldn't get a connection from the pool: %w", err)
+	}
+	defer u.pool.Put(conn)
+
+	return commitPlan(ctx, conn, plan)
 }

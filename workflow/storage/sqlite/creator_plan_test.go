@@ -18,6 +18,7 @@ import (
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/uuid"
 	"zombiezen.com/go/sqlite"
+	"zombiezen.com/go/sqlite/sqlitex"
 )
 
 var plan *workflow.Plan
@@ -120,40 +121,53 @@ func mustUUID() uuid.UUID {
 	return id
 }
 
-func dbSetup() (path string, conn *sqlite.Conn, err error) {
+func dbSetup() (path string, pool *sqlitex.Pool, err error) {
 	tmpDir := os.TempDir()
 	id := uuid.New()
 	path = filepath.Join(tmpDir, id.String())
-	conn, err = sqlite.OpenConn(path, sqlite.OpenReadWrite, sqlite.OpenCreate)
+	pool, err = sqlitex.NewPool(
+		path,
+		sqlitex.PoolOptions{
+			Flags:    sqlite.OpenReadWrite | sqlite.OpenCreate,
+			PoolSize: 1,
+		},
+	)
 	if err != nil {
 		return "", nil, err
 	}
-	defer func() {
-		if err != nil {
-			conn.Close()
-		}
-	}()
+
+	conn, err := pool.Take(context.Background())
+	if err != nil {
+		return "", nil, err
+	}
+	defer pool.Put(conn)
 
 	if err := createTables(context.Background(), conn); err != nil {
 		return "", nil, err
 	}
 
-	return path, conn, nil
+	return path, pool, nil
 }
 
 func TestCommitPlan(t *testing.T) {
 	t.Parallel()
 
-	path, conn, err := dbSetup()
+	path, pool, err := dbSetup()
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer os.RemoveAll(path)
-	defer conn.Close()
+	defer pool.Close()
+
+	conn, err := pool.Take(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	if err := commitPlan(context.Background(), conn, plan); err != nil {
 		t.Fatal(err)
 	}
+	pool.Put(conn)
 
 	reg := registry.New()
 	reg.Register(&plugins.CheckPlugin{})
@@ -161,7 +175,7 @@ func TestCommitPlan(t *testing.T) {
 
 	// TODO(element-of-surprise): Add checks to verify the data in the database
 	reader := &reader{
-		conn: conn,
+		pool: pool,
 		reg:  reg,
 	}
 

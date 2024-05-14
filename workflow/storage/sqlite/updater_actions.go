@@ -8,7 +8,7 @@ import (
 	"github.com/element-of-surprise/coercion/internal/private"
 	"github.com/element-of-surprise/coercion/workflow"
 	"github.com/element-of-surprise/coercion/workflow/storage"
-	"zombiezen.com/go/sqlite"
+	"zombiezen.com/go/sqlite/sqlitex"
 )
 
 var _ storage.ActionUpdater = actionUpdater{}
@@ -16,7 +16,7 @@ var _ storage.ActionUpdater = actionUpdater{}
 // actionUpdater implements the storage.actionUpdater interface.
 type actionUpdater struct {
 	mu   *sync.Mutex
-	conn *sqlite.Conn
+	pool *sqlitex.Pool
 
 	private.Storage
 }
@@ -26,7 +26,13 @@ func (a actionUpdater) UpdateAction(ctx context.Context, action *workflow.Action
 	a.mu.Lock()
 	defer a.mu.Unlock()
 
-	stmt, err := a.conn.Prepare(updateAction)
+	conn, err := a.pool.Take(context.WithoutCancel(ctx))
+	if err != nil {
+		return fmt.Errorf("couldn't get a connection from the pool: %w", err)
+	}
+	defer a.pool.Put(conn)
+
+	stmt, err := conn.Prepare(updateAction)
 	if err != nil {
 		return fmt.Errorf("ActionWriter.Write: %w", err)
 	}
