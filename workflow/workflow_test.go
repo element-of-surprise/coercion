@@ -15,7 +15,7 @@ func TestPlanValidate(t *testing.T) {
 	t.Parallel()
 
 	goodPlan := func() *Plan {
-		p := &Plan{
+		p := Plan{
 			Name:       "test",
 			Descr:      "test",
 			PreChecks:  &Checks{},
@@ -23,7 +23,10 @@ func TestPlanValidate(t *testing.T) {
 			ContChecks: &Checks{},
 			Blocks:     []*Block{{}},
 		}
-		return p.Clone()
+		x := func(plan Plan) Plan {
+			return plan
+		}(p)
+		return &x
 	}
 	expectVals := []validator{
 		goodPlan().PreChecks,
@@ -340,7 +343,7 @@ func TestBlockValidate(t *testing.T) {
 	t.Parallel()
 
 	goodBlock := func() *Block {
-		b := &Block{
+		b := Block{
 			Name:       "block",
 			Descr:      "block description",
 			PreChecks:  &Checks{},
@@ -348,7 +351,10 @@ func TestBlockValidate(t *testing.T) {
 			ContChecks: &Checks{},
 			Sequences:  []*Sequence{{}},
 		}
-		return b.Clone()
+		x := func(block Block) Block {
+			return block
+		}(b)
+		return &x
 	}
 
 	tests := []struct {

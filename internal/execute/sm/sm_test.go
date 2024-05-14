@@ -13,6 +13,7 @@ import (
 	"github.com/element-of-surprise/coercion/plugins/registry"
 	"github.com/element-of-surprise/coercion/workflow"
 	"github.com/element-of-surprise/coercion/workflow/builder"
+	"github.com/element-of-surprise/coercion/workflow/utils/clone"
 	"github.com/gostdlib/ops/statemachine"
 )
 
@@ -364,6 +365,8 @@ func TestBlockStartContChecks(t *testing.T) {
 func TestExecuteSequences(t *testing.T) {
 	t.Parallel()
 
+	ctx := context.Background()
+
 	failedAction := &workflow.Action{Plugin: plugins.Name, Timeout: 10 * time.Second, Req: plugins.Req{Sleep: 10 * time.Millisecond, Arg: "error"}}
 	sequenceWithFailure := &workflow.Sequence{Actions: []*workflow.Action{failedAction}}
 
@@ -384,9 +387,9 @@ func TestExecuteSequences(t *testing.T) {
 				ToleratedFailures: -1,
 				Concurrency:       1,
 				Sequences: []*workflow.Sequence{
-					sequenceWithFailure.Clone(),
-					sequenceWithFailure.Clone(),
-					sequenceWithFailure.Clone(),
+					clone.Sequence(ctx, sequenceWithFailure, cloneOpts...),
+					clone.Sequence(ctx, sequenceWithFailure, cloneOpts...),
+					clone.Sequence(ctx, sequenceWithFailure, cloneOpts...),
 				},
 			},
 			wantPluginCalls: 3,
@@ -397,9 +400,9 @@ func TestExecuteSequences(t *testing.T) {
 				ToleratedFailures: 1,
 				Concurrency:       1,
 				Sequences: []*workflow.Sequence{
-					sequenceWithFailure.Clone(),
-					sequenceWithSuccess.Clone(),
-					sequenceWithFailure.Clone(),
+					clone.Sequence(ctx, sequenceWithFailure, cloneOpts...),
+					clone.Sequence(ctx, sequenceWithSuccess, cloneOpts...),
+					clone.Sequence(ctx, sequenceWithFailure, cloneOpts...),
 				},
 			},
 			wantPluginCalls: 3,
@@ -412,9 +415,9 @@ func TestExecuteSequences(t *testing.T) {
 				ToleratedFailures: 1,
 				Concurrency:       1,
 				Sequences: []*workflow.Sequence{
-					sequenceWithFailure.Clone(),
-					sequenceWithFailure.Clone(), // We should die after this.
-					sequenceWithSuccess.Clone(), // Never should be called.
+					clone.Sequence(ctx, sequenceWithFailure, cloneOpts...),
+					clone.Sequence(ctx, sequenceWithFailure, cloneOpts...), // We should die after this.
+					clone.Sequence(ctx,  sequenceWithSuccess, cloneOpts...), // Never should be called.
 				},
 			},
 			wantPluginCalls: 2,
@@ -427,7 +430,7 @@ func TestExecuteSequences(t *testing.T) {
 				ToleratedFailures: 1,
 				Concurrency:       1,
 				Sequences: []*workflow.Sequence{
-					sequenceWithSuccess.Clone(), // Never should be called.
+					clone.Sequence(ctx, sequenceWithSuccess, cloneOpts...), // Never should be called.
 				},
 			},
 			contCheckFail: true,
@@ -440,9 +443,9 @@ func TestExecuteSequences(t *testing.T) {
 				ToleratedFailures: 0,
 				Concurrency:       1,
 				Sequences: []*workflow.Sequence{
-					sequenceWithSuccess.Clone(),
-					sequenceWithSuccess.Clone(),
-					sequenceWithSuccess.Clone(),
+					clone.Sequence(ctx, sequenceWithSuccess, cloneOpts...),
+					clone.Sequence(ctx, sequenceWithSuccess, cloneOpts...),
+					clone.Sequence(ctx, sequenceWithSuccess, cloneOpts...),
 				},
 			},
 			wantPluginCalls: 3,

@@ -12,6 +12,7 @@ import (
 	"github.com/element-of-surprise/coercion/workflow"
 	"github.com/element-of-surprise/coercion/workflow/builder"
 	"github.com/element-of-surprise/coercion/workflow/storage/sqlite/testing/plugins"
+	"github.com/element-of-surprise/coercion/workflow/utils/clone"
 	"github.com/element-of-surprise/coercion/workflow/utils/walk"
 
 	"github.com/google/go-cmp/cmp"
@@ -27,6 +28,8 @@ type setters interface {
 }
 
 func init() {
+	ctx := context.Background()
+
 	build, err := builder.New("test", "test", builder.WithGroupID(mustUUID()))
 	if err != nil {
 		panic(err)
@@ -55,15 +58,15 @@ func init() {
 	}
 
 	build.AddChecks(builder.PreChecks, &workflow.Checks{})
-	build.AddAction(checkAction1.Clone())
+	build.AddAction(clone.Action(ctx, checkAction1))
 	build.Up()
 
 	build.AddChecks(builder.ContChecks, &workflow.Checks{Delay: 32 * time.Second})
-	build.AddAction(checkAction2.Clone())
+	build.AddAction(clone.Action(ctx, checkAction2))
 	build.Up()
 
 	build.AddChecks(builder.PostChecks, &workflow.Checks{})
-	build.AddAction(checkAction3.Clone())
+	build.AddAction(clone.Action(ctx, checkAction3))
 	build.Up()
 
 	build.AddBlock(builder.BlockArgs{

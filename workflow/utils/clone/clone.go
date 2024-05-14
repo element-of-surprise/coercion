@@ -4,7 +4,6 @@ package clone
 import (
 	"context"
 	"fmt"
-	"log"
 	"reflect"
 	"strings"
 	"time"
@@ -38,6 +37,9 @@ func WithKeepSecrets() Option {
 	}
 }
 
+/*
+Not Implemented Yet
+
 // WithRemoveCompletedSequences removes Sequences that are Completed from Blocks.
 // If a Block contains only Completed Sequences, the Block is removed as long as
 // all PreChecks, PostChecks have completed and ContChecks are not in a failed state.
@@ -48,6 +50,7 @@ func WithRemoveCompletedSequences() Option {
 		return c
 	}
 }
+*/
 
 // WithKeepState keeps all the state for all objects. This includes IDs,
 // output, etc. This is only useful if going to out to display or writing
@@ -96,22 +99,16 @@ func Plan(ctx context.Context, p *workflow.Plan, options ...Option) *workflow.Pl
 		np.Reason = p.Reason
 		np.State = cloneState(p.State)
 		np.SubmitTime = p.SubmitTime
-
-		if !opts.keepSecrets && opts.callNum == 1 {
-			defer func() {
-				Secure(np)
-			}()
-		}
 	}
 
 	if p.PreChecks != nil {
-		np.PreChecks = p.PreChecks.Clone()
+		np.PreChecks = Checks(ctx, p.PreChecks, withOptions(opts))
 	}
 	if p.ContChecks != nil {
-		np.ContChecks = p.ContChecks.Clone()
+		np.ContChecks = Checks(ctx, p.ContChecks, withOptions(opts))
 	}
 	if p.PostChecks != nil {
-		np.PostChecks = p.PostChecks.Clone()
+		np.PostChecks = Checks(ctx, p.PostChecks, withOptions(opts))
 	}
 
 	np.Blocks = make([]*workflow.Block, 0, len(p.Blocks))
@@ -138,6 +135,10 @@ func Plan(ctx context.Context, p *workflow.Plan, options ...Option) *workflow.Pl
 			return np
 		}
 		return nil
+	}
+
+	if !opts.keepSecrets && opts.callNum == 1 {
+		Secure(np)
 	}
 
 	return np
@@ -471,8 +472,6 @@ func secureStruct(ptr reflect.Value) reflect.Value {
 		}
 		field := val.Field(i)
 
-		log.Println("field: ", val.Type().Field(i).Name)
-
 		tags := getTags(typ.Field(i))
 		if tags.hasTag("secure") {
 			if field.Type().Kind() == reflect.String {
@@ -503,7 +502,6 @@ func secureStruct(ptr reflect.Value) reflect.Value {
 			if field.CanAddr() {
 				secureStruct(field.Addr())
 			} else {
-				log.Printf("Type: %T", field.Interface())
 				fieldPtr := noAddrStruct(field)
 				fieldPtr = secureStruct(fieldPtr)
 				val.Field(i).Set(fieldPtr.Elem())
@@ -535,7 +533,6 @@ func secureSlice(val reflect.Value) reflect.Value {
 			if _, ok := val.Interface().(time.Time); ok {
 				continue
 			}
-			log.Printf("Type: %T", val.Interface())
 			ptr := noAddrStruct(val.Index(i))
 			secureStruct(ptr)
 			val.Index(i).Set(ptr.Elem())
@@ -592,7 +589,6 @@ func secureInterface(val reflect.Value) reflect.Value {
 		if _, ok := val.Interface().(time.Time); ok {
 			return val
 		}
-		log.Printf("Type: %T", val.Interface())
 		ptr := noAddrStruct(elem)
 		ptr = secureStruct(ptr)
 		val.Set(ptr.Elem())

@@ -8,7 +8,9 @@ import (
 	"github.com/gostdlib/ops/retry/exponential"
 )
 
-// ErrCode is the type for error codes that are returned by plugins.:w
+// ErrCode is the type for error codes that are returned by plugins. Unlike most typed error codes,
+// this has no defined values except for ECUnknown, which is the error code for an unknown error.
+// All plugins define their own error codes.
 type ErrCode uint
 
 //go:generate stringer -type=ErrCode

@@ -6,7 +6,10 @@ import (
 
 	"github.com/element-of-surprise/coercion/workflow"
 	"github.com/element-of-surprise/coercion/workflow/storage"
+	"github.com/element-of-surprise/coercion/workflow/utils/clone"
 )
+
+var cloneOpts = []clone.Option{clone.WithKeepSecrets(), clone.WithKeepState()}
 
 func fakeActionRunner(ctx context.Context, action *workflow.Action, updater storage.ActionUpdater) error {
 	if action.Name == "error" {
@@ -39,8 +42,7 @@ type fakeUpdater struct {
 func (f *fakeUpdater) Create(ctx context.Context, plan *workflow.Plan) error {
 	f.calls++
 
-	n := plan.Clone()
-	n.State = plan.State.Clone()
+	n := clone.Plan(ctx, plan, cloneOpts...)
 	f.create = append(f.create, n)
 	return nil
 }
@@ -48,8 +50,7 @@ func (f *fakeUpdater) Create(ctx context.Context, plan *workflow.Plan) error {
 func (f *fakeUpdater) UpdatePlan(ctx context.Context, plan *workflow.Plan) error {
 	f.calls++
 
-	n := plan.Clone()
-	n.State = plan.State.Clone()
+	n := clone.Plan(ctx, plan, cloneOpts...)
 	f.plans = append(f.plans, n)
 	return nil
 }
@@ -57,8 +58,7 @@ func (f *fakeUpdater) UpdatePlan(ctx context.Context, plan *workflow.Plan) error
 func (f *fakeUpdater) UpdateBlock(ctx context.Context, block *workflow.Block) error {
 	f.calls++
 
-	n := block.Clone()
-	n.State = block.State.Clone()
+	n := clone.Block(ctx, block, cloneOpts...)
 	f.blocks = append(f.blocks, n)
 	return nil
 }
@@ -66,8 +66,7 @@ func (f *fakeUpdater) UpdateBlock(ctx context.Context, block *workflow.Block) er
 func (f *fakeUpdater) UpdateChecks(ctx context.Context, checks *workflow.Checks) error {
 	f.calls++
 
-	n := checks.Clone()
-	n.State = checks.State.Clone()
+	n := clone.Checks(ctx, checks, cloneOpts...)
 	f.checks = append(f.checks, n)
 	return nil
 }
@@ -75,8 +74,7 @@ func (f *fakeUpdater) UpdateChecks(ctx context.Context, checks *workflow.Checks)
 func (f *fakeUpdater) UpdateAction(ctx context.Context, action *workflow.Action) error {
 	f.calls++
 
-	n := action.Clone()
-	n.State = action.State.Clone()
+	n := clone.Action(ctx, action, cloneOpts...)
 	f.actions = append(f.actions, n)
 	return nil
 }
@@ -84,8 +82,7 @@ func (f *fakeUpdater) UpdateAction(ctx context.Context, action *workflow.Action)
 func (f *fakeUpdater) UpdateSequence(ctx context.Context, seq *workflow.Sequence) error {
 	f.calls++
 
-	n := seq.Clone()
-	n.State = seq.State.Clone()
+	n := clone.Sequence(ctx, seq, cloneOpts...)
 	f.seqs = append(f.seqs, n)
 	return nil
 }

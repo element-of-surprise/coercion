@@ -16,12 +16,138 @@ type Req struct {
 	Data string `coerce:"secure"`
 }
 
+func TestPlan(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+
+	start := time.Now()
+	id, err := uuid.NewV7()
+	if err != nil {
+		panic(err)
+	}
+
+	action := &workflow.Action{
+		ID:   id,
+		Name: "action1",
+		Req:  Req{Data: "Hello"},
+	}
+
+	block := &workflow.Block{
+		ID:    id,
+		Name:  "block1",
+		Descr: "descr",
+	}
+
+	checks := &workflow.Checks{
+		ID: id,
+		Actions: []*workflow.Action{
+			Action(ctx, action, WithKeepState(), WithKeepSecrets()),
+		},
+	}
+
+	plan := &workflow.Plan{
+		ID:         id,
+		Name:       "plan1",
+		Descr:      "descr",
+		GroupID:    id,
+		Meta:       []byte("hello"),
+		PreChecks:  Checks(ctx, checks, WithKeepSecrets(), WithKeepState()),
+		PostChecks: Checks(ctx, checks, WithKeepSecrets(), WithKeepState()),
+		ContChecks: Checks(ctx, checks, WithKeepSecrets(), WithKeepState()),
+		Blocks: []*workflow.Block{
+			Block(ctx, block, WithKeepSecrets(), WithKeepState()),
+		},
+		State: &workflow.State{
+			Status: workflow.Completed,
+			Start:  start,
+		},
+		Reason:     workflow.FRBlock,
+		SubmitTime: start,
+	}
+
+	tests := []struct {
+		name    string
+		options cloneOptions
+		plan    *workflow.Plan
+		want    *workflow.Plan
+	}{
+		{
+			name: "nil",
+		},
+		{
+			name: "no options",
+			plan: plan,
+			want: &workflow.Plan{
+				Name:       "plan1",
+				Descr:      "descr",
+				GroupID:    id,
+				Meta:       []byte("hello"),
+				PreChecks:  Checks(ctx, checks),
+				PostChecks: Checks(ctx, checks),
+				ContChecks: Checks(ctx, checks),
+				Blocks:     []*workflow.Block{Block(ctx, plan.Blocks[0])},
+			},
+		},
+		{
+			name:    "WithKeepState(), WithKeepSecrets()",
+			plan:    plan,
+			options: cloneOptions{keepState: true, keepSecrets: true},
+			want:    plan,
+		},
+		{
+			name:    "WithKeepState()",
+			plan:    plan,
+			options: cloneOptions{keepState: true},
+			want: &workflow.Plan{
+				ID:         id,
+				Name:       "plan1",
+				Descr:      "descr",
+				GroupID:    id,
+				Meta:       []byte("hello"),
+				PreChecks:  Checks(ctx, checks, WithKeepState()),
+				PostChecks: Checks(ctx, checks, WithKeepState()),
+				ContChecks: Checks(ctx, checks, WithKeepState()),
+				Blocks:     []*workflow.Block{Block(ctx, plan.Blocks[0], WithKeepState())},
+				State: &workflow.State{
+					Status: workflow.Completed,
+					Start:  start,
+				},
+				Reason:     workflow.FRBlock,
+				SubmitTime: start,
+			},
+		},
+		{
+			name:    "Without WithKeepSecrets(), but callNum > 0",
+			plan:    plan,
+			options: cloneOptions{keepSecrets: true, callNum: 1},
+			want: &workflow.Plan{
+				Name:       "plan1",
+				Descr:      "descr",
+				GroupID:    id,
+				Meta:       []byte("hello"),
+				PreChecks:  Checks(ctx, checks, WithKeepSecrets()),
+				PostChecks: Checks(ctx, checks, WithKeepSecrets()),
+				ContChecks: Checks(ctx, checks, WithKeepSecrets()),
+				Blocks:     []*workflow.Block{Block(ctx, plan.Blocks[0], WithKeepSecrets())},
+			},
+		},
+	}
+
+	for _, test := range tests {
+		got := Plan(context.Background(), test.plan, withOptions(test.options))
+
+		if diff := pretty.Compare(test.want, got); diff != "" {
+			t.Errorf("TestPlan(%s): -want/+got:\n%s", test.name, diff)
+		}
+	}
+}
+
 func TestBlock(t *testing.T) {
 	t.Parallel()
 
 	ctx := context.Background()
 
-	//start := time.Now()
 	id, err := uuid.NewV7()
 	if err != nil {
 		panic(err)
