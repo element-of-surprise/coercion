@@ -31,7 +31,7 @@ var _ storage.Vault = &Vault{}
 type Vault struct {
 	// root is the root path for the storage.
 	root      string
-	conn      *sqlite.Conn
+	pool      *sqlitex.Pool
 	openFlags []sqlite.OpenFlags
 
 	reader
@@ -60,7 +60,7 @@ func New(ctx context.Context, root string, reg *registry.Register, options ...Op
 
 	r := &Vault{
 		root:      root,
-		openFlags: []sqlite.OpenFlags{sqlite.OpenReadWrite, sqlite.OpenCreate},
+		openFlags: []sqlite.OpenFlags{sqlite.OpenReadWrite, sqlite.OpenCreate, sqlite.OpenWAL},
 	}
 	for _, o := range options {
 		if err := o(r); err != nil {
@@ -89,11 +89,23 @@ func New(ctx context.Context, root string, reg *registry.Register, options ...Op
 	}
 
 	path := filepath.Join(root, "workstream.db")
+	var flags sqlite.OpenFlags
+	for _, flag := range r.openFlags {
+		flags |= flag
+	}
 
-	conn, err := sqlite.OpenConn(path, r.openFlags...)
+	// NOTE: Pool is set to 1. I'm having a problem with multiple conns seeing the commits of each other.
+	// Such as even Pool creation. Not sure what is wrong. PoolSize 1 is a workaround for the moment.
+	pool, err := sqlitex.NewPool(path, sqlitex.PoolOptions{Flags: flags, PoolSize: 1})
 	if err != nil {
 		return nil, err
 	}
+
+	conn, err := pool.Take(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer pool.Put(conn)
 
 	if err = createTables(ctx, conn); err != nil {
 		conn.Close()
@@ -102,17 +114,12 @@ func New(ctx context.Context, root string, reg *registry.Register, options ...Op
 
 	mu := &sync.Mutex{}
 
-	r.conn = conn
-	r.reader = reader{conn: conn, reg: reg}
-	r.creator = creator{mu: mu, conn: conn, reader: r.reader}
-	r.updater = newUpdater(mu, conn)
-	r.closer = closer{conn: conn}
+	r.pool = pool
+	r.reader = reader{pool: pool, reg: reg}
+	r.creator = creator{mu: mu, pool: pool, reader: r.reader}
+	r.updater = newUpdater(mu, pool)
+	r.closer = closer{pool: pool}
 	return r, nil
-}
-
-// createTables creates the tables for the storage using the schema stored in the embedded file.
-func (r *Vault) createTables(ctx context.Context) error {
-	return createTables(ctx, r.conn)
 }
 
 func createTables(ctx context.Context, conn *sqlite.Conn) error {

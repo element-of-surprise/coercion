@@ -9,7 +9,7 @@ import (
 	"github.com/element-of-surprise/coercion/workflow"
 	"github.com/element-of-surprise/coercion/workflow/storage"
 
-	"zombiezen.com/go/sqlite"
+	"zombiezen.com/go/sqlite/sqlitex"
 )
 
 var _ storage.PlanUpdater = planUpdater{}
@@ -17,7 +17,7 @@ var _ storage.PlanUpdater = planUpdater{}
 // planUpdater implements the storage.PlanUpdater interface.
 type planUpdater struct {
 	mu   *sync.Mutex
-	conn *sqlite.Conn
+	pool *sqlitex.Pool
 
 	private.Storage
 }
@@ -27,7 +27,13 @@ func (u planUpdater) UpdatePlan(ctx context.Context, plan *workflow.Plan) error 
 	u.mu.Lock()
 	defer u.mu.Unlock()
 
-	stmt, err := u.conn.Prepare(updatePlan)
+	conn, err := u.pool.Take(context.WithoutCancel(ctx))
+	if err != nil {
+		return fmt.Errorf("couldn't get a connection from the pool: %w", err)
+	}
+	defer u.pool.Put(conn)
+
+	stmt, err := conn.Prepare(updatePlan)
 	if err != nil {
 		return fmt.Errorf("PlanUpdater.UpdatePlan: %w", err)
 	}

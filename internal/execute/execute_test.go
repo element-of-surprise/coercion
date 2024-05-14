@@ -214,7 +214,10 @@ func TestStart(t *testing.T) {
 		if methodName(fr.req.Next) != methodName(p.states.Start) {
 			t.Errorf("TestStart(%s): Next method in Request is not the expected Start method", test.name)
 		}
-		if len(p.stoppers) > 0 {
+		p.mu.Lock()
+		stopperLen := len(p.stoppers)
+		p.mu.Unlock()
+		if stopperLen > 0 {
 			t.Errorf("TestStart(%s): did not delete the stopper entry", test.name)
 		}
 	}

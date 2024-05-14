@@ -19,7 +19,7 @@ import (
 
 // reader implements the storage.PlanReader interface.
 type reader struct {
-	conn *sqlite.Conn
+	pool *sqlitex.Pool
 	reg  *registry.Register
 }
 
@@ -27,9 +27,15 @@ type reader struct {
 func (r reader) Exists(ctx context.Context, id uuid.UUID) (bool, error) {
 	const q = "SELECT COUNT(*) FROM 'plans' WHERE 'id' = ?;"
 
+	conn, err := r.pool.Take(ctx)
+	if err != nil {
+		return false, fmt.Errorf("couldn't get a connection from the pool: %w", err)
+	}
+	defer r.pool.Put(conn)
+
 	count := -1
-	err := sqlitex.ExecuteTransient(
-		r.conn,
+	err = sqlitex.ExecuteTransient(
+		conn,
 		q,
 		&sqlitex.ExecOptions{
 			Args: []any{
@@ -61,13 +67,19 @@ func (r reader) Search(ctx context.Context, filters storage.Filters) (chan stora
 		return nil, fmt.Errorf("invalid filter: %w", err)
 	}
 
+	conn, err := r.pool.Take(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("couldn't get a connection from the pool: %w", err)
+	}
+	defer r.pool.Put(conn)
+
 	q, args, named := r.buildSearchQuery(filters)
 
 	results := make(chan storage.Stream[storage.ListResult], 1)
 
 	go func() {
 		err := sqlitex.Execute(
-			r.conn,
+			conn,
 			q,
 			&sqlitex.ExecOptions{
 				Args:  args,
@@ -156,6 +168,12 @@ func (r reader) buildSearchQuery(filters storage.Filters) (string, []any, map[st
 func (r reader) List(ctx context.Context, limit int) (chan storage.Stream[storage.ListResult], error) {
 	const listPlans = `SELECT id, group_id, name, descr, submit_time, state_status, state_start, state_end FROM plans ORDER BY submit_time DESC`
 
+	conn, err := r.pool.Take(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("couldn't get a connection from the pool: %w", err)
+	}
+	defer r.pool.Put(conn)
+
 	named := map[string]any{}
 
 	q := listPlans
@@ -168,7 +186,7 @@ func (r reader) List(ctx context.Context, limit int) (chan storage.Stream[storag
 
 	go func() {
 		err := sqlitex.Execute(
-			r.conn,
+			conn,
 			q,
 			&sqlitex.ExecOptions{
 				Named: named,
