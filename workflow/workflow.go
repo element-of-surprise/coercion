@@ -186,7 +186,7 @@ func (p *Plan) Defaults() {
 	if p == nil {
 		return
 	}
-	p.ID = uuid.New()
+	p.ID = NewV7()
 	p.State = &State{
 		Status: NotStarted,
 	}
@@ -279,7 +279,7 @@ func (c *Checks) Defaults() {
 	if c == nil {
 		return
 	}
-	c.ID = uuid.New()
+	c.ID = NewV7()
 	c.State = &State{
 		Status: NotStarted,
 	}
@@ -382,7 +382,7 @@ func (b *Block) Defaults() {
 	if b == nil {
 		return
 	}
-	b.ID = uuid.New()
+	b.ID = NewV7()
 	if b.Concurrency < 1 {
 		b.Concurrency = 1
 	}
@@ -474,7 +474,7 @@ func (s *Sequence) Defaults() {
 	if s == nil {
 		return
 	}
-	s.ID = uuid.New()
+	s.ID = NewV7()
 	s.State = &State{
 		Status: NotStarted,
 	}
@@ -587,7 +587,7 @@ func (a *Action) Defaults() {
 	if a == nil {
 		return
 	}
-	a.ID = uuid.New()
+	a.ID = NewV7()
 	a.State = &State{
 		Status: NotStarted,
 	}
@@ -756,4 +756,15 @@ func getTags(f reflect.StructField) tags {
 		t[tag] = true
 	}
 	return t
+}
+
+// NewV7 generates a new UUID. This is a wrapper around uuid.NewV7
+// that retries until a valid UUID is generated.
+func NewV7() uuid.UUID {
+	for {
+		u, err := uuid.NewV7()
+		if err == nil {
+			return u
+		}
+	}
 }
