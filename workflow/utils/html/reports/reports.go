@@ -295,6 +295,10 @@ type FS struct {
 	fs afero.Fs
 }
 
+func (f FS) FS() afero.Fs {
+	return f.fs
+}
+
 func (f FS) Open(name string) (fs.File, error) {
 	return f.fs.Open(name)
 }

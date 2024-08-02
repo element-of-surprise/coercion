@@ -40,7 +40,7 @@
                 </tr>
             </table>
         </div>
-    
+
        <div class="m-5 mb-0 p-5 pb-0">
             <div class="section-row flex sitems-center">
                 <div>Actions</div>
@@ -61,7 +61,7 @@
                 </tr>
                 {{range .Actions}}
                     <tr class="group">
-                        <td class="group-hover:bg-yellow-400"><a href="/actions/{{.ID}}.html">{{.Name}}</a></td>
+                        <td class="group-hover:bg-yellow-400"><a href="./actions/{{.ID}}.html">{{.Name}}</a></td>
                         <td class="group-hover:bg-yellow-400">{{.Descr}}</td>
                         <td class="group-hover:bg-yellow-400"><span style="color:{{statusColor .State.Status}}">{{.State.Status}}</span></td>
                     </tr>
