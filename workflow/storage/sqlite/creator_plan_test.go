@@ -123,7 +123,10 @@ func mustUUID() uuid.UUID {
 
 func dbSetup() (path string, pool *sqlitex.Pool, err error) {
 	tmpDir := os.TempDir()
-	id := uuid.New()
+	id, err := uuid.NewV7()
+	if err != nil {
+		panic(err)
+	}
 	path = filepath.Join(tmpDir, id.String())
 	pool, err = sqlitex.NewPool(
 		path,
