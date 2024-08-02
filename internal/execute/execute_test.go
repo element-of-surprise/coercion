@@ -146,10 +146,19 @@ func (r *fakeRunner) Run(name string, req statemachine.Request[sm.Data], options
 	return req, nil
 }
 
+func NewV7() uuid.UUID {
+	for {
+		id, err := uuid.NewV7()
+		if err == nil {
+			return id
+		}
+	}
+}
+
 func TestStart(t *testing.T) {
 	t.Parallel()
 
-	storedID := uuid.New()
+	storedID := NewV7()
 
 	tests := []struct {
 		name    string
@@ -159,7 +168,7 @@ func TestStart(t *testing.T) {
 	}{
 		{
 			name:    "no plan could be found",
-			id:      uuid.New(),
+			id:      NewV7(),
 			wantErr: true,
 		},
 		{
@@ -237,7 +246,7 @@ func TestValidateStartState(t *testing.T) {
 		},
 		{
 			name: "plan is not nil",
-			plan: &workflow.Plan{ID: uuid.New()},
+			plan: &workflow.Plan{ID: NewV7()},
 		},
 	}
 
@@ -392,7 +401,7 @@ func TestValidateAction(t *testing.T) {
 }
 
 func TestValidateID(t *testing.T) {
-	id := uuid.New()
+	id := NewV7()
 
 	// This adds compile level checking that all the object types implement the ider interface.
 	iders := []ider{

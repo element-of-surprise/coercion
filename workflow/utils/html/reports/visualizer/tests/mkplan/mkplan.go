@@ -11,6 +11,15 @@ import (
 	"github.com/google/uuid"
 )
 
+func NewV7() uuid.UUID {
+	for {
+		id, err := uuid.NewV7()
+		if err == nil {
+			return id
+		}
+	}
+}
+
 func main() {
 	p := makePlan()
 
@@ -48,7 +57,7 @@ func makePlan() *workflow.Plan {
 			}
 		}
 		return &workflow.Action{
-			ID:   uuid.New(),
+			ID:   NewV7(),
 			Name: name,
 			State: &workflow.State{
 				Status: status,
@@ -59,20 +68,20 @@ func makePlan() *workflow.Plan {
 
 	// Sample workflow plan generation
 	plan := &workflow.Plan{
-		ID:         uuid.New(),
+		ID:         NewV7(),
 		Name:       "Complex Deployment Plan",
 		Descr:      "This plan deploys multiple microservices in a staged approach.",
-		GroupID:    uuid.New(),
+		GroupID:    NewV7(),
 		SubmitTime: time.Now(),
 		State:      &workflow.State{Status: workflow.Running},
 		PreChecks: &workflow.Checks{
-			ID: uuid.New(),
+			ID: NewV7(),
 			Actions: []*workflow.Action{
 				actionWithAttempts("Verify User Permissions", workflow.Completed, 3),
 			},
 		},
 		ContChecks: &workflow.Checks{
-			ID: uuid.New(),
+			ID: NewV7(),
 			Actions: []*workflow.Action{
 				actionWithAttempts("Check Site is Reliable", workflow.Completed, 1),
 				actionWithAttempts("Check Network Connectivity", workflow.Completed, 1),
@@ -80,11 +89,11 @@ func makePlan() *workflow.Plan {
 		},
 		Blocks: []*workflow.Block{
 			{
-				ID:    uuid.New(),
+				ID:    NewV7(),
 				Name:  "Initialize Environment",
 				State: &workflow.State{Status: workflow.Running},
 				PreChecks: &workflow.Checks{
-					ID:    uuid.New(),
+					ID:    NewV7(),
 					State: &workflow.State{Status: workflow.Completed},
 					Actions: []*workflow.Action{
 						actionWithAttempts("Check Cloud Credentials", workflow.Completed, 2),
@@ -92,7 +101,7 @@ func makePlan() *workflow.Plan {
 				},
 				Sequences: []*workflow.Sequence{
 					{
-						ID:    uuid.New(),
+						ID:    NewV7(),
 						Name:  "Setup Kubernetes Cluster",
 						State: &workflow.State{Status: workflow.Completed},
 						Actions: []*workflow.Action{
@@ -101,7 +110,7 @@ func makePlan() *workflow.Plan {
 					},
 				},
 				PostChecks: &workflow.Checks{
-					ID:    uuid.New(),
+					ID:    NewV7(),
 					State: &workflow.State{Status: workflow.Completed},
 					Actions: []*workflow.Action{
 						actionWithAttempts("Validate Cluster Configuration", workflow.Completed, 1),
@@ -110,7 +119,7 @@ func makePlan() *workflow.Plan {
 			},
 		},
 		PostChecks: &workflow.Checks{
-			ID:      uuid.New(),
+			ID:      NewV7(),
 			State:   &workflow.State{Status: workflow.Completed},
 			Actions: []*workflow.Action{actionWithAttempts("Cleanup Temporary Files", workflow.Completed, 1)},
 		},
