@@ -370,10 +370,80 @@ Plugin authors can also take direct control of retries in special circumstances.
 
 ### Retrying a Plan
 
-`Plan` objects that are submitted to the system can only be run once. There IDs are unique and they follow a directed acyclic graph (DAG) model. This means that if you want to retry a `Plan`, you must create a new `Plan` object and submit that.
+`Plan` objects that are submitted to the system can only be run once. The IDs are unique and they follow a directed acyclic graph (DAG) model. This means that if you want to retry a `Plan`, you must create a new `Plan` object and submit that.
 
 `Plan` objects have a Clone() methd to allow cloning a `Plan` for various purposes. This removes fields such as the ID and State in preparation for a new submission.
 
 In the future, I will add more intelligent cloing methods to do things like remove only failiures and collapse blocks that have no failures.
 
 You can tie `Plan`s together by using the same `GroupID` on a `Plan`.
+
+### Walking a Plan object
+
+The `workflow/utils/walk` package has a `Walk` function that will walk a `Plan` object and call a function for each `Block` and `Action` in the `Plan`.
+
+This is extremely useful for doing mass modifications or find errors quickly in a `Plan`.  Here is an example where we print any `Action` errors:
+
+```go
+for item := range walk.Plan(ctx, plan) {
+	switch v := item.(type) {
+	case *workflow.Action:
+		if v.State.Status == workflow.Failed {
+			attempt := v.FinalAttempt()
+			fmt.Printf("Action(%s) [runtime: %v], failed: %s\n", v.Name, v.State.Duration(), attempt.Err.Error())
+		}
+	}
+}
+```
+
+### Cloning a Plan
+
+The `clone` package in `workflow/utils/clone` provides methods to clone a `Plan` object. By default, this will attempt to remove
+secrets from the `Plan` object. This is useful for logging or debugging purposes where you do not want that information displayed.
+By default it will also delete all state information from the `Plan` object. This allows you to submit the `Plan` object again.
+
+The `clone` package currently is a little thin on features. But this will be rectified in the near future.
+
+Right now its base use is for displaying or resubitting a `Plan` object in its entirety.
+
+Example for prepping for display:
+
+```go
+display := clone.Plan(plan, clone.WithKeepState)
+// Safe to print out or display.
+```
+
+Example for resubmitting:
+
+```go
+newPlan := clone.Plan(plan, clone.WithKeepSecrets)
+// Safe to submit again.
+```
+
+### Visualizing a Plan
+
+The `workflow/utils/visualize` package provides a method to visualize a `Plan` object.  This is not the only method
+of visualizing a `Plan` object, but one that is useful for tech support.
+
+You can install the visualizer with:
+
+```bash
+go install github.com/element-of-surprise/coercion/workflow/utils/html/reports/visualizer
+```
+
+As long as your `go/bin` directory is in your path, you can run the visualizer with:
+
+```bash
+./visualizer
+```
+
+This will start a web server on `localhost:3030`.
+
+That page will allow you to drag and drop a `Plan` object that is saved in json format. You will then see its UUID
+displayed. You can then navigate through the `Plan` object in a graphical format.
+
+<img src="./docs/img/coercion-uploader.jpg"  width="500">
+
+You can then navigate through the `Plan` object in a graphical format.
+
+<img src="./docs/img/coercion-ui.jpg"  width="500">
