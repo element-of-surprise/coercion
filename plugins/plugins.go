@@ -35,6 +35,9 @@ type Error struct {
 
 // Error implements the error interface.
 func (e *Error) Error() string {
+	if e == nil {
+		return ""
+	}
 	return e.Message
 }
 

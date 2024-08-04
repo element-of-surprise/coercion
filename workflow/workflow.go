@@ -74,6 +74,11 @@ func (s *State) Reset() {
 	s.End = time.Time{}
 }
 
+// Duration returns the time between Start and End for this object.
+func (s *State) Duration() time.Duration {
+	return s.End.Sub(s.Start)
+}
+
 // validator is a type that validates its own fields. If the validator has sub-types that
 // need validation, it returns a list of validators that need to be validated.
 // This allows tests to be more modular instead of a super test of the entire object tree.
@@ -651,6 +656,17 @@ func (a *Action) validate() ([]validator, error) {
 	}
 
 	return nil, nil
+}
+
+// FinalAttempt returns the last attempt of the action.
+func (a *Action) FinalAttempt() *Attempt {
+	if len(a.Attempts) == 0 {
+		return nil
+	}
+	if len(a.Attempts) == 0 {
+		return nil
+	}
+	return a.Attempts[len(a.Attempts)-1]
 }
 
 type queue[T any] struct {

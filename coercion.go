@@ -105,12 +105,12 @@ func (w *Workstream) Submit(ctx context.Context, plan *workflow.Plan) (uuid.UUID
 // requestDefaults finds all request objects in the plan and calls their Defaults() method.
 func (w *Workstream) requestDefaults(ctx context.Context, plan *workflow.Plan) {
 	for item := range walk.Plan(ctx, plan) {
-		a := item.Action()
-		if a == nil {
-			continue
-		}
-		if v, ok := a.Req.(defaulter); ok {
-			v.Defaults()
+		switch item.Value.Type() {
+		case workflow.OTAction:
+			a := item.Action()
+			if v, ok := a.Req.(defaulter); ok {
+				v.Defaults()
+			}
 		}
 	}
 }
