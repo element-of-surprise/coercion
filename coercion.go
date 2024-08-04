@@ -82,6 +82,8 @@ func (w *Workstream) Submit(ctx context.Context, plan *workflow.Plan) (uuid.UUID
 	if err := w.populateRegistry(ctx, plan); err != nil {
 		return uuid.Nil, err
 	}
+	w.requestDefaults(ctx, plan)
+
 	if err := workflow.Validate(plan); err != nil {
 		return uuid.Nil, fmt.Errorf("Plan did not validate: %s", err)
 	}
@@ -98,6 +100,19 @@ func (w *Workstream) Submit(ctx context.Context, plan *workflow.Plan) (uuid.UUID
 	}
 
 	return plan.ID, nil
+}
+
+// requestDefaults finds all request objects in the plan and calls their Defaults() method.
+func (w *Workstream) requestDefaults(ctx context.Context, plan *workflow.Plan) {
+	for item := range walk.Plan(ctx, plan) {
+		a := item.Action()
+		if a == nil {
+			continue
+		}
+		if v, ok := a.Req.(defaulter); ok {
+			v.Defaults()
+		}
+	}
 }
 
 func (w *Workstream) populateRegistry(ctx context.Context, plan *workflow.Plan) error {
