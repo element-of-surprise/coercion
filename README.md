@@ -4,7 +4,7 @@
 [![Go Report Card](https://goreportcard.com/badge/github.com/element-of-surprise/coercion)](https://goreportcard.com/report/github.com/element-of-surprise/coercion)
 
 <p align="center">
-  <img src="./docs/img/gopher_river.jpeg"  width="500">
+  <img src="./docs/img/coercion.webp"  width="500">
 </p>
 
 ## Introduction
@@ -104,7 +104,7 @@ type Plugin interface {
 - Request - Returns an empty request object.
 - Response - Returns an empty response object. If a plugin returns a response that isn't the same as this, the plugin is considered to have failed.
 - IsCheck - Returns true if the plugin is a check plugin. A check plugin should not have side effects and can only be used in one of the check actions. A check plugin cannot be used in a Job.
-- RetryPlan - Returns the retry plan for the plugin. This is the plan for how the plugin should be retried. The number of retries is set in the `Job` object. This RetryPlan uses exponential backoff that you define for SRE best practices.
+- RetryPlan - Returns the retry plan for the plugin. This is the plan for how the plugin should be retried. The number of retries is set in the `Action` object. This RetryPlan uses exponential backoff that you define for SRE best practices.
 - Init - Validates that the environment that the plugin currently operates in is valid for the plugin. If this fails, the plugin cannot be used. For example, if this leverages an external binary, this can check for the existence of that binary.
 
 A plugin is registered in a plugin registry. The registry is used to look up plugins by name, where all plugin names must be unique within a registry.
@@ -176,8 +176,6 @@ There are two ways to build a `Plan`:
 
 This is an example of how you can build a `Plan` object by hand. In this case we are deploying a server and running it using SCP, SSH and a ping plugin. (These are fictional plugins, just an example).
 
-````go
-
 ```go
 plan := &workflow.Plan{
 	Name: "Deploy Server and Run",
@@ -199,7 +197,7 @@ plan := &workflow.Plan{
 				{
 					Name: "Upload Server and Run",
 					Descr: "Uses SCP to copy the server files and then logs in via SSH and runs it",
-					Jobs: []workflow.Action{
+					Actions: []*workflow.Action{
 						{
 							Name: "Copy Server Files",
 							Plugin: "github.com/element-of-surprise/plugins/scp",
@@ -221,7 +219,7 @@ plan := &workflow.Plan{
 					},
 				},
 			},
-			PostChecks: []workflow.Action{
+			PostChecks: []*workflow.Action{
 				{
 					Name: "Check Server Deployed",
 					Plugin: "github.com/element-of-surprise/plugins/healthcheck",
