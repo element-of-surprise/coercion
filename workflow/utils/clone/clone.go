@@ -206,19 +206,22 @@ func Block(ctx context.Context, b *workflow.Block, options ...Option) *workflow.
 	)
 
 	if b.PreChecks != nil {
-		if b.PreChecks.State.Status == workflow.Completed {
+		state := b.PreChecks.State
+		if state != nil && b.PreChecks.State.Status == workflow.Completed {
 			preChecksCompleted = true
 		}
 		n.PreChecks = Checks(ctx, b.PreChecks, withOptions(opts))
 	}
 	if b.ContChecks != nil {
-		if b.ContChecks.State.Status != workflow.Failed {
+		state := b.ContChecks.State
+		if state != nil && state.Status != workflow.Failed {
 			contChecksNotFailed = true
 		}
 		n.ContChecks = Checks(ctx, b.ContChecks, withOptions(opts))
 	}
 	if b.PostChecks != nil {
-		if b.PostChecks.State.Status == workflow.Completed {
+		state := b.PostChecks.State
+		if state != nil && b.PostChecks.State.Status == workflow.Completed {
 			postChecksCompleted = true
 		}
 		n.PostChecks = Checks(ctx, b.PostChecks, withOptions(opts))

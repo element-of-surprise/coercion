@@ -173,16 +173,19 @@ func TestBlock(t *testing.T) {
 		EntranceDelay: 1 * time.Second,
 		ExitDelay:     1 * time.Second,
 		PreChecks: &workflow.Checks{
+			State: &workflow.State{},
 			Actions: []*workflow.Action{
 				Action(ctx, action, WithKeepState(), WithKeepSecrets()),
 			},
 		},
 		PostChecks: &workflow.Checks{
+			State: &workflow.State{},
 			Actions: []*workflow.Action{
 				Action(ctx, action, WithKeepState(), WithKeepSecrets()),
 			},
 		},
 		ContChecks: &workflow.Checks{
+			State: &workflow.State{},
 			Actions: []*workflow.Action{
 				Action(ctx, action, WithKeepState(), WithKeepSecrets()),
 			},
@@ -253,16 +256,19 @@ func TestBlock(t *testing.T) {
 				EntranceDelay: 1 * time.Second,
 				ExitDelay:     1 * time.Second,
 				PreChecks: &workflow.Checks{
+					State: &workflow.State{},
 					Actions: []*workflow.Action{
 						actionSecretRemoved,
 					},
 				},
 				PostChecks: &workflow.Checks{
+					State: &workflow.State{},
 					Actions: []*workflow.Action{
 						actionSecretRemoved,
 					},
 				},
 				ContChecks: &workflow.Checks{
+					State: &workflow.State{},
 					Actions: []*workflow.Action{
 						actionSecretRemoved,
 					},
