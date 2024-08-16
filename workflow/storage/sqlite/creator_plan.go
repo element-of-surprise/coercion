@@ -177,7 +177,7 @@ func commitBlock(ctx context.Context, conn *sqlite.Conn, planID uuid.UUID, pos i
 		return fmt.Errorf("conn.Prepate(insertBlock): %w", err)
 	}
 
-	for _, c := range []*workflow.Checks{block.PreChecks, block.PostChecks, block.ContChecks} {
+	for _, c := range [3]*workflow.Checks{block.PreChecks, block.PostChecks, block.ContChecks} {
 		if err := commitChecks(ctx, conn, planID, c); err != nil {
 			return fmt.Errorf("commitBlock(commitChecks): %w", err)
 		}

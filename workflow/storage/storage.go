@@ -66,6 +66,7 @@ type Vault interface {
 	Creator
 	Updater
 	Closer
+	Deleter
 }
 
 // Creator allows for creating Plan data in storage.
@@ -79,6 +80,13 @@ type Creator interface {
 // Closer allows for closing the storage.
 type Closer interface {
 	Close(ctx context.Context) error
+
+	private.Storage
+}
+
+// Deleter allows for deleting Plan data from storage.
+type Deleter interface {
+	Delete(ctx context.Context, id uuid.UUID) error
 
 	private.Storage
 }
@@ -120,7 +128,7 @@ type PlanUpdater interface {
 
 // BlockUpdater allows for writing Block data to storage.
 type BlockUpdater interface {
-	// Update writes Block data to storage, but not underlying data.
+	// UpdateBlock writes Block data to storage, but not underlying data.
 	UpdateBlock(context.Context, *workflow.Block) error
 
 	private.Storage
@@ -128,7 +136,7 @@ type BlockUpdater interface {
 
 // ChecksUpdater is a storage writer for Checks in a specific Plan or Block.
 type ChecksUpdater interface {
-	// Update writes Checks states data to storage but not underlying data.
+	// UpdateChecks writes Checks states data to storage but not underlying data.
 	UpdateChecks(context.Context, *workflow.Checks) error
 
 	private.Storage
@@ -136,7 +144,7 @@ type ChecksUpdater interface {
 
 // SequenceUpdater is a storage writer for Sequences in a specific Block.
 type SequenceUpdater interface {
-	// Update writes Sequence data to storage for Sequences in the specific Block, but not underlying data.
+	// UpdateSequence writes Sequence data to storage for Sequences in the specific Block, but not underlying data.
 	UpdateSequence(context.Context, *workflow.Sequence) error
 
 	private.Storage
@@ -144,7 +152,7 @@ type SequenceUpdater interface {
 
 // ActionUpdater is a storage writer for Actions in a specific Sequence, PreChecks, PostChecks or ContChecks.
 type ActionUpdater interface {
-	// Update writes Action data to storage for Actions in the specific Sequence, PreChecks, PostChecks or ContChecks.
+	// UpdateAction writes Action data to storage for Actions in the specific Sequence, PreChecks, PostChecks or ContChecks.
 	UpdateAction(context.Context, *workflow.Action) error
 
 	private.Storage

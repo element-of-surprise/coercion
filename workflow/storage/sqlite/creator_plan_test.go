@@ -2,8 +2,10 @@ package sqlite
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -121,7 +123,16 @@ func mustUUID() uuid.UUID {
 	return id
 }
 
+var (
+	dbPath string
+	dbPool *sqlitex.Pool
+)
+
 func dbSetup() (path string, pool *sqlitex.Pool, err error) {
+	if dbPath != "" {
+		return dbPath, dbPool, nil
+	}
+
 	tmpDir := os.TempDir()
 	id, err := uuid.NewV7()
 	if err != nil {
@@ -149,18 +160,17 @@ func dbSetup() (path string, pool *sqlitex.Pool, err error) {
 		return "", nil, err
 	}
 
+	dbPath = path
+	dbPool = pool
+
 	return path, pool, nil
 }
 
 func TestCommitPlan(t *testing.T) {
-	t.Parallel()
-
-	path, pool, err := dbSetup()
+	_, pool, err := dbSetup()
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer os.RemoveAll(path)
-	defer pool.Close()
 
 	conn, err := pool.Take(context.Background())
 	if err != nil {
@@ -177,7 +187,7 @@ func TestCommitPlan(t *testing.T) {
 	reg.Register(&plugins.HelloPlugin{})
 
 	// TODO(element-of-surprise): Add checks to verify the data in the database
-	reader := &reader{
+	reader := reader{
 		pool: pool,
 		reg:  reg,
 	}
@@ -190,4 +200,97 @@ func TestCommitPlan(t *testing.T) {
 	if diff := cmp.Diff(plan, storedPlan, cmp.AllowUnexported(workflow.Action{})); diff != "" {
 		t.Fatalf("Read plan does not match the original plan: -want/+got:\n%s", diff)
 	}
+}
+
+func TestDeletePlan(t *testing.T) {
+	path, pool, err := dbSetup()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(path)
+	defer pool.Close()
+
+	reg := registry.New()
+	reg.Register(&plugins.CheckPlugin{})
+	reg.Register(&plugins.HelloPlugin{})
+
+	reader := reader{
+		pool: pool,
+		reg:  reg,
+	}
+
+	/*
+		plan, err := reader.Read(context.Background(), plan.ID)
+		if err != nil {
+			t.Fatalf("couldn't fetch plan: %s", err)
+		}
+	*/
+
+	deleter := deleter{
+		mu:     &sync.Mutex{},
+		pool:   pool,
+		reader: reader,
+	}
+
+	countExpect(pool, "plans", 1, t)
+	mustGetcount(pool, "blocks", t)
+	mustGetcount(pool, "actions", t)
+	mustGetcount(pool, "checks", t)
+	mustGetcount(pool, "sequences", t)
+
+	if err := deleter.Delete(context.Background(), plan.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	countExpect(pool, "plans", 0, t)
+	countExpect(pool, "blocks", 0, t)
+	countExpect(pool, "actions", 0, t)
+	countExpect(pool, "checks", 0, t)
+	countExpect(pool, "sequences", 0, t)
+}
+
+func mustGetcount(pool *sqlitex.Pool, table string, t *testing.T) int64 {
+	c, err := countTable(pool, table)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c == 0 {
+		t.Fatalf("expected at least one row in %s", table)
+	}
+	return c
+}
+
+func countExpect(pool *sqlitex.Pool, table string, expect int64, t *testing.T) {
+	count, err := countTable(pool, table)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if count != expect {
+		t.Fatalf("expected %d rows in %s, got %d", expect, table, count)
+	}
+}
+
+func countTable(pool *sqlitex.Pool, table string) (int64, error) {
+	conn, err := pool.Take(context.Background())
+	if err != nil {
+		return 0, err
+	}
+	defer pool.Put(conn)
+
+	q := fmt.Sprintf("SELECT COUNT(*) FROM %s", table)
+	var count int64
+	err = sqlitex.Execute(
+		conn,
+		q,
+		&sqlitex.ExecOptions{
+			ResultFunc: func(stmt *sqlite.Stmt) error {
+				count = stmt.GetInt64("COUNT(*)")
+				return nil
+			},
+		},
+	)
+	if err != nil {
+		return 0, err
+	}
+	return count, nil
 }
