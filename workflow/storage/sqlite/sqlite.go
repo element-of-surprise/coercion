@@ -38,6 +38,7 @@ type Vault struct {
 	creator
 	updater
 	closer
+	deleter
 
 	private.Storage
 }
@@ -119,6 +120,7 @@ func New(ctx context.Context, root string, reg *registry.Register, options ...Op
 	r.creator = creator{mu: mu, pool: pool, reader: r.reader}
 	r.updater = newUpdater(mu, pool)
 	r.closer = closer{pool: pool}
+	r.deleter = deleter{mu: mu, pool: pool, reader: r.reader}
 	return r, nil
 }
 
