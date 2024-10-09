@@ -133,6 +133,11 @@ func (w *Workstream) Start(ctx context.Context, id uuid.UUID) error {
 	return w.exec.Start(ctx, id)
 }
 
+// Plan returns the plan with the given id. If the plan does not exist, an error is returned.
+func (w *Workstream) Plan(ctx context.Context, id uuid.UUID) (*workflow.Plan, error) {
+	return w.store.Read(ctx, id)
+}
+
 // Status returns a channel that will receive updates on the status of the plan with the given id. The interval
 // is the time between updates. The channel will be closed when the plan is complete or an error occurs.
 // If the Context is canceled, the channel will be closed and the final Result will have Err set. Otherwise, regardless
