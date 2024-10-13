@@ -248,6 +248,33 @@ func TestAddChecks(t *testing.T) {
 	}
 }
 
+// TestAddBypassChecks simply tests that AddChecks() adds Bypass checks where they should go.
+// TestAddChecks checks Cont checks and all the rest of the logic.
+func TestAddBypassChecks(t *testing.T) {
+	wantCheck0 := &workflow.Checks{Actions: []*workflow.Action{{Name: "check0"}}}
+
+	builder, err := New("test", "test")
+	if err != nil {
+		panic(err)
+	}
+
+	builder.AddChecks(BypassChecks, wantCheck0).Up()
+	builder.AddBlock(BlockArgs{Name: "test", Descr: "test", Concurrency: 1})
+	builder.AddChecks(BypassChecks, wantCheck0).Up()
+
+	got, err := builder.Plan()
+	if err != nil {
+		t.Fatalf("TestAddBypassChecks(builer.Plan()): unexpected error: %v", err)
+	}
+
+	if got.BypassChecks.Actions[0].Name != "check0" {
+		t.Errorf("TestAddBypassChecks(Plan.BypassChecks): got %s, want check0", got.BypassChecks.Actions[0].Name)
+	}
+	if got.Blocks[0].BypassChecks.Actions[0].Name != "check0" {
+		t.Errorf("TestAddBypassChecks(Block.BypassChecks): got %s, want check0", got.Blocks[0].BypassChecks.Actions[0].Name)
+	}
+}
+
 // TestAddPrePostChecks simply tests that AddChecks() adds Pre and Post checks where they should go.
 // TestAddChecks checks Cont checks and all the rest of the logic.
 func TestAddPrePostChecks(t *testing.T) {

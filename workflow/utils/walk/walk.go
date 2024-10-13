@@ -31,8 +31,8 @@ func (i Item) Plan() *workflow.Plan {
 	return i.Value.(*workflow.Plan)
 }
 
-// PreCheck returns the Value as a *workflow.PreCheck. If the object is not a
-// PreCheck, this will panic.
+// Checks returns the Value as a *workflow.Checks. If the object is not a
+// Checks, this will panic.
 func (i Item) Checks() *workflow.Checks {
 	return i.Value.(*workflow.Checks)
 }
@@ -74,6 +74,11 @@ func Plan(ctx context.Context, p *workflow.Plan) chan Item {
 		}
 
 		chain := []workflow.Object{p}
+		if p.BypassChecks != nil {
+			if ok := walkChecks(ctx, ch, chain, p.BypassChecks); !ok {
+				return
+			}
+		}
 		if p.PreChecks != nil {
 			if ok := walkChecks(ctx, ch, chain, p.PreChecks); !ok {
 				return
@@ -124,6 +129,11 @@ func walkBlock(ctx context.Context, ch chan Item, chain []workflow.Object, block
 	}
 
 	chain = append(chain, block)
+	if block.BypassChecks != nil {
+		if ok := walkChecks(ctx, ch, chain, block.BypassChecks); !ok {
+			return false
+		}
+	}
 	if block.PreChecks != nil {
 		if ok := walkChecks(ctx, ch, chain, block.PreChecks); !ok {
 			return false

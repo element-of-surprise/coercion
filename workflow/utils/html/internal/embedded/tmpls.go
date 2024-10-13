@@ -143,9 +143,7 @@ func calcCompleted[T supportedCalcs](v T) completed {
 				c.Completed++
 			}
 		}
-		log.Printf("%+v", c)
 		c.Total = len(x)
-		log.Printf("%v/%v", c.Done(), c.Total)
 	case *workflow.Sequence:
 		for _, act := range x.Actions {
 			switch act.State.Status {
