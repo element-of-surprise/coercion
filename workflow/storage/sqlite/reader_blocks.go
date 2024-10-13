@@ -79,7 +79,10 @@ func (p reader) blockRowToBlock(ctx context.Context, conn *sqlite.Conn, stmt *sq
 	}
 	b.Concurrency = int(stmt.GetInt64("concurrency"))
 	b.ToleratedFailures = int(stmt.GetInt64("toleratedfailures"))
-
+	b.BypassChecks, err = p.fieldToCheck(ctx, "bypasschecks", conn, stmt)
+	if err != nil {
+		return nil, fmt.Errorf("couldn't read block bypasschecks: %w", err)
+	}
 	b.PreChecks, err = p.fieldToCheck(ctx, "prechecks", conn, stmt)
 	if err != nil {
 		return nil, fmt.Errorf("couldn't read block prechecks: %w", err)

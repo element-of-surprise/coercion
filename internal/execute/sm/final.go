@@ -13,6 +13,21 @@ type finalStates struct{}
 
 // start is simply the starting place for the statemachine. It does nothing.
 func (f finalStates) start(req statemachine.Request[Data]) statemachine.Request[Data] {
+	req.Next = f.bypassChecks
+	return req
+}
+
+// bypassChecks looks through all the gates in the Plan and Completes the Plan if there are
+// gates defined and they all pass. If there are no gates defined, the Plan is examined
+// further.
+func (f finalStates) bypassChecks(req statemachine.Request[Data]) statemachine.Request[Data] {
+	plan := req.Data.Plan
+
+	skipped := f.examineBypasses(plan.BypassChecks)
+	if skipped {
+		req.Next = f.end // Records the Plan as Completed
+		return req
+	}
 	req.Next = f.planChecks
 	return req
 }
@@ -62,6 +77,18 @@ func (f finalStates) end(req statemachine.Request[Data]) statemachine.Request[Da
 	plan := req.Data.Plan
 	plan.State.Status = workflow.Completed
 	return req
+}
+
+// examineBypasses checks to see if any gates were defined. If not, it returns false.
+// If the gates were defined and they are in a Completed state, it returns true.
+func (f finalStates) examineBypasses(gates *workflow.Checks) bool {
+	if gates == nil {
+		return false
+	}
+	if gates.State.Status == workflow.Completed {
+		return true
+	}
+	return false
 }
 
 // examineChecks Pre/Cont/Post checks passed and returns a failure reason and an error if one of them failed.

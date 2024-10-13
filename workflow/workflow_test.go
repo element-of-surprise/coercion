@@ -29,6 +29,7 @@ func TestPlanValidate(t *testing.T) {
 		return &x
 	}
 	expectVals := []validator{
+		goodPlan().BypassChecks,
 		goodPlan().PreChecks,
 		goodPlan().PostChecks,
 		goodPlan().ContChecks,
@@ -417,6 +418,7 @@ func TestBlockValidate(t *testing.T) {
 			name:  "Success",
 			block: goodBlock,
 			vals: []validator{
+				goodBlock().BypassChecks,
 				goodBlock().PreChecks,
 				goodBlock().PostChecks,
 				goodBlock().ContChecks,

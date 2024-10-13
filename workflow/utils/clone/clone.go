@@ -95,6 +95,12 @@ func Plan(ctx context.Context, p *workflow.Plan, options ...Option) *workflow.Pl
 		np.SubmitTime = p.SubmitTime
 	}
 
+	if p.BypassChecks != nil {
+		if opts.removeCompleted && p.BypassChecks.State.Status == workflow.Completed {
+			return nil
+		}
+		np.BypassChecks = Checks(ctx, p.BypassChecks, withOptions(opts))
+	}
 	if p.PreChecks != nil {
 		np.PreChecks = Checks(ctx, p.PreChecks, withOptions(opts))
 	}
@@ -205,6 +211,15 @@ func Block(ctx context.Context, b *workflow.Block, options ...Option) *workflow.
 		postChecksCompleted bool
 	)
 
+	if b.BypassChecks != nil {
+		state := b.BypassChecks.State
+		if state != nil && state.Status == workflow.Completed {
+			if opts.removeCompleted {
+				return nil
+			}
+		}
+		n.BypassChecks = Checks(ctx, b.BypassChecks, withOptions(opts))
+	}
 	if b.PreChecks != nil {
 		state := b.PreChecks.State
 		if state != nil && b.PreChecks.State.Status == workflow.Completed {

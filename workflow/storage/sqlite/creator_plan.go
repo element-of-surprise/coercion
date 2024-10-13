@@ -21,6 +21,7 @@ const insertPlan = `
 		name,
 		descr,
 		meta,
+		bypasschecks,
 		prechecks,
 		postchecks,
 		contchecks,
@@ -30,7 +31,7 @@ const insertPlan = `
 		state_end,
 		submit_time,
 		reason
-	) VALUES ($id, $group_id, $name, $descr, $meta, $prechecks, $postchecks, $contchecks, $blocks,
+	) VALUES ($id, $group_id, $name, $descr, $meta, $bypasschecks, $prechecks, $postchecks, $contchecks, $blocks,
 	$state_status, $state_start, $state_end, $submit_time, $reason)`
 
 var zeroTime = time.Unix(0, 0)
@@ -53,6 +54,9 @@ func commitPlan(ctx context.Context, conn *sqlite.Conn, p *workflow.Plan) (err e
 	stmt.SetText("$name", p.Name)
 	stmt.SetText("$descr", p.Descr)
 	stmt.SetBytes("$meta", p.Meta)
+	if p.BypassChecks != nil {
+		stmt.SetText("$bypasschecks", p.BypassChecks.ID.String())
+	}
 	if p.PreChecks != nil {
 		stmt.SetText("$prechecks", p.PreChecks.ID.String())
 	}
@@ -83,6 +87,9 @@ func commitPlan(ctx context.Context, conn *sqlite.Conn, p *workflow.Plan) (err e
 		return fmt.Errorf("planToSQL(plan): %w", err)
 	}
 
+	if err := commitChecks(ctx, conn, p.ID, p.BypassChecks); err != nil {
+		return fmt.Errorf("planToSQL(commitChecks(bypasschecks)): %w", err)
+	}
 	if err := commitChecks(ctx, conn, p.ID, p.PreChecks); err != nil {
 		return fmt.Errorf("planToSQL(commitChecks(prechecks)): %w", err)
 	}
@@ -159,6 +166,7 @@ const insertBlock = `
 		pos,
 		entrancedelay,
 		exitdelay,
+		bypasschecks,
 		prechecks,
 		postchecks,
 		contchecks,
@@ -168,7 +176,7 @@ const insertBlock = `
 		state_status,
 		state_start,
 		state_end
-	) VALUES ($id, $plan_id, $name, $descr, $pos, $entrancedelay, $exitdelay, $prechecks, $postchecks, $contchecks, $sequences,
+	) VALUES ($id, $plan_id, $name, $descr, $pos, $entrancedelay, $exitdelay, $bypasschecks, $prechecks, $postchecks, $contchecks, $sequences,
 	$concurrency, $toleratedfailures,$state_status, $state_start, $state_end)`
 
 func commitBlock(ctx context.Context, conn *sqlite.Conn, planID uuid.UUID, pos int, block *workflow.Block) error {
@@ -177,7 +185,7 @@ func commitBlock(ctx context.Context, conn *sqlite.Conn, planID uuid.UUID, pos i
 		return fmt.Errorf("conn.Prepate(insertBlock): %w", err)
 	}
 
-	for _, c := range [3]*workflow.Checks{block.PreChecks, block.PostChecks, block.ContChecks} {
+	for _, c := range [4]*workflow.Checks{block.BypassChecks, block.PreChecks, block.PostChecks, block.ContChecks} {
 		if err := commitChecks(ctx, conn, planID, c); err != nil {
 			return fmt.Errorf("commitBlock(commitChecks): %w", err)
 		}
@@ -195,6 +203,9 @@ func commitBlock(ctx context.Context, conn *sqlite.Conn, planID uuid.UUID, pos i
 	stmt.SetInt64("$pos", int64(pos))
 	stmt.SetInt64("$entrancedelay", int64(block.EntranceDelay))
 	stmt.SetInt64("$exitdelay", int64(block.ExitDelay))
+	if block.BypassChecks != nil {
+		stmt.SetText("$bypasschecks", block.BypassChecks.ID.String())
+	}
 	if block.PreChecks != nil {
 		stmt.SetText("$prechecks", block.PreChecks.ID.String())
 	}
