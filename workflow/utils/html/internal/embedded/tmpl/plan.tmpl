@@ -38,6 +38,36 @@
             </table>
         </div> {{/*<div class="summary m-5 p-5">*/}}
 
+        {{with .BypassChecks}}
+        {{$completed := completedChecks .}}
+        <div class="m-5 mb-0 p-5 pb-0">
+            <div class="section-row flex sitems-center">
+                <div>BypassChecks</div>
+                <div>
+                    <div class="progress" data-label="{{$completed.Done}}/{{$completed.Total}}" style="margin-left: auto;">
+                        <span class="value" style="width:{{$completed.Percent}}%; background-color:{{$completed.Color}};"></span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="summary m-5 mt-0 p-5 pt-0">
+            <table class="w-full">
+                <tr>
+                    <th class="header text-left">Name</th>
+                    <th class="header text-left">Description</th>
+                    <th class="header text-left">Status</th>
+                </tr>
+                {{range .Actions}}
+                    <tr class="group">
+                        <td class="group-hover:bg-yellow-400"><a href="./actions/{{.ID}}.html">{{.Name}}</a></td>
+                        <td class="group-hover:bg-yellow-400">{{.Descr}}</td>
+                        <td class="group-hover:bg-yellow-400"><span style="color:{{statusColor .State.Status}}">{{.State.Status}}</span></td>
+                    </tr>
+                {{end}} {{/*{{range .Actions}}*/}}
+            </table>
+        </div>
+        {{end}} {{/*with .BypassChecks*/}}
 
         {{with .PreChecks}}
         {{$completed := completedChecks .}}

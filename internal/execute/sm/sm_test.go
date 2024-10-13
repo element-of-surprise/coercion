@@ -57,8 +57,63 @@ func TestPlanStart(t *testing.T) {
 	if vault.calls.Load() != 1 {
 		t.Errorf("TestPlanStart: storage.Create() did not get called")
 	}
-	if methodName(req.Next) != methodName(states.PlanPreChecks) {
-		t.Errorf("TestPlanStart: expected req.Next == %s, got %s", methodName(req.Next), methodName(states.PlanPreChecks))
+	if methodName(req.Next) != methodName(states.PlanBypassChecks) {
+		t.Errorf("TestPlanStart: expected req.Next == %s, got %s", methodName(req.Next), methodName(states.PlanBypassChecks))
+	}
+}
+
+func TestPlanBypassChecks(t *testing.T) {
+	t.Parallel()
+
+	states := &States{} // Used to get the method name of a state for wantNextState
+
+	tests := []struct {
+		name          string
+		plan          *workflow.Plan
+		checksRunner  checksRunner
+		wantNextState statemachine.State[Data]
+	}{
+		{
+			name:          "BypassChecks are nil",
+			plan:          &workflow.Plan{},
+			wantNextState: states.PlanPreChecks,
+		},
+		{
+			name: "BypassChecks succeed",
+			plan: &workflow.Plan{
+				BypassChecks: &workflow.Checks{},
+			},
+			checksRunner: func(ctx context.Context, checks *workflow.Checks) error {
+				return nil
+			},
+			wantNextState: states.End,
+		},
+		{
+			name: "BypassChecks fail",
+			plan: &workflow.Plan{
+				PreChecks:  &workflow.Checks{},
+				ContChecks: &workflow.Checks{},
+			},
+			checksRunner: func(ctx context.Context, checks *workflow.Checks) error {
+				return fmt.Errorf("error")
+			},
+			wantNextState: states.PlanPreChecks,
+		},
+	}
+
+	for _, test := range tests {
+		req := statemachine.Request[Data]{
+			Ctx: context.Background(),
+			Data: Data{
+				Plan: test.plan,
+			},
+		}
+
+		states := &States{store: &fakeUpdater{}, checksRunner: test.checksRunner}
+		req = states.PlanBypassChecks(req)
+		if methodName(req.Next) != methodName(test.wantNextState) {
+			t.Errorf("TestBlockBypassChecks(%s): got next state = %v, want %v", test.name, methodName(req.Next), methodName(test.wantNextState))
+		}
 	}
 }
 
@@ -203,7 +258,7 @@ func TestExecuteBlocks(t *testing.T) {
 			block: block{
 				block: &workflow.Block{State: &workflow.State{}},
 			},
-			wantNextState: states.BlockPreChecks,
+			wantNextState: states.BlockBypassChecks,
 		},
 	}
 
@@ -227,6 +282,64 @@ func TestExecuteBlocks(t *testing.T) {
 			if req.Data.blocks[0].block.State.Status != workflow.Running {
 				t.Errorf("TestExecuteBlocks(%s): got block state = %v, want %v", test.name, req.Data.blocks[0].block.State.Status, workflow.Running)
 			}
+		}
+	}
+}
+
+func TestBlockBypassChecks(t *testing.T) {
+	t.Parallel()
+
+	states := &States{} // Used to get the method name of a state for wantNextState
+
+	tests := []struct {
+		name            string
+		block           *workflow.Block
+		checksRunner    checksRunner
+		wantBlockStatus workflow.Status
+		wantNextState   statemachine.State[Data]
+	}{
+		{
+			name:          "BypassChecks are nil",
+			block:         &workflow.Block{},
+			wantNextState: states.BlockPreChecks,
+		},
+		{
+			name: "BypassChecks succeed",
+			block: &workflow.Block{
+				BypassChecks: &workflow.Checks{},
+			},
+			checksRunner: func(ctx context.Context, checks *workflow.Checks) error {
+				return nil
+			},
+			wantBlockStatus: workflow.Completed,
+			wantNextState:   states.BlockEnd,
+		},
+		{
+			name: "BypassChecks fail",
+			block: &workflow.Block{
+				BypassChecks: &workflow.Checks{},
+			},
+			checksRunner: func(ctx context.Context, checks *workflow.Checks) error {
+				return fmt.Errorf("error")
+			},
+			wantBlockStatus: workflow.Running,
+			wantNextState:   states.BlockPreChecks,
+		},
+	}
+
+	for _, test := range tests {
+		req := statemachine.Request[Data]{
+			Ctx: context.Background(),
+			Data: Data{
+				blocks: []block{{block: test.block}},
+			},
+		}
+		test.block.State = &workflow.State{}
+
+		states := &States{store: &fakeUpdater{}, checksRunner: test.checksRunner}
+		req = states.BlockBypassChecks(req)
+		if methodName(req.Next) != methodName(test.wantNextState) {
+			t.Errorf("TestBlockBypassChecks(%s): got next state = %v, want %v", test.name, methodName(req.Next), methodName(test.wantNextState))
 		}
 	}
 }
@@ -417,7 +530,7 @@ func TestExecuteSequences(t *testing.T) {
 				Sequences: []*workflow.Sequence{
 					clone.Sequence(ctx, sequenceWithFailure, cloneOpts...),
 					clone.Sequence(ctx, sequenceWithFailure, cloneOpts...), // We should die after this.
-					clone.Sequence(ctx,  sequenceWithSuccess, cloneOpts...), // Never should be called.
+					clone.Sequence(ctx, sequenceWithSuccess, cloneOpts...), // Never should be called.
 				},
 			},
 			wantPluginCalls: 2,
@@ -657,6 +770,14 @@ func TestBlockEnd(t *testing.T) {
 			wantBlocksLen:   1,
 		},
 		{
+			name: "Success: bypasschecks success",
+			data: Data{
+				blocks: []block{{block: &workflow.Block{BypassChecks: &workflow.Checks{State: &workflow.State{Status: workflow.Completed}}}}},
+			},
+			wantBlockStatus: workflow.Completed,
+			wantNextState:   states.ExecuteBlock,
+		},
+		{
 			name: "Success: no more blocks",
 			data: Data{
 				blocks: []block{{}},
@@ -721,7 +842,11 @@ func TestBlockEnd(t *testing.T) {
 			t.Errorf("TestBlockEnd(%s): got blocks len == %v, want blocks len == %v", test.name, len(req.Data.blocks), test.wantBlocksLen)
 		}
 		if ctx.Err() == nil {
-			t.Errorf("TestBlockEnd(%s): context for continuous checks should have been cancelled", test.name)
+			if block.BypassChecks == nil {
+				t.Errorf("TestBlockEnd(%s): context for continuous checks should have been cancelled", test.name)
+			} else if block.BypassChecks.GetState().Status != workflow.Completed {
+				t.Errorf("TestBlockEnd(%s): context for continuous checks should have been cancelled", test.name)
+			}
 		}
 		if states.store.(*fakeUpdater).calls.Load() != 1 {
 			t.Errorf("TestBlockEnd(%s): got store calls == %v, want store calls == 1", test.name, states.store.(*fakeUpdater).calls)

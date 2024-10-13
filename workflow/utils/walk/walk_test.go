@@ -37,6 +37,11 @@ func TestPlan(t *testing.T) {
 	plan := &workflow.Plan{
 		Name:  "plan",
 		Descr: "plan",
+		BypassChecks: &workflow.Checks{
+			Actions: []*workflow.Action{
+				{Name: "plan_bypass_action"},
+			},
+		},
 		PreChecks: &workflow.Checks{
 			Actions: []*workflow.Action{
 				{Name: "plan_precheck_action"},
@@ -56,6 +61,11 @@ func TestPlan(t *testing.T) {
 			{
 				Name:  "plan_block",
 				Descr: "plan_block",
+				BypassChecks: &workflow.Checks{
+					Actions: []*workflow.Action{
+						{Name: "plan_block_bypass_action"},
+					},
+				},
 				PreChecks: &workflow.Checks{
 					Actions: []*workflow.Action{
 						{Name: "plan_block_precheck_action"},
@@ -94,12 +104,16 @@ func TestPlan(t *testing.T) {
 
 	want := []Item{
 		{Value: plan},
+		{Chain: []workflow.Object{plan}, Value: plan.BypassChecks},
+		{Chain: []workflow.Object{plan, plan.BypassChecks}, Value: plan.BypassChecks.Actions[0]},
 		{Chain: []workflow.Object{plan}, Value: plan.PreChecks},
 		{Chain: []workflow.Object{plan, plan.PreChecks}, Value: plan.PreChecks.Actions[0]},
 		{Chain: []workflow.Object{plan}, Value: plan.ContChecks},
 		{Chain: []workflow.Object{plan, plan.ContChecks}, Value: plan.ContChecks.Actions[0]},
 		{Chain: []workflow.Object{plan}, Value: plan.Blocks[0]},
 
+		{Chain: []workflow.Object{plan, plan.Blocks[0]}, Value: plan.Blocks[0].BypassChecks},
+		{Chain: []workflow.Object{plan, plan.Blocks[0], plan.Blocks[0].BypassChecks}, Value: plan.Blocks[0].BypassChecks.Actions[0]},
 		{Chain: []workflow.Object{plan, plan.Blocks[0]}, Value: plan.Blocks[0].PreChecks},
 		{Chain: []workflow.Object{plan, plan.Blocks[0], plan.Blocks[0].PreChecks}, Value: plan.Blocks[0].PreChecks.Actions[0]},
 		{Chain: []workflow.Object{plan, plan.Blocks[0]}, Value: plan.Blocks[0].ContChecks},
