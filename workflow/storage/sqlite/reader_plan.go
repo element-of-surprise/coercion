@@ -56,7 +56,10 @@ func (p reader) fetchPlan(ctx context.Context, id uuid.UUID) (*workflow.Plan, er
 				if b := fieldToBytes("meta", stmt); b != nil {
 					plan.Meta = b
 				}
-
+				plan.BypassChecks, err = p.fieldToCheck(ctx, "bypasschecks", conn, stmt)
+				if err != nil {
+					return fmt.Errorf("couldn't get plan bypasschecks: %w", err)
+				}
 				plan.PreChecks, err = p.fieldToCheck(ctx, "prechecks", conn, stmt)
 				if err != nil {
 					return fmt.Errorf("couldn't get plan prechecks: %w", err)

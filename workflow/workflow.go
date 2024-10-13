@@ -129,7 +129,9 @@ type Plan struct {
 	// Meta is any type of metadata that the user wants to store with the workflow.
 	// This is not used by the workflow engine. Optional.
 	Meta []byte
-
+	// BypassChecks are actions that if they succeed will cause the workflow to be skipped.
+	// If any gate fails, the workflow will be executed. Optional.
+	BypassChecks *Checks
 	// PreChecks are actions that are executed before the workflow starts.
 	// Any error will cause the workflow to fail. Optional.
 	PreChecks *Checks
@@ -224,7 +226,7 @@ func (p *Plan) validate() ([]validator, error) {
 		return nil, fmt.Errorf("submit time should not be set by the user")
 	}
 
-	vals := []validator{p.PreChecks, p.ContChecks, p.PostChecks}
+	vals := []validator{p.BypassChecks, p.PreChecks, p.ContChecks, p.PostChecks}
 	for _, b := range p.Blocks {
 		vals = append(vals, b)
 	}
@@ -328,6 +330,9 @@ type Block struct {
 	// ExitDelay is the amount of time to wait after the block has completed. This defaults to 0.
 	ExitDelay time.Duration
 
+	// BypassChecks are actions that if they succeed will cause the block to be skipped.
+	// If any gate fails, the workflow will be executed. Optional.
+	BypassChecks *Checks
 	// PreChecks are actions that are executed before the block starts.
 	// Any error will cause the block to fail. Optional.
 	PreChecks *Checks
@@ -421,7 +426,7 @@ func (b *Block) validate() ([]validator, error) {
 		return nil, fmt.Errorf("at least one sequence is required")
 	}
 
-	vals := []validator{b.PreChecks, b.ContChecks, b.PostChecks}
+	vals := []validator{b.BypassChecks, b.PreChecks, b.ContChecks, b.PostChecks}
 	for _, seq := range b.Sequences {
 		vals = append(vals, seq)
 	}
@@ -546,7 +551,6 @@ type Action struct {
 	Retries int
 	// Req is the request object that is passed to the plugin.
 	Req any
-
 	// Attempts is the attempts of the action. This should not be set by the user.
 	Attempts []*Attempt
 	// State represents settings that should not be set by the user, but users can query.
@@ -619,7 +623,6 @@ func (a *Action) validate() ([]validator, error) {
 	if a.State != nil {
 		return nil, fmt.Errorf("internal settings should not be set by the user")
 	}
-
 	if a.Timeout == 0 {
 		a.Timeout = 30 * time.Second
 	}

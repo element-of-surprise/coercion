@@ -191,6 +191,8 @@ const (
 	ContChecks ChecksType = 2
 	// PostChecks is a set of post-checks.
 	PostChecks ChecksType = 3
+	// BypassChecks is a set of bypass checks.
+	BypassChecks ChecksType = 4
 )
 
 // AddChecks adds a check to the current Plan or Block. This moves you into the check.
@@ -219,6 +221,13 @@ func (b *BuildPlan) AddChecks(cType ChecksType, check *workflow.Checks) *BuildPl
 	switch t := b.current().(type) {
 	case *workflow.Plan:
 		switch cType {
+		case BypassChecks:
+			if t.BypassChecks != nil {
+				b.setErr(errors.New("cannot add BypassCheck to Plan with existing BypassChecks"))
+				return b
+			}
+			t.BypassChecks = check
+			b.chain = append(b.chain, check)
 		case PreChecks:
 			if t.PreChecks != nil {
 				b.setErr(errors.New("cannot add PreCheck to Plan with existing PreChecks"))
@@ -246,6 +255,13 @@ func (b *BuildPlan) AddChecks(cType ChecksType, check *workflow.Checks) *BuildPl
 		}
 	case *workflow.Block:
 		switch cType {
+		case BypassChecks:
+			if t.BypassChecks != nil {
+				b.setErr(errors.New("cannot add BypassCheck to Block with existing BypassChecks"))
+				return b
+			}
+			t.BypassChecks = check
+			b.chain = append(b.chain, check)
 		case PreChecks:
 			if t.PreChecks != nil {
 				b.setErr(errors.New("cannot add PreCheck to Block with existing PreChecks"))

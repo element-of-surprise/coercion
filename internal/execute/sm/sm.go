@@ -125,6 +125,27 @@ func (s *States) Start(req statemachine.Request[Data]) statemachine.Request[Data
 		log.Fatalf("failed to write Plan: %v", err)
 	}
 
+	req.Next = s.PlanBypassChecks
+	return req
+}
+
+// PlanBypassChecks runs all the gates on the Plan. If any of the gates fail,
+// or no gates are present, the Plan is executed.
+func (s *States) PlanBypassChecks(req statemachine.Request[Data]) statemachine.Request[Data] {
+	defer func() {
+		if err := s.store.UpdatePlan(req.Ctx, req.Data.Plan); err != nil {
+			log.Fatalf("failed to write Plan: %v", err)
+		}
+	}()
+
+	skip := s.runBypasses(req.Ctx, req.Data.Plan.BypassChecks)
+	if skip {
+		if req.Data.contCheckResult != nil {
+			close(req.Data.contCheckResult)
+		}
+		req.Next = s.End
+		return req
+	}
 	req.Next = s.PlanPreChecks
 	return req
 }
@@ -158,6 +179,8 @@ func (s *States) PlanStartContChecks(req statemachine.Request[Data]) statemachin
 		go func() {
 			s.runContChecks(ctx, req.Data.Plan.ContChecks, req.Data.contCheckResult)
 		}()
+	} else {
+		close(req.Data.contCheckResult)
 	}
 
 	req.Next = s.ExecuteBlock
@@ -188,6 +211,27 @@ func (s *States) ExecuteBlock(req statemachine.Request[Data]) statemachine.Reque
 	}
 
 	h.block.State.Status = workflow.Running
+	req.Next = s.BlockBypassChecks
+	return req
+}
+
+// BlockBypassChecks runs all the gates on the Block. If any of the gates fail,
+// or no gates are present, the Block is executed.
+func (s *States) BlockBypassChecks(req statemachine.Request[Data]) statemachine.Request[Data] {
+	h := req.Data.blocks[0]
+
+	if h.block.BypassChecks == nil {
+		req.Next = s.BlockPreChecks
+		return req
+	}
+	skip := s.runBypasses(req.Ctx, h.block.BypassChecks)
+	if skip {
+		if h.contCheckResult != nil {
+			close(h.contCheckResult)
+		}
+		req.Next = s.BlockEnd
+		return req
+	}
 	req.Next = s.BlockPreChecks
 	return req
 }
@@ -196,7 +240,7 @@ func (s *States) ExecuteBlock(req statemachine.Request[Data]) statemachine.Reque
 func (s *States) BlockPreChecks(req statemachine.Request[Data]) statemachine.Request[Data] {
 	h := req.Data.blocks[0]
 
-	if h.block.PreChecks == nil && h.block.ContChecks == nil {
+	if h.block.PreChecks == nil {
 		req.Next = s.BlockStartContChecks
 		return req
 	}
@@ -218,14 +262,22 @@ func (s *States) BlockPreChecks(req statemachine.Request[Data]) statemachine.Req
 func (s *States) BlockStartContChecks(req statemachine.Request[Data]) statemachine.Request[Data] {
 	h := req.Data.blocks[0]
 
-	if h.block.ContChecks != nil {
-		var ctx context.Context
-		ctx, h.contCancel = context.WithCancel(context.WithoutCancel(req.Ctx))
-
-		go func() {
-			s.runContChecks(ctx, h.block.ContChecks, h.contCheckResult)
-		}()
+	if h.block.ContChecks == nil {
+		close(h.contCheckResult)
+		req.Next = s.ExecuteSequences
+		return req
 	}
+
+	var ctx context.Context
+	ctx, h.contCancel = context.WithCancel(context.WithoutCancel(req.Ctx))
+	// This re-assignment happens only here because a block is a stack object
+	// and the other fields are all pointers that are assigned at the beginning of the block.
+	// But contextCanel is not, so it needs to be re-assigned here.
+	req.Data.blocks[0] = h
+
+	go func() {
+		s.runContChecks(ctx, h.block.ContChecks, h.contCheckResult)
+	}()
 
 	req.Next = s.ExecuteSequences
 	return req
@@ -342,40 +394,44 @@ func (s *States) BlockEnd(req statemachine.Request[Data]) statemachine.Request[D
 		}
 	}()
 
-	// For safety reasons, we always check this so we don't get goroutine leaks.
-	if h.contCancel != nil {
-		h.contCancel()
-	}
+	if h.block.BypassChecks != nil && h.block.BypassChecks.State.Status == workflow.Completed {
+		h.block.State.Status = workflow.Completed
+	} else {
+		// For safety reasons, we always check this so we don't get goroutine leaks.
+		if h.contCancel != nil {
+			h.contCancel()
+		}
 
-	// Stop our cont checks if they are still running, get the final result.
-	if h.block.ContChecks != nil {
-		var err error
-		for err = range h.contCheckResult {
+		// Stop our cont checks if they are still running, get the final result.
+		if h.block.ContChecks != nil {
+			var err error
+			for err = range h.contCheckResult {
+				if err != nil {
+					break
+				}
+			}
 			if err != nil {
-				break
+				h.block.State.Status = workflow.Failed
+				req.Data.err = err
+				req.Next = s.End
+				return req
 			}
 		}
-		if err != nil {
+
+		if h.block.State.Status == workflow.Running {
+			h.block.State.Status = workflow.Completed
+		} else {
 			h.block.State.Status = workflow.Failed
+			req.Next = s.End
+			return req
+		}
+
+		if err := after(req.Ctx, h.block.ExitDelay); err != nil {
+			h.block.State.Status = workflow.Stopped
 			req.Data.err = err
 			req.Next = s.End
 			return req
 		}
-	}
-
-	if h.block.State.Status == workflow.Running {
-		h.block.State.Status = workflow.Completed
-	} else {
-		h.block.State.Status = workflow.Failed
-		req.Next = s.End
-		return req
-	}
-
-	if err := after(req.Ctx, h.block.ExitDelay); err != nil {
-		h.block.State.Status = workflow.Stopped
-		req.Data.err = err
-		req.Next = s.End
-		return req
 	}
 
 	if len(req.Data.blocks) == 1 {
@@ -433,6 +489,7 @@ func (s *States) End(req statemachine.Request[Data]) statemachine.Request[Data] 
 	plan := req.Data.Plan
 	plan.State.End = s.now()
 
+	// Runs a new statemachine to calculate the final state of the Plan.
 	f := finalStates{}
 	req.Next = f.start
 
@@ -451,6 +508,25 @@ func (s *States) End(req statemachine.Request[Data]) statemachine.Request[Data] 
 	}
 
 	return req
+}
+
+// runBypasses runs all gates in the Plan. If any gate fails, the Plan proceeds. If there
+// are no gates, this function returns false as the plan should proceed.
+func (s *States) runBypasses(ctx context.Context, bypasses *workflow.Checks) (skip bool) {
+	if bypasses == nil {
+		return false
+	}
+
+	g := wait.Group{}
+
+	g.Go(ctx, func(cts context.Context) error {
+		return s.runChecksOnce(cts, bypasses)
+	})
+
+	if err := g.Wait(ctx); err != nil {
+		return false
+	}
+	return true
 }
 
 // runPreChecks runs all PreChecks and ContChecks. This is a helper function for PlanPreChecks and BlockPreChecks.
@@ -507,7 +583,7 @@ func (s *States) runContChecks(ctx context.Context, checks *workflow.Checks, res
 	}
 }
 
-// runContChecksOnce runs the ContChecks once and writes the result to the store.
+// runContChecksOnce runs Checks once and writes the result to the store.
 func (s *States) runChecksOnce(ctx context.Context, checks *workflow.Checks) error {
 	if s.checksRunner != nil {
 		return s.checksRunner(ctx, checks)
