@@ -4,6 +4,7 @@ package execute
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -17,6 +18,10 @@ import (
 
 	"github.com/gostdlib/concurrency/prim/wait"
 	"github.com/gostdlib/ops/statemachine"
+)
+
+var (
+	ErrNotFound = errors.New("not found")
 )
 
 // runner runs a Plan through the statemachine.
@@ -37,6 +42,7 @@ type Plans struct {
 	states *sm.States
 
 	mu       sync.Mutex // protects stoppers
+	waiters  map[uuid.UUID]chan struct{}
 	stoppers map[uuid.UUID]context.CancelFunc
 
 	// runner is the function that runs the statemachine.
@@ -52,6 +58,7 @@ func New(ctx context.Context, store storage.Vault, reg *registry.Register) (*Pla
 	e := &Plans{
 		registry: reg,
 		store:    store,
+		waiters:  map[uuid.UUID]chan struct{}{},
 		stoppers: map[uuid.UUID]context.CancelFunc{},
 		runner:   statemachine.Run[sm.Data],
 	}
@@ -110,16 +117,20 @@ func (e *Plans) Start(ctx context.Context, id uuid.UUID) error {
 		return fmt.Errorf("invalid plan state: %w", err)
 	}
 
-	go func() {
-		runCtx, cancel := context.WithCancel(context.WithoutCancel(ctx))
-		defer cancel()
+	runCtx, cancel := context.WithCancel(context.WithoutCancel(ctx))
 
-		e.mu.Lock()
-		e.stoppers[plan.ID] = cancel
-		e.mu.Unlock()
+	e.mu.Lock()
+	e.stoppers[plan.ID] = cancel
+	e.waiters[plan.ID] = make(chan struct{})
+	e.mu.Unlock()
+
+	go func() {
 		defer func() {
+			cancel()
 			e.mu.Lock()
 			delete(e.stoppers, plan.ID)
+			close(e.waiters[plan.ID])
+			delete(e.waiters, plan.ID)
 			e.mu.Unlock()
 		}()
 
@@ -141,6 +152,25 @@ func (e *Plans) Start(ctx context.Context, id uuid.UUID) error {
 
 func (e *Plans) now() time.Time {
 	return time.Now().UTC()
+}
+
+// Wait waits for a Plan to finish execution. Cancelling the Context will stop waiting and
+// return context.Canceled. If the Plan is not found, this will return ErrNotFound.
+func (e *Plans) Wait(ctx context.Context, id uuid.UUID) error {
+	e.mu.Lock()
+	waiter, ok := e.waiters[id]
+	e.mu.Unlock()
+
+	if !ok {
+		return ErrNotFound
+	}
+
+	select {
+	case <-ctx.Done():
+		return context.Canceled
+	case <-waiter:
+		return nil
+	}
 }
 
 // getStater provides an interface for grabbing the State struct from workflow objects.

@@ -138,18 +138,14 @@ func TestEtoE(t *testing.T) {
 		panic(err)
 	}
 
-	var result workstream.Result[*workflow.Plan]
-	for result = range ws.Status(ctx, id, 5*time.Second) {
-		if result.Err != nil {
-			panic(result.Err)
-		}
-		fmt.Println("Workflow status: ", result.Data.State.Status)
+	result, err := ws.Wait(ctx, id)
+	if err != nil {
+		panic(err)
 	}
-
-	if result.Data.State.Status != workflow.Completed {
-		t.Fatalf("TestEtoE: workflow did not complete successfully")
+	if result.State.Status != workflow.Completed {
+		t.Fatalf("TestEtoE: workflow did not complete successfully(%s)", result.State.Status)
 	}
-	plugResp := result.Data.PreChecks.Actions[0].Attempts[0].Resp.(plugins.Resp)
+	plugResp := result.PreChecks.Actions[0].Attempts[0].Resp.(plugins.Resp)
 	if plugResp.Arg == "" {
 		t.Fatalf("TestEtoE: planID not found")
 	}
@@ -158,7 +154,7 @@ func TestEtoE(t *testing.T) {
 		t.Fatalf("TestEtoE: planID not a valid UUID")
 	}
 
-	plugResp = result.Data.Blocks[0].Sequences[0].Actions[1].Attempts[0].Resp.(plugins.Resp)
+	plugResp = result.Blocks[0].Sequences[0].Actions[1].Attempts[0].Resp.(plugins.Resp)
 	if plugResp.Arg == "" {
 		t.Fatalf("TestEtoE: actionID not found")
 	}
@@ -167,7 +163,7 @@ func TestEtoE(t *testing.T) {
 		t.Fatalf("TestEtoE: actionID not a valid UUID")
 	}
 
-	pConfig.Print("Workflow result: \n", result.Data)
+	pConfig.Print("Workflow result: \n", result)
 }
 
 func TestBypassPlan(t *testing.T) {
