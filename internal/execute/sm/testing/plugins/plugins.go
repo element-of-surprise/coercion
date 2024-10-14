@@ -1,12 +1,14 @@
 package plugins
 
 import (
-	"context"
 	"fmt"
+	"strings"
 	"sync/atomic"
 	"time"
 
 	"github.com/element-of-surprise/coercion/plugins"
+	"github.com/element-of-surprise/coercion/workflow/context"
+
 	"github.com/gostdlib/ops/retry/exponential"
 )
 
@@ -100,6 +102,14 @@ func (h *Plugin) Execute(ctx context.Context, req any) (any, *plugins.Error) {
 	if h.AlwaysRespond {
 		if r.Arg == "error" {
 			return nil, &plugins.Error{Message: "error"}
+		}
+		if strings.ToLower(r.Arg) == "actionid" {
+			id := context.ActionID(ctx).String()
+			return Resp{Arg: id}, nil
+		}
+		if strings.ToLower(r.Arg) == "planid" {
+			id := context.PlanID(ctx).String()
+			return Resp{Arg: id}, nil
 		}
 		return Resp{Arg: "ok"}, nil
 	}
