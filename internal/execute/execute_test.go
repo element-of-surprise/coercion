@@ -198,7 +198,13 @@ func TestStart(t *testing.T) {
 		}
 		fr := &fakeRunner{ran: make(chan struct{})}
 
-		p := &Plans{store: fakeStore, runner: fr.Run, states: &sm.States{}, stoppers: map[uuid.UUID]context.CancelFunc{}}
+		p := &Plans{
+			store:    fakeStore,
+			runner:   fr.Run,
+			states:   &sm.States{},
+			stoppers: map[uuid.UUID]context.CancelFunc{},
+			waiters:  map[uuid.UUID]chan struct{}{},
+		}
 		p.addValidators()
 
 		err := p.Start(context.Background(), test.id)

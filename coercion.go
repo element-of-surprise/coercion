@@ -138,6 +138,22 @@ func (w *Workstream) Plan(ctx context.Context, id uuid.UUID) (*workflow.Plan, er
 	return w.store.Read(ctx, id)
 }
 
+// Wait waits for the plan with the given id to complete and returns the Plan's final state.
+// If the plan does not exist, an error is returned. If the context is canceled, the error
+// will be context.Canceled.
+func (w *Workstream) Wait(ctx context.Context, id uuid.UUID) (*workflow.Plan, error) {
+	err := w.exec.Wait(ctx, id)
+	if err != nil {
+		if err == context.Canceled || err == context.DeadlineExceeded {
+			return nil, context.Canceled
+		}
+		if err != execute.ErrNotFound {
+			return nil, err
+		}
+	}
+	return w.store.Read(ctx, id)
+}
+
 // Status returns a channel that will receive updates on the status of the plan with the given id. The interval
 // is the time between updates. The channel will be closed when the plan is complete or an error occurs.
 // If the Context is canceled, the channel will be closed and the final Result will have Err set. Otherwise, regardless
