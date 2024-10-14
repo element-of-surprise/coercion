@@ -2,7 +2,6 @@
 package sm
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"log"
@@ -13,6 +12,7 @@ import (
 	"github.com/element-of-surprise/coercion/internal/execute/sm/actions"
 	"github.com/element-of-surprise/coercion/plugins/registry"
 	"github.com/element-of-surprise/coercion/workflow"
+	"github.com/element-of-surprise/coercion/workflow/context"
 	"github.com/element-of-surprise/coercion/workflow/storage"
 
 	"github.com/gostdlib/concurrency/goroutines/pooled"
@@ -112,6 +112,8 @@ func New(store storage.Vault, registry *registry.Register) (*States, error) {
 // Start starts execution of the Plan. This is the first state of the statemachine.
 func (s *States) Start(req statemachine.Request[Data]) statemachine.Request[Data] {
 	plan := req.Data.Plan
+
+	req.Ctx = context.SetPlanID(req.Ctx, req.Data.Plan.ID)
 
 	for _, b := range req.Data.Plan.Blocks {
 		req.Data.blocks = append(req.Data.blocks, block{block: b, contCheckResult: make(chan error, 1)})
@@ -670,6 +672,8 @@ func (s *States) runAction(ctx context.Context, action *workflow.Action, updater
 	if s.actionRunner != nil {
 		return s.actionRunner(ctx, action, updater)
 	}
+
+	ctx = context.SetActionID(ctx, action.ID)
 
 	req := statemachine.Request[actions.Data]{
 		Ctx: ctx,

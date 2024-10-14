@@ -13,8 +13,10 @@ import (
 	"github.com/element-of-surprise/coercion/workflow/builder"
 	"github.com/element-of-surprise/coercion/workflow/storage/sqlite"
 	"github.com/element-of-surprise/coercion/workflow/utils/clone"
+	"github.com/google/uuid"
 	"github.com/kylelemons/godebug/pretty"
 
+	"github.com/element-of-surprise/coercion/internal/execute/sm/testing/plugins"
 	testplugin "github.com/element-of-surprise/coercion/internal/execute/sm/testing/plugins"
 )
 
@@ -68,7 +70,7 @@ func TestEtoE(t *testing.T) {
 				Name:   "check",
 				Descr:  "check",
 				Plugin: "check",
-				Req:    testplugin.Req{Sleep: 1 * time.Second},
+				Req:    testplugin.Req{Arg: "planid"},
 			},
 			{
 				Name:   "check",
@@ -84,7 +86,7 @@ func TestEtoE(t *testing.T) {
 		Descr: "seq",
 		Actions: []*workflow.Action{
 			{Name: "action0", Descr: "action", Plugin: testplugin.Name, Req: testplugin.Req{Sleep: 1 * time.Second}},
-			{Name: "action1", Descr: "action", Plugin: testplugin.Name, Req: testplugin.Req{Sleep: 1 * time.Second}},
+			{Name: "action1", Descr: "action", Plugin: testplugin.Name, Req: testplugin.Req{Arg: "planid"}},
 		},
 	}
 
@@ -142,6 +144,27 @@ func TestEtoE(t *testing.T) {
 			panic(result.Err)
 		}
 		fmt.Println("Workflow status: ", result.Data.State.Status)
+	}
+
+	if result.Data.State.Status != workflow.Completed {
+		t.Fatalf("TestEtoE: workflow did not complete successfully")
+	}
+	plugResp := result.Data.PreChecks.Actions[0].Attempts[0].Resp.(plugins.Resp)
+	if plugResp.Arg == "" {
+		t.Fatalf("TestEtoE: planID not found")
+	}
+	_, err = uuid.Parse(plugResp.Arg)
+	if err != nil {
+		t.Fatalf("TestEtoE: planID not a valid UUID")
+	}
+
+	plugResp = result.Data.Blocks[0].Sequences[0].Actions[1].Attempts[0].Resp.(plugins.Resp)
+	if plugResp.Arg == "" {
+		t.Fatalf("TestEtoE: actionID not found")
+	}
+	_, err = uuid.Parse(plugResp.Arg)
+	if err != nil {
+		t.Fatalf("TestEtoE: actionID not a valid UUID")
 	}
 
 	pConfig.Print("Workflow result: \n", result.Data)
