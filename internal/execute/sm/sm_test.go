@@ -153,7 +153,7 @@ func TestPlanPreChecks(t *testing.T) {
 			checksRunner: func(ctx context.Context, checks *workflow.Checks) error {
 				return fmt.Errorf("error")
 			},
-			wantNextState: states.End,
+			wantNextState: states.PlanDeferredChecks,
 		},
 	}
 
@@ -382,7 +382,7 @@ func TestBlockPreChecks(t *testing.T) {
 				return fmt.Errorf("error")
 			},
 			wantBlockStatus: workflow.Failed,
-			wantNextState:   states.BlockEnd,
+			wantNextState:   states.BlockDeferredChecks,
 		},
 	}
 
@@ -736,7 +736,7 @@ func TestBlockPostChecks(t *testing.T) {
 		if req.Data.blocks[0].block.State.Status != test.wantStatus {
 			t.Errorf("TestBlockPostChecks(%s): got status == %v, want status == %v", test.name, req.Data.blocks[0].block.State.Status, test.wantStatus)
 		}
-		if methodName(req.Next) != methodName(states.BlockEnd) {
+		if methodName(req.Next) != methodName(states.BlockDeferredChecks) {
 			t.Errorf("TestBlockPostChecks(%s): got next == %v, want next == %v", test.name, methodName(req.Next), methodName(states.BlockEnd))
 		}
 	}
@@ -766,7 +766,7 @@ func TestBlockEnd(t *testing.T) {
 			contCheckResult: fmt.Errorf("error"),
 			wantErr:         true,
 			wantBlockStatus: workflow.Failed,
-			wantNextState:   states.End,
+			wantNextState:   states.PlanDeferredChecks,
 			wantBlocksLen:   1,
 		},
 		{

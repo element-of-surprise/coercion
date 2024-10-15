@@ -81,7 +81,7 @@ type Plugin interface {
 	// Response returns an empty response object.
 	Response() any
 	// IsCheck returns true if the plugin is a check plugin. A check plugin
-	// can be used as a PreCheck, PostCheck or ContCheck Action. It cannot be used
+	// can be used as a BypassChecks, PreChecks, PostChecks, ContChecks or DeferChecks Action. It cannot be used
 	// in a Sequeunce. A non-check plugin is the opposite.
 	IsCheck() bool
 	// RetryPlan returns the retry plan for the plugin so that when an Action wants to
@@ -143,9 +143,9 @@ func main() {
 The workflow is defined in a hierarchy of objects:
 
 - Plan - The top level object.
-  - Can have PreChecks, PostChecks and ContChecks that are executed before, after and during the main actions.
+  - Can have BypassChecks, PreChecks, PostChecks, ContChecks and DeferredChecks that are executed before, after and during the main actions.
 - Block - A block of `Sequence` objects. You can have mulitple `Block`s.
-  - Can have PreChecks, PostChecks and ContChecks that are executed before, after the main actions.
+  - Can have BypassChecks, PreChecks, PostChecks, ContChecks and DeferredChecks that are executed before, after the main actions.
   - Represents a set of work to be done, usually related.
   - Controls the number of failures that are tolerated. Failures are defined as Sequence failures.
   - Controls the currency of execution. Sequences are then rate limited to this concurrency.
@@ -393,6 +393,11 @@ for item := range walk.Plan(ctx, plan) {
 	}
 }
 ```
+
+### Bypassing a Plan or Block execution
+
+If you want to check for conditions that should cause a `Plan` or `Block` to automatically complete without running anything, you can use `BypassChecks`.
+Failure in `BypassChecks` will not cause a failure, but will cause the `Plan` or `Block` to run.
 
 ### Cloning a Plan
 

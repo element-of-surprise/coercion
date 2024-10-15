@@ -95,6 +95,10 @@ func (p reader) blockRowToBlock(ctx context.Context, conn *sqlite.Conn, stmt *sq
 	if err != nil {
 		return nil, fmt.Errorf("couldn't read block postchecks: %w", err)
 	}
+	b.DeferredChecks, err = p.fieldToCheck(ctx, "deferredchecks", conn, stmt)
+	if err != nil {
+		return nil, fmt.Errorf("couldn't read block deferredchecks: %w", err)
+	}
 
 	b.Sequences, err = p.fieldToSequences(ctx, conn, stmt)
 	if err != nil {

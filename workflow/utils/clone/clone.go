@@ -110,6 +110,9 @@ func Plan(ctx context.Context, p *workflow.Plan, options ...Option) *workflow.Pl
 	if p.PostChecks != nil {
 		np.PostChecks = Checks(ctx, p.PostChecks, withOptions(opts))
 	}
+	if p.DeferredChecks != nil {
+		np.DeferredChecks = Checks(ctx, p.DeferredChecks, withOptions(opts))
+	}
 
 	np.Blocks = make([]*workflow.Block, 0, len(p.Blocks))
 	for _, b := range p.Blocks {
@@ -134,6 +137,9 @@ func Plan(ctx context.Context, p *workflow.Plan, options ...Option) *workflow.Pl
 			return np
 		}
 		if p.ContChecks.State.Status == workflow.Failed {
+			return np
+		}
+		if p.DeferredChecks.State.Status == workflow.Failed {
 			return np
 		}
 		return nil
@@ -206,9 +212,10 @@ func Block(ctx context.Context, b *workflow.Block, options ...Option) *workflow.
 	}
 
 	var (
-		preChecksCompleted  bool
-		contChecksNotFailed bool
-		postChecksCompleted bool
+		preChecksCompleted      bool
+		contChecksNotFailed     bool
+		postChecksCompleted     bool
+		deferredChecksCompleted bool
 	)
 
 	if b.BypassChecks != nil {
@@ -241,6 +248,13 @@ func Block(ctx context.Context, b *workflow.Block, options ...Option) *workflow.
 		}
 		n.PostChecks = Checks(ctx, b.PostChecks, withOptions(opts))
 	}
+	if b.DeferredChecks != nil {
+		state := b.DeferredChecks.State
+		if state != nil && b.DeferredChecks.State.Status == workflow.Completed {
+			deferredChecksCompleted = true
+		}
+		n.DeferredChecks = Checks(ctx, b.DeferredChecks, withOptions(opts))
+	}
 
 	n.Sequences = make([]*workflow.Sequence, 0, len(b.Sequences))
 	for _, seq := range b.Sequences {
@@ -252,7 +266,7 @@ func Block(ctx context.Context, b *workflow.Block, options ...Option) *workflow.
 	}
 
 	if opts.removeCompleted && len(n.Sequences) == 0 {
-		if preChecksCompleted || contChecksNotFailed || postChecksCompleted {
+		if preChecksCompleted || contChecksNotFailed || postChecksCompleted || deferredChecksCompleted {
 			return nil
 		}
 	}
