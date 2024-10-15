@@ -16,12 +16,14 @@ func TestPlanValidate(t *testing.T) {
 
 	goodPlan := func() *Plan {
 		p := Plan{
-			Name:       "test",
-			Descr:      "test",
-			PreChecks:  &Checks{},
-			PostChecks: &Checks{},
-			ContChecks: &Checks{},
-			Blocks:     []*Block{{}},
+			Name:           "test",
+			Descr:          "test",
+			BypassChecks:   &Checks{},
+			PreChecks:      &Checks{},
+			PostChecks:     &Checks{},
+			ContChecks:     &Checks{},
+			DeferredChecks: &Checks{},
+			Blocks:         []*Block{{}},
 		}
 		x := func(plan Plan) Plan {
 			return plan
@@ -33,6 +35,7 @@ func TestPlanValidate(t *testing.T) {
 		goodPlan().PreChecks,
 		goodPlan().PostChecks,
 		goodPlan().ContChecks,
+		goodPlan().DeferredChecks,
 	}
 	for _, v := range goodPlan().Blocks {
 		expectVals = append(expectVals, v)
@@ -267,6 +270,79 @@ func TestPostCheckValidate(t *testing.T) {
 	}
 }
 
+func TestDeferredCheckValidate(t *testing.T) {
+	t.Parallel()
+
+	goodDeferChecks := func() *Checks {
+		return &Checks{
+			Actions: []*Action{{}},
+		}
+	}
+
+	tests := []struct {
+		name       string
+		deferCheck func() *Checks
+		err        bool
+		vals       []validator
+	}{
+		{
+			name:       "Success: PostChecks is nil",
+			deferCheck: func() *Checks { return nil },
+		},
+		{
+			name: "Error: Actions is nil",
+			deferCheck: func() *Checks {
+				p := goodDeferChecks()
+				p.Actions = nil
+				return p
+			},
+			err: true,
+		},
+		{
+			name: "Error: Actions is empty",
+			deferCheck: func() *Checks {
+				p := goodDeferChecks()
+				p.Actions = []*Action{}
+				return p
+			},
+			err: true,
+		},
+		{
+			name: "Error: State != nil",
+			deferCheck: func() *Checks {
+				p := goodDeferChecks()
+				p.State = &State{}
+				return p
+			},
+			err: true,
+		},
+		{
+			name:       "Success",
+			deferCheck: goodDeferChecks,
+			vals:       []validator{goodDeferChecks().Actions[0]},
+		},
+	}
+
+	for _, test := range tests {
+		p := test.deferCheck()
+		gotValidators, err := p.validate()
+		switch {
+		case test.err && err == nil:
+			t.Errorf("TestDeferCheckValidate(%s): got err == nil, want err != nil", test.name)
+			continue
+		case !test.err && err != nil:
+			t.Errorf("TestDeferCheckValidate(%s): got err != %s, want err == nil", test.name, err)
+			continue
+		case err != nil:
+			continue
+		}
+
+		if diff := pretty.Compare(test.vals, gotValidators); diff != "" {
+			t.Errorf("TestDeferCheckValidate(%s): returned validators: -want/+got:\n%s", test.name, diff)
+		}
+	}
+}
+
 func TestContCheckValidate(t *testing.T) {
 	t.Parallel()
 
@@ -345,12 +421,14 @@ func TestBlockValidate(t *testing.T) {
 
 	goodBlock := func() *Block {
 		b := Block{
-			Name:       "block",
-			Descr:      "block description",
-			PreChecks:  &Checks{},
-			PostChecks: &Checks{},
-			ContChecks: &Checks{},
-			Sequences:  []*Sequence{{}},
+			Name:           "block",
+			Descr:          "block description",
+			BypassChecks:   &Checks{},
+			PreChecks:      &Checks{},
+			PostChecks:     &Checks{},
+			ContChecks:     &Checks{},
+			DeferredChecks: &Checks{},
+			Sequences:      []*Sequence{{}},
 		}
 		x := func(block Block) Block {
 			return block
@@ -422,6 +500,7 @@ func TestBlockValidate(t *testing.T) {
 				goodBlock().PreChecks,
 				goodBlock().PostChecks,
 				goodBlock().ContChecks,
+				goodBlock().DeferredChecks,
 				goodBlock().Sequences[0],
 			},
 		},

@@ -57,6 +57,11 @@ func TestPlan(t *testing.T) {
 				{Name: "plan_postcheck_action"},
 			},
 		},
+		DeferredChecks: &workflow.Checks{
+			Actions: []*workflow.Action{
+				{Name: "plan_deferred_action"},
+			},
+		},
 		Blocks: []*workflow.Block{
 			{
 				Name:  "plan_block",
@@ -79,6 +84,11 @@ func TestPlan(t *testing.T) {
 				PostChecks: &workflow.Checks{
 					Actions: []*workflow.Action{
 						{Name: "plan_block_postcheck_action"},
+					},
+				},
+				DeferredChecks: &workflow.Checks{
+					Actions: []*workflow.Action{
+						{Name: "plan_block_deferredcheck_action"},
 					},
 				},
 				Sequences: []*workflow.Sequence{
@@ -122,8 +132,12 @@ func TestPlan(t *testing.T) {
 		{Chain: []workflow.Object{plan, plan.Blocks[0], plan.Blocks[0].Sequences[0]}, Value: plan.Blocks[0].Sequences[0].Actions[0]},
 		{Chain: []workflow.Object{plan, plan.Blocks[0]}, Value: plan.Blocks[0].PostChecks},
 		{Chain: []workflow.Object{plan, plan.Blocks[0], plan.Blocks[0].PostChecks}, Value: plan.Blocks[0].PostChecks.Actions[0]},
+		{Chain: []workflow.Object{plan, plan.Blocks[0]}, Value: plan.Blocks[0].DeferredChecks},
+		{Chain: []workflow.Object{plan, plan.Blocks[0], plan.Blocks[0].DeferredChecks}, Value: plan.Blocks[0].DeferredChecks.Actions[0]},
 		{Chain: []workflow.Object{plan}, Value: plan.PostChecks},
 		{Chain: []workflow.Object{plan, plan.PostChecks}, Value: plan.PostChecks.Actions[0]},
+		{Chain: []workflow.Object{plan}, Value: plan.DeferredChecks},
+		{Chain: []workflow.Object{plan, plan.DeferredChecks}, Value: plan.DeferredChecks.Actions[0]},
 	}
 
 	pConfig := pretty.Config{

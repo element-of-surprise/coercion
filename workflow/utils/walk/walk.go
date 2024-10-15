@@ -101,6 +101,11 @@ func Plan(ctx context.Context, p *workflow.Plan) chan Item {
 				return
 			}
 		}
+		if p.DeferredChecks != nil {
+			if ok := walkChecks(ctx, ch, chain, p.DeferredChecks); !ok {
+				return
+			}
+		}
 	}()
 	return ch
 }
@@ -154,6 +159,11 @@ func walkBlock(ctx context.Context, ch chan Item, chain []workflow.Object, block
 	}
 	if block.PostChecks != nil {
 		if ok := walkChecks(ctx, ch, chain, block.PostChecks); !ok {
+			return false
+		}
+	}
+	if block.DeferredChecks != nil {
+		if ok := walkChecks(ctx, ch, chain, block.DeferredChecks); !ok {
 			return false
 		}
 	}

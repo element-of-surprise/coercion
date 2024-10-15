@@ -17,8 +17,8 @@ func (f finalStates) start(req statemachine.Request[Data]) statemachine.Request[
 	return req
 }
 
-// bypassChecks looks through all the gates in the Plan and Completes the Plan if there are
-// gates defined and they all pass. If there are no gates defined, the Plan is examined
+// bypassChecks looks through all the checks in the in the Plan bypass and Completes the Plan if there are
+// bypass checks defined and they all pass. If there are no bypasses defined, the Plan is examined
 // further.
 func (f finalStates) bypassChecks(req statemachine.Request[Data]) statemachine.Request[Data] {
 	plan := req.Data.Plan
@@ -37,7 +37,7 @@ func (f finalStates) bypassChecks(req statemachine.Request[Data]) statemachine.R
 func (f finalStates) planChecks(req statemachine.Request[Data]) statemachine.Request[Data] {
 	plan := req.Data.Plan
 
-	r, err := f.examineChecks([3]*workflow.Checks{plan.PreChecks, plan.ContChecks, plan.PostChecks})
+	r, err := f.examineChecks([4]*workflow.Checks{plan.PreChecks, plan.ContChecks, plan.PostChecks, plan.DeferredChecks})
 	if err == nil {
 		req.Next = f.blocks
 		return req
@@ -91,9 +91,9 @@ func (f finalStates) examineBypasses(gates *workflow.Checks) bool {
 	return false
 }
 
-// examineChecks Pre/Cont/Post checks passed and returns a failure reason and an error if one of them failed.
+// examineChecks Pre/Cont/Post/Deferred checks passed and returns a failure reason and an error if one of them failed.
 // If nothing failed (or checks are nil) this returns workflow.FRUnknown and a nil error.
-func (f finalStates) examineChecks(checks [3]*workflow.Checks) (workflow.FailureReason, error) {
+func (f finalStates) examineChecks(checks [4]*workflow.Checks) (workflow.FailureReason, error) {
 	for i, check := range checks {
 		if check == nil {
 			continue
@@ -111,6 +111,9 @@ func (f finalStates) examineChecks(checks [3]*workflow.Checks) (workflow.Failure
 		case 2:
 			t = "PostChecks"
 			r = workflow.FRPostCheck
+		case 3:
+			t = "DeferredChecks"
+			r = workflow.FRDeferredCheck
 		}
 
 		switch check.State.Status {

@@ -53,6 +53,8 @@ const (
 	FRPostCheck FailureReason = 300 // PostCheck
 	// FRContCheck represents a failure reason that occurred during a continuous check.
 	FRContCheck FailureReason = 400 // ContCheck
+	// FRDeferredCheck represents a failure reason that occurred during a deferred check.
+	FRDeferredCheck FailureReason = 450 // DeferredCheck
 	// FRStopped represents a failure reason that occurred because the workflow was stopped.
 	FRStopped FailureReason = 500 // Stopped
 )
@@ -141,6 +143,11 @@ type Plan struct {
 	// Checks are actions that are executed after the workflow has completed.
 	// Any error will cause the workflow to fail. Optional.
 	PostChecks *Checks
+	// DeferredChecks are actions that are executed after the workflow has completed.
+	// This is executed regardless of Plan success or failure. However, if the
+	// Plan is bypassed via BypassChecks, this will not run.
+	// Useful for logging and similar operations. Optional.
+	DeferredChecks *Checks
 
 	// Blocks is a list of blocks that are executed in sequence.
 	// If a block fails, the workflow will fail.
@@ -226,7 +233,7 @@ func (p *Plan) validate() ([]validator, error) {
 		return nil, fmt.Errorf("submit time should not be set by the user")
 	}
 
-	vals := []validator{p.BypassChecks, p.PreChecks, p.ContChecks, p.PostChecks}
+	vals := []validator{p.BypassChecks, p.PreChecks, p.ContChecks, p.PostChecks, p.DeferredChecks}
 	for _, b := range p.Blocks {
 		vals = append(vals, b)
 	}
@@ -341,6 +348,11 @@ type Block struct {
 	// PostChecks are actions that are executed after the block has completed.
 	// Any error will cause the block to fail. Optional.
 	PostChecks *Checks
+	// DeferredChecks are actions that are executed after the workflow has completed.
+	// This is executed regardless of Plan success or failure. However, if the
+	// Block is bypassed via BypassChecks, this will not run.
+	// Useful for logging and similar operations. Optional.
+	DeferredChecks *Checks
 
 	// Sequences is a list of sequences that are executed. Required..
 	Sequences []*Sequence
@@ -426,7 +438,7 @@ func (b *Block) validate() ([]validator, error) {
 		return nil, fmt.Errorf("at least one sequence is required")
 	}
 
-	vals := []validator{b.BypassChecks, b.PreChecks, b.ContChecks, b.PostChecks}
+	vals := []validator{b.BypassChecks, b.PreChecks, b.ContChecks, b.PostChecks, b.DeferredChecks}
 	for _, seq := range b.Sequences {
 		vals = append(vals, seq)
 	}

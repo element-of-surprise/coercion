@@ -311,6 +311,32 @@ func TestAddPrePostChecks(t *testing.T) {
 	}
 }
 
+// TestAddDeferredChecks simply tests that AddChecks() adds Deferred checks where they should go.
+func TestAddDeferredChecks(t *testing.T) {
+	wantCheck0 := &workflow.Checks{Actions: []*workflow.Action{{Name: "check0"}}}
+
+	builder, err := New("test", "test")
+	if err != nil {
+		panic(err)
+	}
+
+	builder.AddChecks(DeferredChecks, wantCheck0).Up()
+	builder.AddBlock(BlockArgs{Name: "test", Descr: "test", Concurrency: 1})
+	builder.AddChecks(DeferredChecks, wantCheck0).Up()
+
+	got, err := builder.Plan()
+	if err != nil {
+		t.Fatalf("TestAddDeferredChecks(builer.Plan()): unexpected error: %v", err)
+	}
+
+	if got.DeferredChecks.Actions[0].Name != "check0" {
+		t.Errorf("TestAddDeferredChecks(Plan.DeferredChecks): got %s, want check0", got.DeferredChecks.Actions[0].Name)
+	}
+	if got.Blocks[0].DeferredChecks.Actions[0].Name != "check0" {
+		t.Errorf("TestAddDeferredChecks(Block.DeferredChecks): got %s, want check0", got.Blocks[0].DeferredChecks.Actions[0].Name)
+	}
+}
+
 func TestAddBlock(t *testing.T) {
 	t.Parallel()
 

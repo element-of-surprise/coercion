@@ -163,7 +163,7 @@ func (s *States) PlanPreChecks(req statemachine.Request[Data]) statemachine.Requ
 	err := s.runPreChecks(req.Ctx, req.Data.Plan.PreChecks, req.Data.Plan.ContChecks)
 	if err != nil {
 		req.Data.err = err
-		req.Next = s.End
+		req.Next = s.PlanDeferredChecks
 		return req
 	}
 
@@ -208,7 +208,7 @@ func (s *States) ExecuteBlock(req statemachine.Request[Data]) statemachine.Reque
 	if err := after(req.Ctx, h.block.EntranceDelay); err != nil {
 		h.block.State.Status = workflow.Stopped
 		req.Data.err = err
-		req.Next = s.End
+		req.Next = s.PlanDeferredChecks
 		return req
 	}
 
@@ -251,7 +251,7 @@ func (s *States) BlockPreChecks(req statemachine.Request[Data]) statemachine.Req
 	if err != nil {
 		h.block.State.Status = workflow.Failed
 		req.Data.err = err
-		req.Next = s.BlockEnd
+		req.Next = s.BlockDeferredChecks
 		return req
 	}
 
@@ -320,14 +320,14 @@ func (s *States) ExecuteSequences(req statemachine.Request[Data]) statemachine.R
 		if _, err := req.Data.contChecksPassing(); err != nil {
 			h.block.State.Status = workflow.Failed
 			req.Data.err = err
-			req.Next = s.BlockEnd
+			req.Next = s.BlockDeferredChecks
 			return req
 		}
 
 		if exceededFailures() {
 			h.block.State.Status = workflow.Failed
 			req.Data.err = fmt.Errorf("block(%s) has exceeded the tolerated failures", h.block.Name)
-			req.Next = s.BlockEnd
+			req.Next = s.BlockDeferredChecks
 			return req
 		}
 
@@ -358,7 +358,7 @@ func (s *States) ExecuteSequences(req statemachine.Request[Data]) statemachine.R
 	if h.block.ToleratedFailures >= 0 && failures.Load() > int64(h.block.ToleratedFailures) {
 		h.block.State.Status = workflow.Failed
 		req.Data.err = fmt.Errorf("block(%s) has exceeded the tolerated failures", h.block.Name)
-		req.Next = s.BlockEnd
+		req.Next = s.BlockDeferredChecks
 		return req
 	}
 
@@ -369,8 +369,8 @@ func (s *States) ExecuteSequences(req statemachine.Request[Data]) statemachine.R
 // BlockPostChecks runs all PostChecks on the current block.
 func (s *States) BlockPostChecks(req statemachine.Request[Data]) statemachine.Request[Data] {
 	h := req.Data.blocks[0]
+	req.Next = s.BlockDeferredChecks
 	if h.block.PostChecks == nil {
-		req.Next = s.BlockEnd
 		return req
 	}
 
@@ -378,11 +378,27 @@ func (s *States) BlockPostChecks(req statemachine.Request[Data]) statemachine.Re
 	if err != nil {
 		h.block.State.Status = workflow.Failed
 		req.Data.err = err
-		req.Next = s.BlockEnd
+		return req
+	}
+	return req
+}
+
+// BlockDeferredChecks runs all DeferredChecks on the current block before proceeding.
+func (s *States) BlockDeferredChecks(req statemachine.Request[Data]) statemachine.Request[Data] {
+	h := req.Data.blocks[0]
+	req.Next = s.BlockEnd
+
+	if h.block.DeferredChecks == nil {
 		return req
 	}
 
-	req.Next = s.BlockEnd
+	err := s.runChecksOnce(req.Ctx, h.block.DeferredChecks)
+	if err != nil {
+		h.block.State.Status = workflow.Failed
+		req.Data.err = err
+		return req
+	}
+
 	return req
 }
 
@@ -415,7 +431,7 @@ func (s *States) BlockEnd(req statemachine.Request[Data]) statemachine.Request[D
 			if err != nil {
 				h.block.State.Status = workflow.Failed
 				req.Data.err = err
-				req.Next = s.End
+				req.Next = s.PlanDeferredChecks
 				return req
 			}
 		}
@@ -424,14 +440,14 @@ func (s *States) BlockEnd(req statemachine.Request[Data]) statemachine.Request[D
 			h.block.State.Status = workflow.Completed
 		} else {
 			h.block.State.Status = workflow.Failed
-			req.Next = s.End
+			req.Next = s.PlanDeferredChecks
 			return req
 		}
 
 		if err := after(req.Ctx, h.block.ExitDelay); err != nil {
 			h.block.State.Status = workflow.Stopped
 			req.Data.err = err
-			req.Next = s.End
+			req.Next = s.PlanDeferredChecks
 			return req
 		}
 	}
@@ -448,7 +464,7 @@ func (s *States) BlockEnd(req statemachine.Request[Data]) statemachine.Request[D
 // PlanPostChecks stops the ContChecks and runs the PostChecks of the current plan.
 func (s *States) PlanPostChecks(req statemachine.Request[Data]) statemachine.Request[Data] {
 	// No matter what the outcome here is, we go to the end state.
-	req.Next = s.End
+	req.Next = s.PlanDeferredChecks
 
 	// We always checks this to avoid programmer mistakes that lead to a goroutine lea
 	// 	// We always checks this to avoid programmer mistakes that lead to a goroutine leak.
@@ -470,6 +486,21 @@ func (s *States) PlanPostChecks(req statemachine.Request[Data]) statemachine.Req
 			req.Data.err = err
 			return req
 		}
+	}
+	return req
+}
+
+// PlanDeferredChecks runs the DeferredChecks.
+func (s *States) PlanDeferredChecks(req statemachine.Request[Data]) statemachine.Request[Data] {
+	// No matter what the outcome here is, we go to the end state.
+	req.Next = s.End
+
+	if req.Data.Plan.DeferredChecks == nil {
+		return req
+	}
+	if err := s.runChecksOnce(req.Ctx, req.Data.Plan.DeferredChecks); err != nil {
+		req.Data.err = err
+		return req
 	}
 	return req
 }

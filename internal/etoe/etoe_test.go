@@ -99,6 +99,7 @@ func TestEtoE(t *testing.T) {
 	build.AddChecks(builder.PreChecks, clone.Checks(ctx, checks, cloneOpts...)).Up()
 	build.AddChecks(builder.PostChecks, clone.Checks(ctx, checks, cloneOpts...)).Up()
 	build.AddChecks(builder.ContChecks, clone.Checks(ctx, checks, cloneOpts...)).Up()
+	build.AddChecks(builder.DeferredChecks, clone.Checks(ctx, checks, cloneOpts...)).Up()
 
 	build.AddBlock(
 		builder.BlockArgs{
@@ -109,6 +110,10 @@ func TestEtoE(t *testing.T) {
 			Concurrency:   2,
 		},
 	)
+	build.AddChecks(builder.PreChecks, clone.Checks(ctx, checks, cloneOpts...)).Up()
+	build.AddChecks(builder.PostChecks, clone.Checks(ctx, checks, cloneOpts...)).Up()
+	build.AddChecks(builder.ContChecks, clone.Checks(ctx, checks, cloneOpts...)).Up()
+	build.AddChecks(builder.DeferredChecks, clone.Checks(ctx, checks, cloneOpts...)).Up()
 	build.AddSequence(clone.Sequence(ctx, seqs, cloneOpts...)).Up()
 	build.AddSequence(clone.Sequence(ctx, seqs, cloneOpts...)).Up()
 	build.AddSequence(clone.Sequence(ctx, seqs, cloneOpts...)).Up()
@@ -153,17 +158,70 @@ func TestEtoE(t *testing.T) {
 	if err != nil {
 		t.Fatalf("TestEtoE: planID not a valid UUID")
 	}
-
-	plugResp = result.Blocks[0].Sequences[0].Actions[1].Attempts[0].Resp.(plugins.Resp)
+	if result.DeferredChecks.State.Status != workflow.Completed {
+		t.Fatalf("TestEtoE: deferred checks did not complete successfully(%s)", result.DeferredChecks.State.Status)
+	}
+	plugResp = result.DeferredChecks.Actions[0].Attempts[0].Resp.(plugins.Resp)
 	if plugResp.Arg == "" {
-		t.Fatalf("TestEtoE: actionID not found")
+		t.Fatalf("TestEtoE: planID not found")
 	}
 	_, err = uuid.Parse(plugResp.Arg)
 	if err != nil {
-		t.Fatalf("TestEtoE: actionID not a valid UUID")
+		t.Fatalf("TestEtoE: planID not a valid UUID")
+	}
+
+	for _, block := range result.Blocks {
+		if block.State.Status != workflow.Completed {
+			t.Fatalf("TestEtoE: block did not complete successfully(%s)", block.State.Status)
+		}
+		if block.PreChecks.State.Status != workflow.Completed {
+			t.Fatalf("TestEtoE: block pre checks did not complete successfully(%s)", block.PreChecks.State.Status)
+		}
+		if err := testPlugResp(block.PreChecks.Actions[0], "actionID"); err != nil {
+			t.Fatalf("TestEtoE(block PreChecks): %v", err)
+		}
+		if block.PostChecks.State.Status != workflow.Completed {
+			t.Fatalf("TestEtoE: block post checks did not complete successfully(%s)", block.PostChecks.State.Status)
+		}
+		if err := testPlugResp(block.PostChecks.Actions[0], "actionID"); err != nil {
+			t.Fatalf("TestEtoE(block PostChecks): %v", err)
+		}
+		if block.ContChecks.State.Status != workflow.Completed {
+			t.Fatalf("TestEtoE: block cont checks did not complete successfully(%s)", block.ContChecks.State.Status)
+		}
+		if err := testPlugResp(block.ContChecks.Actions[0], "actionID"); err != nil {
+			t.Fatalf("TestEtoE(block ContChecks): %v", err)
+		}
+		if block.DeferredChecks.State.Status != workflow.Completed {
+			t.Fatalf("TestEtoE: block deferred checks did not complete successfully(%s)", block.DeferredChecks.State.Status)
+		}
+		if err := testPlugResp(block.DeferredChecks.Actions[0], "actionID"); err != nil {
+			t.Fatalf("TestEtoE(block DeferredChecks): %v", err)
+		}
+
+		for _, seq := range block.Sequences {
+			if seq.State.Status != workflow.Completed {
+				t.Fatalf("TestEtoE: sequence did not complete successfully(%s)", seq.State.Status)
+			}
+			if err := testPlugResp(seq.Actions[1], "actionID"); err != nil {
+				t.Fatalf("TestEtoE(sequence): %v", err)
+			}
+		}
 	}
 
 	pConfig.Print("Workflow result: \n", result)
+}
+
+func testPlugResp(action *workflow.Action, want string) error {
+	plugResp := action.Attempts[0].Resp.(plugins.Resp)
+	if plugResp.Arg == "" {
+		return fmt.Errorf("%q was not found in the response", want)
+	}
+	_, err := uuid.Parse(plugResp.Arg)
+	if err != nil {
+		return fmt.Errorf("%q was not a valid UUID", plugResp.Arg)
+	}
+	return nil
 }
 
 func TestBypassPlan(t *testing.T) {

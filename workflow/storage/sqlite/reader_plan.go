@@ -72,6 +72,10 @@ func (p reader) fetchPlan(ctx context.Context, id uuid.UUID) (*workflow.Plan, er
 				if err != nil {
 					return fmt.Errorf("couldn't get plan postchecks: %w", err)
 				}
+				plan.DeferredChecks, err = p.fieldToCheck(ctx, "deferredchecks", conn, stmt)
+				if err != nil {
+					return fmt.Errorf("couldn't get plan deferredchecks: %w", err)
+				}
 				plan.Blocks, err = p.fieldToBlocks(ctx, conn, stmt)
 				if err != nil {
 					return fmt.Errorf("couldn't get blocks: %w", err)

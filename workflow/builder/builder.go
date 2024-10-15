@@ -193,6 +193,8 @@ const (
 	PostChecks ChecksType = 3
 	// BypassChecks is a set of bypass checks.
 	BypassChecks ChecksType = 4
+	// DeferredChecks is a set of deferred checks.
+	DeferredChecks ChecksType = 5
 )
 
 // AddChecks adds a check to the current Plan or Block. This moves you into the check.
@@ -249,6 +251,13 @@ func (b *BuildPlan) AddChecks(cType ChecksType, check *workflow.Checks) *BuildPl
 			}
 			t.PostChecks = check
 			b.chain = append(b.chain, check)
+		case DeferredChecks:
+			if t.DeferredChecks != nil {
+				b.setErr(errors.New("cannot add DeferredCheck to Plan with existing DeferredChecks"))
+				return b
+			}
+			t.DeferredChecks = check
+			b.chain = append(b.chain, check)
 		default:
 			b.setErr(errors.New("unknown check type"))
 			return b
@@ -282,6 +291,13 @@ func (b *BuildPlan) AddChecks(cType ChecksType, check *workflow.Checks) *BuildPl
 				return b
 			}
 			t.PostChecks = check
+			b.chain = append(b.chain, check)
+		case DeferredChecks:
+			if t.DeferredChecks != nil {
+				b.setErr(errors.New("cannot add DeferredCheck to Block with existing DeferredChecks"))
+				return b
+			}
+			t.DeferredChecks = check
 			b.chain = append(b.chain, check)
 		default:
 			b.setErr(errors.New("unknown check type"))

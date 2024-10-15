@@ -138,14 +138,15 @@ func TestExamineChecks(t *testing.T) {
 
 	tests := []struct {
 		name        string
-		checks      [3]*workflow.Checks
+		checks      [4]*workflow.Checks
 		wantReason  workflow.FailureReason
 		wantErr     bool
 		internalErr bool
 	}{
 		{
 			name: "all checks pass",
-			checks: [3]*workflow.Checks{
+			checks: [4]*workflow.Checks{
+				{State: &workflow.State{Status: workflow.Completed}},
 				{State: &workflow.State{Status: workflow.Completed}},
 				{State: &workflow.State{Status: workflow.Completed}},
 				{State: &workflow.State{Status: workflow.Completed}},
@@ -153,16 +154,18 @@ func TestExamineChecks(t *testing.T) {
 		},
 		{
 			name: "all checks pass, but we have a nil check",
-			checks: [3]*workflow.Checks{
+			checks: [4]*workflow.Checks{
 				{State: &workflow.State{Status: workflow.Completed}},
 				nil,
+				{State: &workflow.State{Status: workflow.Completed}},
 				{State: &workflow.State{Status: workflow.Completed}},
 			},
 		},
 		{
 			name: "pre-check fails",
-			checks: [3]*workflow.Checks{
+			checks: [4]*workflow.Checks{
 				{State: &workflow.State{Status: workflow.Failed}},
+				{State: &workflow.State{Status: workflow.Completed}},
 				{State: &workflow.State{Status: workflow.Completed}},
 				{State: &workflow.State{Status: workflow.Completed}},
 			},
@@ -171,9 +174,10 @@ func TestExamineChecks(t *testing.T) {
 		},
 		{
 			name: "cont-check fails",
-			checks: [3]*workflow.Checks{
+			checks: [4]*workflow.Checks{
 				{State: &workflow.State{Status: workflow.Completed}},
 				{State: &workflow.State{Status: workflow.Failed}},
+				{State: &workflow.State{Status: workflow.Completed}},
 				{State: &workflow.State{Status: workflow.Completed}},
 			},
 			wantReason: workflow.FRContCheck,
@@ -181,20 +185,22 @@ func TestExamineChecks(t *testing.T) {
 		},
 		{
 			name: "post-check fails",
-			checks: [3]*workflow.Checks{
+			checks: [4]*workflow.Checks{
 				{State: &workflow.State{Status: workflow.Completed}},
 				{State: &workflow.State{Status: workflow.Completed}},
 				{State: &workflow.State{Status: workflow.Failed}},
+				{State: &workflow.State{Status: workflow.Completed}},
 			},
 			wantReason: workflow.FRPostCheck,
 			wantErr:    true,
 		},
 		{
 			name: "check in an unexpected state",
-			checks: [3]*workflow.Checks{
+			checks: [4]*workflow.Checks{
 				{State: &workflow.State{Status: workflow.Completed}},
 				{State: &workflow.State{Status: workflow.Completed}},
 				{State: &workflow.State{Status: workflow.Running}},
+				{State: &workflow.State{Status: workflow.Completed}},
 			},
 			wantReason:  workflow.FRPostCheck,
 			wantErr:     true,
