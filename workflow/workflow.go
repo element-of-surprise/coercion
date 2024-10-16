@@ -2,6 +2,7 @@
 package workflow
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"reflect"
@@ -85,7 +86,7 @@ func (s *State) Duration() time.Duration {
 // need validation, it returns a list of validators that need to be validated.
 // This allows tests to be more modular instead of a super test of the entire object tree.
 type validator interface {
-	validate() ([]validator, error)
+	validate(ctx context.Context) ([]validator, error)
 }
 
 //go:generate stringer -type=ObjectType
@@ -125,7 +126,7 @@ type Plan struct {
 	Name string
 	// Descr is a human-readable description of the workflow. Required.
 	Descr string
-	// A GroupID is a unique identifier for a group of workflows. This is used to group
+	// GroupID is a unique identifier for a group of workflows. This is used to group
 	// workflows together for informational purposes. This is not required.
 	GroupID uuid.UUID
 	// Meta is any type of metadata that the user wants to store with the workflow.
@@ -206,7 +207,7 @@ func (p *Plan) Defaults() {
 	}
 }
 
-func (p *Plan) validate() ([]validator, error) {
+func (p *Plan) validate(ctx context.Context) ([]validator, error) {
 	if p == nil {
 		return nil, errors.New("plan is nil")
 	}
@@ -245,6 +246,9 @@ func (p *Plan) validate() ([]validator, error) {
 type Checks struct {
 	// ID is a unique identifier for the object. Should not be set by the user.
 	ID uuid.UUID
+	// Key is a unique identifier within a Plan that the user supplies and can use to reference
+	// the checks. Optional.
+	Key uuid.UUID
 	// Delay is the amount of time to wait before executing the checks. This
 	// is only used by continuous checks. Optional. Defaults to 30 seconds.
 	Delay time.Duration
@@ -268,6 +272,14 @@ func (c *Checks) GetID() uuid.UUID {
 // This should not be used by the user.
 func (c *Checks) SetID(id uuid.UUID) {
 	c.ID = id
+}
+
+// GetKey is a getter for the Key field.
+func (c *Checks) GetKey() uuid.UUID {
+	if c == nil {
+		return uuid.Nil
+	}
+	return c.Key
 }
 
 // GetState is a getter for the State settings.
@@ -299,12 +311,15 @@ func (c *Checks) Defaults() {
 	}
 }
 
-func (c *Checks) validate() ([]validator, error) {
+func (c *Checks) validate(ctx context.Context) ([]validator, error) {
 	if c == nil {
 		return nil, nil
 	}
 	if c.ID != uuid.Nil {
 		return nil, fmt.Errorf("id should not be set by the user")
+	}
+	if err := addOrErrKey(ctx, c.Key); err != nil {
+		return nil, fmt.Errorf("Checks object: %w", err)
 	}
 	if len(c.Actions) == 0 {
 		return nil, fmt.Errorf("at least one action is required")
@@ -327,6 +342,9 @@ func (c *Checks) validate() ([]validator, error) {
 type Block struct {
 	// ID is a unique identifier for the object. Should not be set by the user.
 	ID uuid.UUID
+	// Key is a unique identifier within a Plan that the user supplies and can use to reference
+	// the block. Optional.
+	Key uuid.UUID
 	// Name is the name of the block. Required.
 	Name string
 	// Descr is a description of the block. Required.
@@ -381,6 +399,14 @@ func (b *Block) SetID(id uuid.UUID) {
 	b.ID = id
 }
 
+// GetKey is a getter for the Key field.
+func (b *Block) GetKey() uuid.UUID {
+	if b == nil {
+		return uuid.Nil
+	}
+	return b.Key
+}
+
 // GetState is a getter for the State settings.
 func (b *Block) GetState() *State {
 	return b.State
@@ -414,14 +440,16 @@ func (b *Block) Defaults() {
 	return
 }
 
-func (b *Block) validate() ([]validator, error) {
+func (b *Block) validate(ctx context.Context) ([]validator, error) {
 	if b == nil {
 		return nil, fmt.Errorf("cannot have a nil Block")
 	}
 	if b.ID != uuid.Nil {
 		return nil, fmt.Errorf("id should not be set by the user")
 	}
-
+	if err := addOrErrKey(ctx, b.Key); err != nil {
+		return nil, fmt.Errorf("Block object(%s): %w", b.Name, err)
+	}
 	if strings.TrimSpace(b.Name) == "" {
 		return nil, fmt.Errorf("name is required")
 	}
@@ -449,6 +477,9 @@ func (b *Block) validate() ([]validator, error) {
 type Sequence struct {
 	// ID is a unique identifier for the object. Should not be set by the user.
 	ID uuid.UUID
+	// Key is a unique identifier within a Plan that the user supplies and can use to reference
+	// the sequence. Optional.
+	Key uuid.UUID
 	// Name is the name of the sequence. Required.
 	Name string
 	// Descr is a description of the sequence. Required.
@@ -471,6 +502,14 @@ func (s *Sequence) GetID() uuid.UUID {
 // SetID is a setter for the ID field.
 func (s *Sequence) SetID(id uuid.UUID) {
 	s.ID = id
+}
+
+// GetKey is a getter for the Key field.
+func (s *Sequence) GetKey() uuid.UUID {
+	if s == nil {
+		return uuid.Nil
+	}
+	return s.Key
 }
 
 // GetState is a getter for the State settings.
@@ -502,12 +541,15 @@ func (s *Sequence) Defaults() {
 	}
 }
 
-func (s *Sequence) validate() ([]validator, error) {
+func (s *Sequence) validate(ctx context.Context) ([]validator, error) {
 	if s == nil {
 		return nil, fmt.Errorf("cannot have a nil Sequence")
 	}
 	if s.ID != uuid.Nil {
 		return nil, fmt.Errorf("id should not be set by the user")
+	}
+	if err := addOrErrKey(ctx, s.Key); err != nil {
+		return nil, fmt.Errorf("Sequence object(%s): %w", s.Name, err)
 	}
 
 	if strings.TrimSpace(s.Name) == "" {
@@ -550,6 +592,9 @@ type Attempt struct {
 type Action struct {
 	// ID is a unique identifier for the object. Should not be set by the user.
 	ID uuid.UUID
+	// Key is a unique identifier within a Plan that the user supplies and can use to reference
+	// the action. Optional.
+	Key uuid.UUID
 	// Name is the name of the Action. Required.
 	Name string
 	// Descr is a description of the Action. Required.
@@ -595,6 +640,14 @@ func (a *Action) SetState(state *State) {
 	a.State = state
 }
 
+// GetKey is a getter for the Key field.
+func (a *Action) GetKey() uuid.UUID {
+	if a == nil {
+		return uuid.Nil
+	}
+	return a.Key
+}
+
 // Type implements the Object.Type().
 func (a *Action) Type() ObjectType {
 	return OTAction
@@ -624,12 +677,15 @@ func (a *Action) SetRegister(r *registry.Register) {
 	a.register = r
 }
 
-func (a *Action) validate() ([]validator, error) {
+func (a *Action) validate(ctx context.Context) ([]validator, error) {
 	if a == nil {
 		return nil, fmt.Errorf("cannot have a nil Action")
 	}
 	if a.ID != uuid.Nil {
 		return nil, fmt.Errorf("id should not be set by the user")
+	}
+	if err := addOrErrKey(ctx, a.Key); err != nil {
+		return nil, fmt.Errorf("Action object(%s): %w", a.Name, err)
 	}
 
 	if a.State != nil {
@@ -710,6 +766,36 @@ func (q *queue[T]) pop() T {
 	return item
 }
 
+type keysMap struct{}
+
+func getKeyMap(ctx context.Context) map[string]bool {
+	m, ok := ctx.Value(keysMap{}).(map[string]bool)
+	if !ok {
+		return nil
+	}
+	return m
+}
+
+// addOrErrKey grabs the map of object.Key elements found and checks to see if k
+// is already in the map. If it is, it returns an error. If it is not, it adds it.
+// If k is uuid.Nil, it does nothing. If the key is not a version 7 UUID, it returns an error.
+func addOrErrKey(ctx context.Context, k uuid.UUID) error {
+	const v7 = uuid.Version(byte(7))
+
+	if k != uuid.Nil {
+		if k.Version() != v7 {
+			return fmt.Errorf("had a .Key value(%s) with an invalid version(got %s, want %s)", k.String(), string(k.Version()), string(v7))
+		}
+		s := k.String()
+		m := getKeyMap(ctx)
+		if m[s] {
+			return fmt.Errorf("Object.Key %q already exists on another object", s)
+		}
+		m[s] = true
+	}
+	return nil
+}
+
 // Validate validates the Plan. This is automatically called by workstream.Submit.
 func Validate(p *Plan) error {
 	if p == nil {
@@ -719,8 +805,12 @@ func Validate(p *Plan) error {
 	q := &queue[validator]{}
 	q.push(p)
 
+	ctx := context.Background()
+	m := map[string]bool{}
+	ctx = context.WithValue(ctx, keysMap{}, m)
+
 	for val := q.pop(); val != nil; val = q.pop() {
-		vals, err := val.validate()
+		vals, err := val.validate(ctx)
 		if err != nil {
 			return err
 		}

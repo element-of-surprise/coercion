@@ -1,6 +1,7 @@
 package workflow
 
 import (
+	"context"
 	"errors"
 	"testing"
 
@@ -105,8 +106,12 @@ func TestPlanValidate(t *testing.T) {
 	}
 
 	for _, test := range tests {
+		ctx := context.Background()
+		m := map[string]bool{}
+		ctx = context.WithValue(ctx, keysMap{}, m)
+
 		p := test.plan()
-		gotValidators, err := p.validate()
+		gotValidators, err := p.validate(ctx)
 		switch {
 		case test.err && err == nil:
 			t.Errorf("TestPlanValidate(%s): got err == nil, want err != nil", test.name)
@@ -127,8 +132,10 @@ func TestPlanValidate(t *testing.T) {
 func TestPreCheckValidate(t *testing.T) {
 	t.Parallel()
 
+	key := NewV7()
 	goodPreChecks := func() *Checks {
 		return &Checks{
+			Key:     key,
 			Actions: []*Action{{}},
 		}
 	}
@@ -136,6 +143,7 @@ func TestPreCheckValidate(t *testing.T) {
 	tests := []struct {
 		name     string
 		preCheck func() *Checks
+		mapKeys  []string
 		err      bool
 		vals     []validator
 	}{
@@ -171,6 +179,13 @@ func TestPreCheckValidate(t *testing.T) {
 			err: true,
 		},
 		{
+			name:     "Error: Duplicate Key",
+			preCheck: goodPreChecks,
+			mapKeys:  []string{key.String()},
+			vals:     []validator{goodPreChecks().Actions[0]},
+			err:      true,
+		},
+		{
 			name:     "Success",
 			preCheck: goodPreChecks,
 			vals:     []validator{goodPreChecks().Actions[0]},
@@ -178,8 +193,14 @@ func TestPreCheckValidate(t *testing.T) {
 	}
 
 	for _, test := range tests {
+		ctx := context.Background()
+		m := map[string]bool{}
+		for _, k := range test.mapKeys {
+			m[k] = true
+		}
+		ctx = context.WithValue(ctx, keysMap{}, m)
 		p := test.preCheck()
-		gotValidators, err := p.validate()
+		gotValidators, err := p.validate(ctx)
 		switch {
 		case test.err && err == nil:
 			t.Errorf("TestPreCheckValidate(%s): got err == nil, want err != nil", test.name)
@@ -200,8 +221,11 @@ func TestPreCheckValidate(t *testing.T) {
 func TestPostCheckValidate(t *testing.T) {
 	t.Parallel()
 
+	key := NewV7()
+
 	goodPostChecks := func() *Checks {
 		return &Checks{
+			Key:     key,
 			Actions: []*Action{{}},
 		}
 	}
@@ -209,6 +233,7 @@ func TestPostCheckValidate(t *testing.T) {
 	tests := []struct {
 		name      string
 		postCheck func() *Checks
+		mapKeys   []string
 		err       bool
 		vals      []validator
 	}{
@@ -244,6 +269,13 @@ func TestPostCheckValidate(t *testing.T) {
 			err: true,
 		},
 		{
+			name:      "Error: Duplicate Key",
+			postCheck: goodPostChecks,
+			mapKeys:   []string{key.String()},
+			vals:      []validator{goodPostChecks().Actions[0]},
+			err:       true,
+		},
+		{
 			name:      "Success",
 			postCheck: goodPostChecks,
 			vals:      []validator{goodPostChecks().Actions[0]},
@@ -251,8 +283,14 @@ func TestPostCheckValidate(t *testing.T) {
 	}
 
 	for _, test := range tests {
+		ctx := context.Background()
+		m := map[string]bool{}
+		for _, k := range test.mapKeys {
+			m[k] = true
+		}
+		ctx = context.WithValue(ctx, keysMap{}, m)
 		p := test.postCheck()
-		gotValidators, err := p.validate()
+		gotValidators, err := p.validate(ctx)
 		switch {
 		case test.err && err == nil:
 			t.Errorf("TestPostCheckValidate(%s): got err == nil, want err != nil", test.name)
@@ -273,8 +311,10 @@ func TestPostCheckValidate(t *testing.T) {
 func TestDeferredCheckValidate(t *testing.T) {
 	t.Parallel()
 
+	key := NewV7()
 	goodDeferChecks := func() *Checks {
 		return &Checks{
+			Key:     key,
 			Actions: []*Action{{}},
 		}
 	}
@@ -282,6 +322,7 @@ func TestDeferredCheckValidate(t *testing.T) {
 	tests := []struct {
 		name       string
 		deferCheck func() *Checks
+		mapKeys    []string
 		err        bool
 		vals       []validator
 	}{
@@ -317,6 +358,13 @@ func TestDeferredCheckValidate(t *testing.T) {
 			err: true,
 		},
 		{
+			name:       "Error: Duplicate Key",
+			deferCheck: goodDeferChecks,
+			mapKeys:    []string{key.String()},
+			vals:       []validator{goodDeferChecks().Actions[0]},
+			err:        true,
+		},
+		{
 			name:       "Success",
 			deferCheck: goodDeferChecks,
 			vals:       []validator{goodDeferChecks().Actions[0]},
@@ -324,8 +372,14 @@ func TestDeferredCheckValidate(t *testing.T) {
 	}
 
 	for _, test := range tests {
+		ctx := context.Background()
+		m := map[string]bool{}
+		for _, k := range test.mapKeys {
+			m[k] = true
+		}
+		ctx = context.WithValue(ctx, keysMap{}, m)
 		p := test.deferCheck()
-		gotValidators, err := p.validate()
+		gotValidators, err := p.validate(ctx)
 		switch {
 		case test.err && err == nil:
 			t.Errorf("TestDeferCheckValidate(%s): got err == nil, want err != nil", test.name)
@@ -346,8 +400,10 @@ func TestDeferredCheckValidate(t *testing.T) {
 func TestContCheckValidate(t *testing.T) {
 	t.Parallel()
 
+	key := NewV7()
 	goodContChecks := func() *Checks {
 		return &Checks{
+			Key:     key,
 			Actions: []*Action{{}},
 		}
 	}
@@ -355,6 +411,7 @@ func TestContCheckValidate(t *testing.T) {
 	tests := []struct {
 		name      string
 		contCheck func() *Checks
+		mapKeys   []string
 		err       bool
 		vals      []validator
 	}{
@@ -390,6 +447,13 @@ func TestContCheckValidate(t *testing.T) {
 			err: true,
 		},
 		{
+			name:      "Error: Duplicate Key",
+			contCheck: goodContChecks,
+			mapKeys:   []string{key.String()},
+			vals:      []validator{goodContChecks().Actions[0]},
+			err:       true,
+		},
+		{
 			name:      "Success",
 			contCheck: goodContChecks,
 			vals:      []validator{goodContChecks().Actions[0]},
@@ -397,8 +461,14 @@ func TestContCheckValidate(t *testing.T) {
 	}
 
 	for _, test := range tests {
+		ctx := context.Background()
+		m := map[string]bool{}
+		for _, k := range test.mapKeys {
+			m[k] = true
+		}
+		ctx = context.WithValue(ctx, keysMap{}, m)
 		p := test.contCheck()
-		gotValidators, err := p.validate()
+		gotValidators, err := p.validate(ctx)
 		switch {
 		case test.err && err == nil:
 			t.Errorf("TestContCheckValidate(%s): got err == nil, want err != nil", test.name)
@@ -419,8 +489,10 @@ func TestContCheckValidate(t *testing.T) {
 func TestBlockValidate(t *testing.T) {
 	t.Parallel()
 
+	key := NewV7()
 	goodBlock := func() *Block {
 		b := Block{
+			Key:            key,
 			Name:           "block",
 			Descr:          "block description",
 			BypassChecks:   &Checks{},
@@ -437,10 +509,11 @@ func TestBlockValidate(t *testing.T) {
 	}
 
 	tests := []struct {
-		name  string
-		block func() *Block
-		err   bool
-		vals  []validator
+		name    string
+		block   func() *Block
+		mapKeys []string
+		err     bool
+		vals    []validator
 	}{
 		{
 			name:  "Error: Block is nil",
@@ -493,6 +566,20 @@ func TestBlockValidate(t *testing.T) {
 			err: true,
 		},
 		{
+			name:    "Error: Duplicate Key",
+			block:   goodBlock,
+			mapKeys: []string{key.String()},
+			vals: []validator{
+				goodBlock().BypassChecks,
+				goodBlock().PreChecks,
+				goodBlock().PostChecks,
+				goodBlock().ContChecks,
+				goodBlock().DeferredChecks,
+				goodBlock().Sequences[0],
+			},
+			err: true,
+		},
+		{
 			name:  "Success",
 			block: goodBlock,
 			vals: []validator{
@@ -507,8 +594,14 @@ func TestBlockValidate(t *testing.T) {
 	}
 
 	for _, test := range tests {
+		ctx := context.Background()
+		m := map[string]bool{}
+		for _, k := range test.mapKeys {
+			m[k] = true
+		}
+		ctx = context.WithValue(ctx, keysMap{}, m)
 		b := test.block()
-		gotValidators, err := b.validate()
+		gotValidators, err := b.validate(ctx)
 		switch {
 		case test.err && err == nil:
 			t.Errorf("TestBlockValidate(%s): got err == nil, want err != nil", test.name)
@@ -529,8 +622,10 @@ func TestBlockValidate(t *testing.T) {
 func TestSequenceValidate(t *testing.T) {
 	t.Parallel()
 
+	key := NewV7()
 	goodSequence := func() *Sequence {
 		return &Sequence{
+			Key:     key,
 			Name:    "sequence",
 			Descr:   "sequence description",
 			Actions: []*Action{{}},
@@ -540,6 +635,7 @@ func TestSequenceValidate(t *testing.T) {
 	tests := []struct {
 		name     string
 		sequence func() *Sequence
+		mapKeys  []string
 		err      bool
 		vals     []validator
 	}{
@@ -594,6 +690,13 @@ func TestSequenceValidate(t *testing.T) {
 			err: true,
 		},
 		{
+			name:     "Error: Duplicate Key",
+			sequence: goodSequence,
+			mapKeys:  []string{key.String()},
+			vals:     []validator{goodSequence().Actions[0]},
+			err:      true,
+		},
+		{
 			name:     "Success",
 			sequence: goodSequence,
 			vals:     []validator{goodSequence().Actions[0]},
@@ -601,8 +704,14 @@ func TestSequenceValidate(t *testing.T) {
 	}
 
 	for _, test := range tests {
+		ctx := context.Background()
+		m := map[string]bool{}
+		for _, k := range test.mapKeys {
+			m[k] = true
+		}
+		ctx = context.WithValue(ctx, keysMap{}, m)
 		s := test.sequence()
-		gotValidators, err := s.validate()
+		gotValidators, err := s.validate(ctx)
 		switch {
 		case test.err && err == nil:
 			t.Errorf("TestSequenceValidate(%s): got err == nil, want err != nil", test.name)
@@ -656,8 +765,10 @@ func TestActionValidate(t *testing.T) {
 	reg := registry.New()
 	reg.Register(validatePlugin{})
 
+	key := NewV7()
 	goodAction := func() *Action {
 		return &Action{
+			Key:      key,
 			Name:     "goodAction",
 			Descr:    "goodAction",
 			Plugin:   "validatePlugin",
@@ -667,9 +778,10 @@ func TestActionValidate(t *testing.T) {
 	}
 
 	tests := []struct {
-		name   string
-		action func() *Action
-		err    bool
+		name    string
+		action  func() *Action
+		mapKeys []string
+		err     bool
 	}{
 		{
 			name: "Error: Action is nil",
@@ -733,14 +845,26 @@ func TestActionValidate(t *testing.T) {
 			err: true,
 		},
 		{
+			name:    "Error: Duplicate Key",
+			action:  goodAction,
+			mapKeys: []string{key.String()},
+			err:     true,
+		},
+		{
 			name:   "Success",
 			action: goodAction,
 		},
 	}
 
 	for _, test := range tests {
+		ctx := context.Background()
+		m := map[string]bool{}
+		for _, k := range test.mapKeys {
+			m[k] = true
+		}
+		ctx = context.WithValue(ctx, keysMap{}, m)
 		a := test.action()
-		gotValidator, err := a.validate()
+		gotValidator, err := a.validate(ctx)
 		switch {
 		case test.err && err == nil:
 			t.Errorf("TestActionValidate(%s): got err == nil, want err != nil", test.name)

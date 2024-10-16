@@ -69,6 +69,13 @@ func (p reader) blockRowToBlock(ctx context.Context, conn *sqlite.Conn, stmt *sq
 	if err != nil {
 		return nil, fmt.Errorf("couldn't read block id: %w", err)
 	}
+	k := stmt.GetText("key")
+	if k != "" {
+		b.Key, err = uuid.Parse(k)
+		if err != nil {
+			return nil, fmt.Errorf("couldn't parse block key: %w", err)
+		}
+	}
 	b.Name = stmt.GetText("name")
 	b.Descr = stmt.GetText("descr")
 	b.EntranceDelay = time.Duration(stmt.GetInt64("entrancedelay"))

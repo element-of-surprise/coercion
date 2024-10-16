@@ -31,6 +31,10 @@ type runner func(name string, req statemachine.Request[sm.Data], options ...stat
 // validator validates a workflow.Object.
 type validator func(walk.Item) error
 
+type keyer interface {
+	Key() uuid.UUID
+}
+
 // Plans handles execution of workflow.Plan instances for a Workstream.
 type Plans struct {
 	// registry is the registry of plugins that can be used to execute Plans.
@@ -242,9 +246,14 @@ func (p *Plans) validateAction(i walk.Item) error {
 
 // validateID validates that the object has a non-nil ID.
 func (e *Plans) validateID(i walk.Item) error {
+	const v7 = uuid.Version(byte(7))
+
 	if hasID, ok := i.Value.(ider); ok {
 		if hasID.GetID() == uuid.Nil {
 			return fmt.Errorf("Object(%T): ID is nil", i.Value)
+		}
+		if hasID.GetID().Version() != v7 {
+			return fmt.Errorf("Object(%T): ID is not a V7 UUID", i.Value)
 		}
 		return nil
 	}
