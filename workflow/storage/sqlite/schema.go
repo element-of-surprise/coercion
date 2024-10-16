@@ -31,6 +31,7 @@ CREATE Table If Not Exists plans (
 var blocksSchema = `
 CREATE Table If Not Exists blocks (
     id TEXT PRIMARY KEY,
+    key TEXT,
     plan_id BLOB NOT NULL,
     name TEXT NOT NULL,
     descr TEXT NOT NULL,
@@ -53,6 +54,7 @@ CREATE Table If Not Exists blocks (
 var checksSchema = `
 CREATE Table If Not Exists checks (
     id TEXT PRIMARY KEY,
+    key TEXT,
     plan_id TEXT NOT NULL,
     actions BLOB NOT NULL,
     delay INTEGER NOT NULL,
@@ -64,6 +66,7 @@ CREATE Table If Not Exists checks (
 var sequencesSchema = `
 CREATE Table If Not Exists sequences (
     id TEXT PRIMARY KEY,
+    key TEXT,
     plan_id TEXT NOT NULL,
     name TEXT NOT NULL,
     descr TEXT NOT NULL,
@@ -77,6 +80,7 @@ CREATE Table If Not Exists sequences (
 var actionsSchema = `
 CREATE Table If Not Exists actions (
     id TEXT PRIMARY KEY,
+    key TEXT,
     plan_id TEXT NOT NULL,
     name TEXT NOT NULL,
     descr TEXT NOT NULL,
@@ -90,3 +94,11 @@ CREATE Table If Not Exists actions (
     state_start INTEGER NOT NULL,
     state_end INTEGER NOT NULL
 );`
+
+var indexes = []string{
+	`CREATE INDEX idx_plans ON plans(id, group_id, state_status, state_start, state_end, reason);`,
+	`CREATE INDEX idx_blocks ON blocks(id, key, plan_id, state_status, state_start, state_end);`,
+	`CREATE INDEX idx_checks ON checks(id, key, plan_id, state_status, state_start, state_end);`,
+	`CREATE INDEX idx_sequences ON sequences(id, key, plan_id, state_status, state_start, state_end);`,
+	`CREATE INDEX idx_actions ON actions(id, key, plan_id, state_status, state_start, state_end, plugin);`,
+}

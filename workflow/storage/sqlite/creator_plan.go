@@ -118,13 +118,14 @@ func commitPlan(ctx context.Context, conn *sqlite.Conn, p *workflow.Plan) (err e
 const insertChecks = `
 	INSERT INTO checks (
 		id,
+		key,
 		plan_id,
 		actions,
 		delay,
 		state_status,
 		state_start,
 		state_end
-	) VALUES ($id, $plan_id, $actions, $delay,
+	) VALUES ($id, $key, $plan_id, $actions, $delay,
 	$state_status, $state_start, $state_end)`
 
 func commitChecks(ctx context.Context, conn *sqlite.Conn, planID uuid.UUID, checks *workflow.Checks) error {
@@ -143,6 +144,7 @@ func commitChecks(ctx context.Context, conn *sqlite.Conn, planID uuid.UUID, chec
 	}
 
 	stmt.SetText("$id", checks.ID.String())
+	stmt.SetText("$key", checks.Key.String())
 	stmt.SetText("$plan_id", planID.String())
 	stmt.SetBytes("$actions", actions)
 	stmt.SetInt64("$delay", int64(checks.Delay))
@@ -167,6 +169,7 @@ func commitChecks(ctx context.Context, conn *sqlite.Conn, planID uuid.UUID, chec
 const insertBlock = `
 	INSERT INTO blocks (
 		id,
+		key,
 		plan_id,
 		name,
 		descr,
@@ -184,7 +187,7 @@ const insertBlock = `
 		state_status,
 		state_start,
 		state_end
-	) VALUES ($id, $plan_id, $name, $descr, $pos, $entrancedelay, $exitdelay, $bypasschecks, $prechecks, $postchecks, $contchecks, $deferredchecks,
+	) VALUES ($id, $key, $plan_id, $name, $descr, $pos, $entrancedelay, $exitdelay, $bypasschecks, $prechecks, $postchecks, $contchecks, $deferredchecks,
 	$sequences, $concurrency, $toleratedfailures,$state_status, $state_start, $state_end)`
 
 func commitBlock(ctx context.Context, conn *sqlite.Conn, planID uuid.UUID, pos int, block *workflow.Block) error {
@@ -205,6 +208,7 @@ func commitBlock(ctx context.Context, conn *sqlite.Conn, planID uuid.UUID, pos i
 	}
 
 	stmt.SetText("$id", block.ID.String())
+	stmt.SetText("$key", block.Key.String())
 	stmt.SetText("$plan_id", planID.String())
 	stmt.SetText("$name", block.Name)
 	stmt.SetText("$descr", block.Descr)
@@ -249,6 +253,7 @@ func commitBlock(ctx context.Context, conn *sqlite.Conn, planID uuid.UUID, pos i
 const insertSequence = `
 	INSERT INTO sequences (
 		id,
+		key,
 		plan_id,
 		name,
 		descr,
@@ -257,7 +262,7 @@ const insertSequence = `
 		state_status,
 		state_start,
 		state_end
-	) VALUES ($id, $plan_id, $name, $descr, $pos, $actions, $state_status, $state_start, $state_end)`
+	) VALUES ($id, $key, $plan_id, $name, $descr, $pos, $actions, $state_status, $state_start, $state_end)`
 
 func commitSequence(ctx context.Context, conn *sqlite.Conn, planID uuid.UUID, pos int, seq *workflow.Sequence) error {
 	stmt, err := conn.Prepare(insertSequence)
@@ -271,6 +276,7 @@ func commitSequence(ctx context.Context, conn *sqlite.Conn, planID uuid.UUID, po
 	}
 
 	stmt.SetText("$id", seq.ID.String())
+	stmt.SetText("$key", seq.Key.String())
 	stmt.SetText("$plan_id", planID.String())
 	stmt.SetText("$name", seq.Name)
 	stmt.SetText("$descr", seq.Descr)
@@ -296,6 +302,7 @@ func commitSequence(ctx context.Context, conn *sqlite.Conn, planID uuid.UUID, po
 const insertAction = `
 	INSERT INTO actions (
 		id,
+		key,
 		plan_id,
 		name,
 		descr,
@@ -308,7 +315,7 @@ const insertAction = `
 		state_status,
 		state_start,
 		state_end
-	) VALUES ($id, $plan_id, $name, $descr, $pos, $plugin, $timeout, $retries, $req, $attempts,
+	) VALUES ($id, $key, $plan_id, $name, $descr, $pos, $plugin, $timeout, $retries, $req, $attempts,
 	$state_status, $state_start, $state_end)`
 
 func commitAction(ctx context.Context, conn *sqlite.Conn, planID uuid.UUID, pos int, action *workflow.Action) error {
@@ -328,6 +335,7 @@ func commitAction(ctx context.Context, conn *sqlite.Conn, planID uuid.UUID, pos 
 	}
 
 	stmt.SetText("$id", action.ID.String())
+	stmt.SetText("$key", action.Key.String())
 	stmt.SetText("$plan_id", planID.String())
 	stmt.SetText("$name", action.Name)
 	stmt.SetText("$descr", action.Descr)

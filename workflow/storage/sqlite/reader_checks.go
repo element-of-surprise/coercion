@@ -68,6 +68,13 @@ func (p reader) checksRowToChecks(ctx context.Context, conn *sqlite.Conn, stmt *
 	if err != nil {
 		return nil, fmt.Errorf("checksRowToChecks: couldn't convert ID to UUID: %w", err)
 	}
+	k := stmt.GetText("key")
+	if k != "" {
+		c.Key, err = uuid.Parse(k)
+		if err != nil {
+			return nil, fmt.Errorf("couldn't parse check key: %w", err)
+		}
+	}
 	c.Delay = time.Duration(stmt.GetInt64("delay"))
 	c.State, err = fieldToState(stmt)
 	if err != nil {

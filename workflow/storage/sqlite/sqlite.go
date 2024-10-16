@@ -2,7 +2,7 @@
 Package sqlite provides a sqlite-based storage implementation for workflow.Plan data. This is used
 to implement the storage.ReadWriter interface.
 
-This package is for use only by the workstream package and any use outside of workstream is not
+This package is for use only by the coercion.Workstream and any use outside of that is not
 supported.
 */
 package sqlite
@@ -132,6 +132,11 @@ func createTables(ctx context.Context, conn *sqlite.Conn) error {
 			&sqlitex.ExecOptions{},
 		); err != nil {
 			return fmt.Errorf("couldn't create table: %w", err)
+		}
+	}
+	for _, index := range indexes {
+		if err := sqlitex.ExecuteTransient(conn, index, &sqlitex.ExecOptions{}); err != nil {
+			return fmt.Errorf("couldn't create index: %w", err)
 		}
 	}
 	return nil
