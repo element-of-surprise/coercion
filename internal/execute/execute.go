@@ -31,10 +31,6 @@ type runner func(name string, req statemachine.Request[sm.Data], options ...stat
 // validator validates a workflow.Object.
 type validator func(walk.Item) error
 
-type keyer interface {
-	Key() uuid.UUID
-}
-
 // Plans handles execution of workflow.Plan instances for a Workstream.
 type Plans struct {
 	// registry is the registry of plugins that can be used to execute Plans.

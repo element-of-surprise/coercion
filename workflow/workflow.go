@@ -274,14 +274,6 @@ func (c *Checks) SetID(id uuid.UUID) {
 	c.ID = id
 }
 
-// GetKey is a getter for the Key field.
-func (c *Checks) GetKey() uuid.UUID {
-	if c == nil {
-		return uuid.Nil
-	}
-	return c.Key
-}
-
 // GetState is a getter for the State settings.
 func (c *Checks) GetState() *State {
 	return c.State
@@ -399,14 +391,6 @@ func (b *Block) SetID(id uuid.UUID) {
 	b.ID = id
 }
 
-// GetKey is a getter for the Key field.
-func (b *Block) GetKey() uuid.UUID {
-	if b == nil {
-		return uuid.Nil
-	}
-	return b.Key
-}
-
 // GetState is a getter for the State settings.
 func (b *Block) GetState() *State {
 	return b.State
@@ -502,14 +486,6 @@ func (s *Sequence) GetID() uuid.UUID {
 // SetID is a setter for the ID field.
 func (s *Sequence) SetID(id uuid.UUID) {
 	s.ID = id
-}
-
-// GetKey is a getter for the Key field.
-func (s *Sequence) GetKey() uuid.UUID {
-	if s == nil {
-		return uuid.Nil
-	}
-	return s.Key
 }
 
 // GetState is a getter for the State settings.
@@ -638,14 +614,6 @@ func (a *Action) GetState() *State {
 // SetState is a setter for the State settings.
 func (a *Action) SetState(state *State) {
 	a.State = state
-}
-
-// GetKey is a getter for the Key field.
-func (a *Action) GetKey() uuid.UUID {
-	if a == nil {
-		return uuid.Nil
-	}
-	return a.Key
 }
 
 // Type implements the Object.Type().
