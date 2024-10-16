@@ -68,6 +68,13 @@ func (p reader) sequenceRowToSequence(ctx context.Context, conn *sqlite.Conn, st
 	if err != nil {
 		return nil, fmt.Errorf("couldn't read block id: %w", err)
 	}
+	k := stmt.GetText("key")
+	if k != "" {
+		s.Key, err = uuid.Parse(k)
+		if err != nil {
+			return nil, fmt.Errorf("couldn't parse sequence key: %w", err)
+		}
+	}
 	s.Name = stmt.GetText("name")
 	s.Descr = stmt.GetText("descr")
 	s.State, err = fieldToState(stmt)
