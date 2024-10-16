@@ -312,6 +312,7 @@ func (b *BuildPlan) AddChecks(cType ChecksType, check *workflow.Checks) *BuildPl
 
 // BlockArgs are arguments for AddBlock that define a Block in the Plan.
 type BlockArgs struct {
+	Key                      uuid.UUID
 	Name                     string
 	Descr                    string
 	EntranceDelay, ExitDelay time.Duration
@@ -343,6 +344,7 @@ func (b *BuildPlan) AddBlock(args BlockArgs) *BuildPlan {
 	case *workflow.Plan:
 		block := &workflow.Block{
 			Name:              args.Name,
+			Key:               args.Key,
 			Descr:             args.Descr,
 			EntranceDelay:     args.EntranceDelay,
 			ExitDelay:         args.ExitDelay,

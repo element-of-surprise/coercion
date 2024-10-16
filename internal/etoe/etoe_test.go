@@ -13,6 +13,7 @@ import (
 	"github.com/element-of-surprise/coercion/workflow/builder"
 	"github.com/element-of-surprise/coercion/workflow/storage/sqlite"
 	"github.com/element-of-surprise/coercion/workflow/utils/clone"
+	"github.com/element-of-surprise/coercion/workflow/utils/walk"
 	"github.com/google/uuid"
 	"github.com/kylelemons/godebug/pretty"
 
@@ -82,6 +83,7 @@ func TestEtoE(t *testing.T) {
 	}
 
 	seqs := &workflow.Sequence{
+		Key:   workflow.NewV7(),
 		Name:  "seq",
 		Descr: "seq",
 		Actions: []*workflow.Action{
@@ -103,6 +105,7 @@ func TestEtoE(t *testing.T) {
 
 	build.AddBlock(
 		builder.BlockArgs{
+			Key:           workflow.NewV7(),
 			Name:          "block0",
 			Descr:         "block0",
 			EntranceDelay: 1 * time.Second,
@@ -122,6 +125,18 @@ func TestEtoE(t *testing.T) {
 	plan, err := build.Plan()
 	if err != nil {
 		panic(err)
+	}
+
+	// Gives each item a unique key. We do this here because we clone the same checks.
+	for item := range walk.Plan(ctx, plan) {
+		switch obj := item.Value.(type) {
+		case *workflow.Action:
+			obj.Key = workflow.NewV7()
+		case *workflow.Sequence:
+			obj.Key = workflow.NewV7()
+		case *workflow.Checks:
+			obj.Key = workflow.NewV7()
+		}
 	}
 
 	vault, err := sqlite.New(ctx, "", reg, sqlite.WithInMemory())
