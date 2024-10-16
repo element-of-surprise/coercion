@@ -68,6 +68,13 @@ func (r reader) actionRowToAction(ctx context.Context, stmt *sqlite.Stmt) (*work
 	if err != nil {
 		return nil, fmt.Errorf("couldn't parse action id: %w", err)
 	}
+	k := stmt.GetText("key")
+	if k != "" {
+		a.Key, err = uuid.Parse(k)
+		if err != nil {
+			return nil, fmt.Errorf("couldn't parse action key: %w", err)
+		}
+	}
 	a.Name = stmt.GetText("name")
 	a.Descr = stmt.GetText("descr")
 	a.Plugin = stmt.GetText("plugin")
