@@ -32,6 +32,7 @@ WHERE id = $id`
 const fetchBlocksByID = `
 SELECT
 	id,
+	key,
 	plan_id,
 	name,
 	descr,
@@ -55,6 +56,7 @@ WHERE id = $id`
 const fetchChecksByID = `
 SELECT
 	id,
+	key,
 	plan_id,
 	actions,
 	delay,
@@ -67,6 +69,7 @@ where id = $id`
 const fetchSequencesByID = `
 SELECT
 	id,
+	key,
 	plan_id,
 	name,
 	descr,
@@ -80,6 +83,7 @@ where id = $id`
 const fetchActionsByID = `
 SELECT
 	id,
+	key,
 	plan_id,
 	name,
 	descr,
