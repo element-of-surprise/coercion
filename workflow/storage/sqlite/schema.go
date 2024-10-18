@@ -96,9 +96,9 @@ CREATE Table If Not Exists actions (
 );`
 
 var indexes = []string{
-	`CREATE INDEX idx_plans ON plans(id, group_id, state_status, state_start, state_end, reason);`,
-	`CREATE INDEX idx_blocks ON blocks(id, key, plan_id, state_status, state_start, state_end);`,
-	`CREATE INDEX idx_checks ON checks(id, key, plan_id, state_status, state_start, state_end);`,
-	`CREATE INDEX idx_sequences ON sequences(id, key, plan_id, state_status, state_start, state_end);`,
-	`CREATE INDEX idx_actions ON actions(id, key, plan_id, state_status, state_start, state_end, plugin);`,
+	`CREATE INDEX If Not Exists idx_plans ON plans(id, group_id, state_status, state_start, state_end, reason);`,
+	`CREATE INDEX If Not Exists idx_blocks ON blocks(id, key, plan_id, state_status, state_start, state_end);`,
+	`CREATE INDEX If Not Exists idx_checks ON checks(id, key, plan_id, state_status, state_start, state_end);`,
+	`CREATE INDEX If Not Exists idx_sequences ON sequences(id, key, plan_id, state_status, state_start, state_end);`,
+	`CREATE INDEX If Not Exists idx_actions ON actions(id, key, plan_id, state_status, state_start, state_end, plugin);`,
 }
