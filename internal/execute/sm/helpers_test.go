@@ -205,6 +205,9 @@ func TestParallelActionsRunner(t *testing.T) {
 func TestExecSeq(t *testing.T) {
 	t.Parallel()
 
+	start := time.Now().UTC()
+	end := start.Add(time.Second)
+
 	tests := []struct {
 		name      string
 		seq       *workflow.Sequence
@@ -224,6 +227,8 @@ func TestExecSeq(t *testing.T) {
 				Actions: []*workflow.Action{{Name: "action"}, {Name: "error"}},
 				State: &workflow.State{
 					Status: workflow.Failed,
+					Start:  start,
+					End:    end,
 				},
 			},
 			dbUpdates: []*workflow.Sequence{
@@ -232,6 +237,7 @@ func TestExecSeq(t *testing.T) {
 					Actions: []*workflow.Action{{Name: "action"}, {Name: "error"}},
 					State: &workflow.State{
 						Status: workflow.Running,
+						Start:  start,
 					},
 				},
 				{
@@ -239,6 +245,8 @@ func TestExecSeq(t *testing.T) {
 					Actions: []*workflow.Action{{Name: "action"}, {Name: "error"}},
 					State: &workflow.State{
 						Status: workflow.Failed,
+						Start:  start,
+						End:    end,
 					},
 				},
 			},
@@ -256,6 +264,8 @@ func TestExecSeq(t *testing.T) {
 				Actions: []*workflow.Action{{Name: "action1"}, {Name: "action2"}},
 				State: &workflow.State{
 					Status: workflow.Completed,
+					Start:  start,
+					End:    end,
 				},
 			},
 			dbUpdates: []*workflow.Sequence{
@@ -264,6 +274,7 @@ func TestExecSeq(t *testing.T) {
 					Actions: []*workflow.Action{{Name: "action1"}, {Name: "action2"}},
 					State: &workflow.State{
 						Status: workflow.Running,
+						Start:  start,
 					},
 				},
 				{
@@ -271,6 +282,8 @@ func TestExecSeq(t *testing.T) {
 					Actions: []*workflow.Action{{Name: "action1"}, {Name: "action2"}},
 					State: &workflow.State{
 						Status: workflow.Completed,
+						Start:  start,
+						End:    end,
 					},
 				},
 			},
@@ -279,9 +292,17 @@ func TestExecSeq(t *testing.T) {
 
 	for _, test := range tests {
 		updater := &fakeUpdater{}
+		callNum := 0
 		states := &States{
 			store:        updater,
 			actionRunner: fakeActionRunner,
+			nower: func() time.Time {
+				defer func() { callNum++ }()
+				if callNum == 0 {
+					return start
+				}
+				return end
+			},
 		}
 
 		err := states.execSeq(context.Background(), test.seq)

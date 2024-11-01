@@ -172,7 +172,7 @@ func (r Runner) exec(ctx context.Context, action *workflow.Action, plugin plugin
 	// We make sure the response is the expected type. If not, we return a permanent error.
 	// This case means the plugin is not behaving as expected and we should avoid conversion panics
 	// by not returning the junk they gave us.
-	if attempt.Err == nil {
+	if attempt.Resp != nil {
 		expect := plugin.Response()
 		if isType(attempt.Resp, expect) {
 			return nil

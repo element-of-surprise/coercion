@@ -1,7 +1,6 @@
 package embedded
 
 import (
-	"encoding/json"
 	"fmt"
 	"html/template"
 	"io/fs"
@@ -11,6 +10,8 @@ import (
 	"unsafe"
 
 	"github.com/element-of-surprise/coercion/workflow"
+
+	"github.com/go-json-experiment/json"
 )
 
 // Tmpls is a collection of templates that were embedded in the binary.
