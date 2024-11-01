@@ -213,6 +213,7 @@ func (s *States) ExecuteBlock(req statemachine.Request[Data]) statemachine.Reque
 	}
 
 	h.block.State.Status = workflow.Running
+	h.block.State.Start = s.now()
 	req.Next = s.BlockBypassChecks
 	return req
 }
@@ -407,6 +408,7 @@ func (s *States) BlockEnd(req statemachine.Request[Data]) statemachine.Request[D
 	h := req.Data.blocks[0]
 
 	defer func() {
+		h.block.State.End = s.now()
 		if err := s.store.UpdateBlock(req.Ctx, h.block); err != nil {
 			log.Fatalf("failed to write Block: %v", err)
 		}
@@ -508,8 +510,10 @@ func (s *States) PlanDeferredChecks(req statemachine.Request[Data]) statemachine
 // End is the final state of the state machine. This is always the last state, regardless of errors.
 // This will do the calculations of the final state of the Plan.
 func (s *States) End(req statemachine.Request[Data]) statemachine.Request[Data] {
+	plan := req.Data.Plan
 	defer func() {
-		if err := s.store.UpdatePlan(req.Ctx, req.Data.Plan); err != nil {
+		plan.State.End = s.now()
+		if err := s.store.UpdatePlan(req.Ctx, plan); err != nil {
 			log.Fatalf("failed to write Plan: %v", err)
 		}
 	}()
@@ -518,9 +522,6 @@ func (s *States) End(req statemachine.Request[Data]) statemachine.Request[Data] 
 	if req.Data.contCancel != nil {
 		req.Data.contCancel()
 	}
-
-	plan := req.Data.Plan
-	plan.State.End = s.now()
 
 	// Runs a new statemachine to calculate the final state of the Plan.
 	f := finalStates{}
@@ -677,10 +678,12 @@ func (s *States) runActionsParallel(ctx context.Context, actions []*workflow.Act
 // based on the retry policy.
 func (s *States) execSeq(ctx context.Context, seq *workflow.Sequence) error {
 	seq.State.Status = workflow.Running
+	seq.State.Start = s.now()
 	if err := s.store.UpdateSequence(ctx, seq); err != nil {
 		log.Fatalf("failed to write Sequence: %v", err)
 	}
 	defer func() {
+		seq.State.End = s.now()
 		if err := s.store.UpdateSequence(ctx, seq); err != nil {
 			log.Fatalf("failed to write Sequence: %v", err)
 		}
