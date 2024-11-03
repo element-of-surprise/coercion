@@ -174,14 +174,16 @@ func (r Runner) exec(ctx context.Context, action *workflow.Action, plugin plugin
 	// by not returning the junk they gave us.
 	if attempt.Resp != nil {
 		expect := plugin.Response()
-		if isType(attempt.Resp, expect) {
-			return nil
+		if !isType(attempt.Resp, expect) {
+			attempt.Err = &plugins.Error{
+				Message:   unexpectedTypeMsg(plugin, attempt.Resp, expect),
+				Permanent: true,
+			}
+			attempt.Resp = nil
 		}
-		attempt.Err = &plugins.Error{
-			Message:   unexpectedTypeMsg(plugin, attempt.Resp, expect),
-			Permanent: true,
-		}
-		attempt.Resp = nil
+	}
+	if attempt.Err == nil {
+		return nil
 	}
 	if attempt.Err.Permanent {
 		return errPermanent(attempt.Err)
