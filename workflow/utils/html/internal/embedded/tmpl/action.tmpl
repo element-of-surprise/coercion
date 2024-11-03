@@ -30,7 +30,7 @@
                 </tr>
                 <tr>
                     <th>Request</th>
-                    <td class="hover:bg-yellow-400">{{jsonMarshal .Req}}</td>
+                    <td class="hover:bg-yellow-400"><pre>{{ jsonMarshal .Req }}</pre></td>
                 </tr>
                 <tr>
                     <th>Start</th>
@@ -64,10 +64,10 @@
                     <tr class="group">
                         <td class="group-hover:bg-yellow-400">{{$i}}</td>
                         {{if .Err}}
-                            <td class="group-hover:bg-yellow-400">{{jsonMarshal .Err}}</td>
+                            <td class="group-hover:bg-yellow-400"><pre>{{ jsonMarshal .Err }}</pre></td>
                             <td class="group-hover:bg-yellow-400"><span style="color:red">Error</span></td>
                         {{else}}
-                            <td class="group-hover:bg-yellow-400">{{jsonMarshal .Resp}}</td>
+                            <td class="group-hover:bg-yellow-400"><pre>{{ jsonMarshal .Resp }}</pre></td>
                             <td class="group-hover:bg-yellow-400"><span style="color:green">Success</span></td>
                         {{end}}
                     </tr>
