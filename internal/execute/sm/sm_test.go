@@ -849,7 +849,7 @@ func TestBlockEnd(t *testing.T) {
 			}
 		}
 		if states.store.(*fakeUpdater).calls.Load() != 1 {
-			t.Errorf("TestBlockEnd(%s): got store calls == %v, want store calls == 1", test.name, states.store.(*fakeUpdater).calls)
+			t.Errorf("TestBlockEnd(%s): got store calls == %v, want store calls == 1", test.name, states.store.(*fakeUpdater).calls.Load())
 		}
 	}
 }

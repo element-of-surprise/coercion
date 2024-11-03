@@ -19,6 +19,7 @@ require (
 	github.com/rodaine/table v1.2.0
 	github.com/spf13/afero v1.11.0
 	github.com/spf13/viper v1.19.0
+	github.com/tidwall/pretty v1.2.1
 	zombiezen.com/go/sqlite v1.3.0
 )
 
