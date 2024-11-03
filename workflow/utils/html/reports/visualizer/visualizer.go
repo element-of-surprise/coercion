@@ -23,7 +23,7 @@ import (
 )
 
 var (
-	addr    = flag.String("addr", ":3000", "the host:port to listen on")
+	addr    = flag.String("addr", "127.0.0.1:3000", "the host:port to listen on")
 	uploads = flag.String("uploads", "", "custom directory to store uploaded files, by default this is [execdir]/uploads")
 )
 

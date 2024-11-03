@@ -1,6 +1,7 @@
 package embedded
 
 import (
+	"bytes"
 	"fmt"
 	"html/template"
 	"io/fs"
@@ -12,6 +13,7 @@ import (
 	"github.com/element-of-surprise/coercion/workflow"
 
 	"github.com/go-json-experiment/json"
+	"github.com/tidwall/pretty"
 )
 
 // Tmpls is a collection of templates that were embedded in the binary.
@@ -205,17 +207,32 @@ func isZeroTime(t time.Time) bool {
 	return t.IsZero()
 }
 
-func jsonMarshal(v any) string {
+var prettyOpts = &pretty.Options{
+	Width:    80,
+	Indent:   "\t",
+	SortKeys: false,
+}
+
+func jsonMarshal(v any) template.HTML {
 	if v == nil {
 		return ""
 	}
 
 	b, err := json.Marshal(v)
 	if err != nil {
-		return fmt.Sprintf("error marshalling JSON: %v", err)
+		return template.HTML(fmt.Sprintf("error marshalling JSON: %v", err))
 	}
 
-	return bytesToStr(b)
+	b = pretty.PrettyOptions(b, prettyOpts)
+
+	return template.HTML(bytesToStr(replaceAll(b)))
+}
+
+func replaceAll(b []byte) []byte {
+	b = bytes.ReplaceAll(b, []byte("\n"), []byte("<br />"))
+	b = bytes.ReplaceAll(b, []byte(`\n`), []byte("\n"))
+	b = bytes.ReplaceAll(b, []byte(`\t`), []byte("\t"))
+	return b
 }
 
 func bytesToStr(b []byte) string {
