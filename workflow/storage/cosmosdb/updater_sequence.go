@@ -1,0 +1,54 @@
+package cosmosdb
+
+import (
+	"context"
+	"sync"
+
+	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
+	"github.com/Azure/azure-sdk-for-go/sdk/data/azcosmos"
+	"github.com/element-of-surprise/coercion/internal/private"
+	"github.com/element-of-surprise/coercion/workflow"
+	"github.com/element-of-surprise/coercion/workflow/storage"
+)
+
+var _ storage.SequenceUpdater = sequenceUpdater{}
+
+// sequenceUpdater implements the storage.sequenceUpdater interface.
+type sequenceUpdater struct {
+	mu *sync.Mutex
+	Client
+
+	private.Storage
+}
+
+// UpdateSequence implements storage.SequenceUpdater.UpdateSequence().
+func (u sequenceUpdater) UpdateSequence(ctx context.Context, seq *workflow.Sequence) error {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+
+	patch := azcosmos.PatchOperations{}
+	patch.AppendReplace("/stateStatus", seq.State.Status)
+	patch.AppendReplace("/stateStart", seq.State.Start)
+	patch.AppendReplace("/stateEnd", seq.State.End)
+
+	itemOpt := u.ItemOptions()
+	if u.EnforceETag() {
+		var ifMatchEtag *azcore.ETag = nil
+		if seq.State.ETag != "" {
+			ifMatchEtag = (*azcore.ETag)(&seq.State.ETag)
+		}
+		itemOpt.IfMatchEtag = ifMatchEtag
+	}
+
+	// save the item into Cosmos DB
+	resp, err := patchItemWithRetry(ctx, u.GetContainerClient(), u.GetPK(), seq.ID.String(), patch, itemOpt)
+	if err != nil {
+		return err
+	}
+
+	if u.EnforceETag() {
+		seq.State.ETag = string(resp.ETag)
+	}
+
+	return nil
+}
