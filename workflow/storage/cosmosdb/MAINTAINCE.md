@@ -6,11 +6,11 @@
 
 - `reader.go` contains the `reader` struct.
 - `schema.go` contains the schema for the database.
-- `reader_actions.go` contains the methods to convert the `$actions` field to `Action` objects.
-- `reader_blocks.go` contains the methods to convert the `$blocks` field to `Block` objects.
-- `reader_checks.go` contains the methods to convert the `$pre_checks`, `$post_checks`, and `$cont_checks` fields to `Checks` objects.
-- `reader_plans.go` contains the methods to convert to locate a Plan in SQLITE by its ID and convert it to a `Plan` objects.
-- `reader_sequences.go` contains the methods to convert the `$sequences` field to `Sequence` objects.
+- `reader_actions.go` contains the methods to convert the `actions` document type to `Action` objects.
+- `reader_blocks.go` contains the methods to convert the `blocks` document type to `Block` objects.
+- `reader_checks.go` contains the methods to convert the `checks` document types to `Checks` objects.
+- `reader_plans.go` contains the methods to convert to locate a Plan in a CosmosDB container by its ID and convert it to a `Plan` object.
+- `reader_sequences.go` contains the methods to convert the `sequences` document type to `Sequence` objects.
 
 ### Writing
 
