@@ -5,7 +5,6 @@
 ### Reading
 
 - `reader.go` contains the `reader` struct.
-- `stmts.go` contains all the SQL statements used to query the database.
 - `schema.go` contains the schema for the database.
 - `reader_actions.go` contains the methods to convert the `$actions` field to `Action` objects.
 - `reader_blocks.go` contains the methods to convert the `$blocks` field to `Block` objects.
@@ -34,7 +33,7 @@
 
 `Read` is a fairly complicated process that involves reading the plan from the database and then creating the plan object. The plan object is a `*workflow.Plan` object. The plan object is then returned to the caller.
 
-This works by calling `fetchPlan` which reads the plan from the database. This grabs all the plan fields, however any field that would contain another `struct` either stores the object's ID as string uuid.UUIDv7 or a JSON encoded list of the uuid.UUIDv7 objects. This is because SQLITE does not support arrays.
+This works by calling `fetchPlan` which reads the plan from the database. This grabs all the plan fields, however any field that would contain another `struct` either stores the object's ID as string uuid.UUIDv7 or a list of the uuid.UUIDv7 objects. This is because these arrays are technically unbounded so normalization is used here, even though CosmosDB is a NoSQL database.
 
 There is a generic `fieldToCheck` method that will convert a field name to a check object. This is used to convert the `BypassCheck`, `PreCheck`, `PostCheck`, `ContCheck`, and `DeferredCheck` fields to their respective check objects.
 
@@ -52,7 +51,7 @@ Each of these methods are contained in their own sub files:
 
 ### Attempts
 
-`Action.Attempts` are stored as a JSON `[][]byte`. This is because SQLITE does not support arrays. Because we don't know the `Resp` type, we can't use a `json.Marshaler` to encode the `Attempts` field. This would lead to a `map[string]any` instead of the specific type the user expected.
+`Action.Attempts` are stored as a JSON `[][]byte`. Because we don't know the `Resp` type, we can't use a `json.Marshaler` to encode the `Attempts` field. This would lead to a `map[string]any` instead of the specific type the user expected.
 
 To fix this, because we decode initially into a `[][]byte`, we can create the slice of `Attempts` like so: `attempts := make([]*Attempts, len(rawAttempts))`. Then we can do the following:
 
@@ -72,9 +71,15 @@ This populates our `Resp` field with the correct type. The normal `encoding/json
 
 # Integration testing 
 
- go run testing/integration.go
 ```
-export AZURE_COSMOSDB_DBNAME="medbaydb"
+export AZURE_COSMOSDB_DBNAME="dbname"
 export AZURE_COSMOSDB_CNAME="underlaycx1"
-export AZURE_COSMOSDB_PK="controlplaneid"
+export AZURE_COSMOSDB_PK="resourceid"
 ```
+
+go run testing/integration.go --teardown=<false/true>
+
+To allow authentication via az login, you need the following comosdb sql roles:
+https://learn.microsoft.com/en-us/azure/cosmos-db/nosql/security/how-to-grant-data-plane-role-based-access?tabs=built-in-definition%2Ccsharp&pivots=azure-interface-cli
+
+In production, use an Azure identity.
