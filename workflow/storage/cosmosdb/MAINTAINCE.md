@@ -35,9 +35,9 @@
 
 This works by calling `fetchPlan` which reads the plan from the database. This grabs all the plan fields, however any field that would contain another `struct` either stores the object's ID as string uuid.UUIDv7 or a list of the uuid.UUIDv7 objects. This is because these arrays are technically unbounded so normalization is used here, even though CosmosDB is a NoSQL database.
 
-There is a generic `fieldToCheck` method that will convert a field name to a check object. This is used to convert the `BypassCheck`, `PreCheck`, `PostCheck`, `ContCheck`, and `DeferredCheck` fields to their respective check objects.
+There is a generic `idToCheck` method that will convert an ID to a check object. This is used to convert the `BypassCheck`, `PreCheck`, `PostCheck`, `ContCheck`, and `DeferredCheck` fields to their respective check objects.
 
-All sub-objects are converted in a similar way with a `fieldTo` method. This is used to convert the `Blocks`, `Sequences` and `Actions` fields to their respective objects.
+All sub-objects are converted in a similar way with an `idsTo` method. This is used to convert the `Blocks`, `Sequences` and `Actions` fields to their respective objects.
 
 Each of these methods are contained in their own sub files:
 
@@ -71,15 +71,22 @@ This populates our `Resp` field with the correct type. The normal `encoding/json
 
 # Integration testing 
 
+To run integration tests with an existing cosmosdb database instance, you need to set the following environment variables:
+
 ```
 export AZURE_COSMOSDB_DBNAME="dbname"
 export AZURE_COSMOSDB_CNAME="underlaycx1"
 export AZURE_COSMOSDB_PK="resourceid"
 ```
 
-go run testing/integration.go --teardown=<false/true>
+```
+go run testing/integration/main.go --teardown=<false/true>
+```
 
-To allow authentication via az login, you need the following comosdb sql roles:
+A new container will be created if one doesn't exist yet, otherwise the existing container will be used.
+Set teardown to true if you want to delete the container afterwards.
+
+To allow authentication via az login, you need the following comosdb sql roles (in addition to the normal Azure RBAC contributor role):
 https://learn.microsoft.com/en-us/azure/cosmos-db/nosql/security/how-to-grant-data-plane-role-based-access?tabs=built-in-definition%2Ccsharp&pivots=azure-interface-cli
 
 In production, use an Azure identity.
