@@ -119,7 +119,6 @@ func (d deleter) deleteBlocks(ctx context.Context, batch TransactionalBatch, blo
 		}
 	}
 
-	// should skip not found errors if part of the plan was deleted previously and this is being retried?
 	for _, block := range blocks {
 		batch.DeleteItem(block.ID.String(), itemOpt)
 	}

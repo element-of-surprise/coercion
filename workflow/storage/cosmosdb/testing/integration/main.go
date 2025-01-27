@@ -38,7 +38,6 @@ var plan *workflow.Plan
 
 type setters interface {
 	SetID(uuid.UUID)
-	GetState() *workflow.State
 	SetState(*workflow.State)
 }
 

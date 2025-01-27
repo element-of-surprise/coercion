@@ -149,8 +149,6 @@ type FakeCosmosDBClient struct {
 	partitionKey string
 	enforceETag  bool
 
-	// Need the following methods to be implemented:
-	// ExecuteTransactionalBatch, NewQueryItemsPager, NewTransactionalBatch, PatchItem, Read, ReadItem
 	client *FakeContainerClient
 
 	batch *FakeTransactionalBatch
@@ -194,13 +192,6 @@ func NewFakeCosmosDBClient() (*FakeCosmosDBClient, error) {
 		createCallCount: map[Type]int{},
 		deleteCallCount: map[Type]int{},
 	}, nil
-}
-
-func (cc *FakeContainerClient) ExecuteTransactionalBatch(ctx context.Context, b azcosmos.TransactionalBatch, o *azcosmos.TransactionalBatchOptions) (azcosmos.TransactionalBatchResponse, error) {
-	cc.mu.Lock()
-	defer cc.mu.Unlock()
-	// Use FakeCosmosDBClient ExecuteTransactionalBatch instead.
-	return azcosmos.TransactionalBatchResponse{}, nil
 }
 
 func (cc *FakeContainerClient) NewQueryItemsPager(query string, partitionKey azcosmos.PartitionKey, o *azcosmos.QueryOptions) *runtime.Pager[azcosmos.QueryItemsResponse] {
@@ -252,11 +243,6 @@ func getIDsFromQueryParameters(params []azcosmos.QueryParameter) map[uuid.UUID]s
 		return ids
 	}
 	return nil
-}
-
-func (cc *FakeContainerClient) NewTransactionalBatch(partitionKey azcosmos.PartitionKey) azcosmos.TransactionalBatch {
-	// Use FakeCosmosDBClient NewTransactionalBatch instead.
-	return azcosmos.TransactionalBatch{}
 }
 
 func (cc *FakeContainerClient) PatchItem(ctx context.Context, partitionKey azcosmos.PartitionKey, itemId string, ops azcosmos.PatchOperations, o *azcosmos.ItemOptions) (azcosmos.ItemResponse, error) {

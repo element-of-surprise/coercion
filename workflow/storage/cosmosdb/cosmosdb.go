@@ -1,6 +1,6 @@
 /*
 Package cosmosdb provides a cosmosdb-based storage implementation for workflow.Plan data. This is used
-to implement the storage.ReadWriter interface.
+to implement the storage.Vault interface.
 
 This package is for use only by the coercion.Workstream and any use outside of that is not
 supported.
@@ -28,7 +28,7 @@ import (
 	_ "embed"
 )
 
-// This validates that the ReadWriter type implements the storage.ReadWriter interface.
+// This validates that the Vault type implements the storage.Vault interface.
 var _ storage.Vault = &Vault{}
 
 // Vault implements the storage.Vault interface.
@@ -64,7 +64,7 @@ var backoff *exponential.Backoff
 func init() {
 	var err error
 	// This ensures that a custom retry policy is going to work. backoff is reusable.
-	// should this ibe different for read and write?
+	// should this be different for read and write?
 	backoff, err = exponential.New(exponential.WithPolicy(plugins.SecondsRetryPolicy()))
 	if err != nil {
 		fatalErr(slog.Default(), "failed to create backoff policy: %v", err)
@@ -102,7 +102,7 @@ func WithContainerProperties(props azcosmos.ContainerProperties) Option {
 }
 
 // WithItemOptions sets item options.
-// IfMatchEtag will be set during an operation, if appropriate.
+// IfMatchEtag (along with EnableContentResponseOnWrite) will be set during an operation, if appropriate.
 func WithItemOptions(opts azcosmos.ItemOptions) Option {
 	return func(r *Vault) error {
 		r.itemOpts = opts
@@ -122,9 +122,7 @@ func WithEnforceETag() Option {
 // ContainerClient is the interface for the cosmosdb container client.
 // This allows for faking the azcosmos container client.
 type ContainerClient interface {
-	ExecuteTransactionalBatch(context.Context, azcosmos.TransactionalBatch, *azcosmos.TransactionalBatchOptions) (azcosmos.TransactionalBatchResponse, error)
 	NewQueryItemsPager(string, azcosmos.PartitionKey, *azcosmos.QueryOptions) *runtime.Pager[azcosmos.QueryItemsResponse]
-	NewTransactionalBatch(azcosmos.PartitionKey) azcosmos.TransactionalBatch
 	Read(context.Context, *azcosmos.ReadContainerOptions) (azcosmos.ContainerResponse, error)
 	ReadItem(context.Context, azcosmos.PartitionKey, string, *azcosmos.ItemOptions) (azcosmos.ItemResponse, error)
 	PatchItem(context.Context, azcosmos.PartitionKey, string, azcosmos.PatchOperations, *azcosmos.ItemOptions) (azcosmos.ItemResponse, error)
@@ -137,8 +135,9 @@ type TransactionalBatch interface {
 }
 
 type setters interface {
+	// SetID is a setter for the ID field.
 	SetID(uuid.UUID)
-	GetState() *workflow.State
+	// SetState is a setter for the State settings.
 	SetState(*workflow.State)
 }
 
@@ -154,7 +153,7 @@ type Client interface {
 	GetPK() azcosmos.PartitionKey
 	// GetPKString returns the partition key as a string.
 	GetPKString() string
-	// NewTransactionalBatch is so that I can use fake TransactionalBatch
+	// NewTransactionalBatch returns a TransactionalBatch. This allows using a fake TransactionalBatch.
 	NewTransactionalBatch() TransactionalBatch
 	// ExecuteTransactionalBatch executes a transactional batch.
 	ExecuteTransactionalBatch(context.Context, TransactionalBatch, *azcosmos.TransactionalBatchOptions) (azcosmos.TransactionalBatchResponse, error)
@@ -177,18 +176,22 @@ type CosmosDBClient struct {
 	enforceETag bool
 }
 
+// GetContainerClient returns the container client.
 func (c *CosmosDBClient) GetContainerClient() ContainerClient {
 	return c.client
 }
 
+// GetPK returns the partition key.
 func (c *CosmosDBClient) GetPK() azcosmos.PartitionKey {
 	return partitionKey(c.partitionKey)
 }
 
+// GetPKString returns the partition key as a string.
 func (c *CosmosDBClient) GetPKString() string {
 	return c.partitionKey
 }
 
+// NewTransactionalBatch returns a TransactionalBatch. This allows using a fake TransactionalBatch.
 func (c *CosmosDBClient) NewTransactionalBatch() TransactionalBatch {
 	batch := c.client.NewTransactionalBatch(c.GetPK())
 	return &batch
@@ -263,19 +266,10 @@ func New(ctx context.Context, dbName, cName, pk string, cred azcore.TokenCredent
 		return nil, err
 	}
 
-	// create container for customer? or container per table for all customers?
-	// multiple containers per customer?
-	// What happens if the connection is broken? The credential will expire at some
-	// point so the client will need to be recreated before that happens.
-	// The GetContainerClient function could return a new client every time, but it would
-	// be nice to reuse the connection for the entire plan execution, including all of the
-	// little updates.
 	cc, err := r.createContainerClient(ctx, client)
 	if err != nil {
 		return nil, err
 	}
-
-	// create pool to limit clients connections or nah?
 
 	mu := &sync.Mutex{}
 
@@ -321,12 +315,6 @@ func (v *Vault) createContainerClient(
 			slog.Default().Info(activityID)
 		}
 	}
-	// activityID, err := recreateContainer(ctx, azCosmosClient, dbName, dbEndpoint, c.name, c.indexPaths)
-	// if err != nil {
-	// 	return nil, fmt.Errorf("failed to create Cosmos DB container: container=%s. %w", c.name, err)
-	// } else {
-	// 	slog.Default().Info(activityID)
-	// }
 
 	cc, err := azCosmosClient.NewContainer(v.dbName, v.cName)
 	if err != nil {
@@ -347,8 +335,7 @@ func (v *Vault) createContainerClient(
 	return client, nil
 }
 
-// For creating if it doesn't exist? should probably get precreated for multiple customers in bicep template though.
-// create a container for each customer instead of containers instead of using partition key?
+// createContainer creates a container. Check for existence first.
 func (v *Vault) createContainer(ctx context.Context, database *azcosmos.DatabaseClient, indexPaths []azcosmos.IncludedPath) (string, error) {
 	v.containerProps.ID = v.cName
 	v.containerProps.PartitionKeyDefinition = azcosmos.PartitionKeyDefinition{
@@ -377,6 +364,7 @@ func (v *Vault) createContainer(ctx context.Context, database *azcosmos.Database
 	return response.ActivityID, nil
 }
 
+// containerExists checks if the container exists.
 func (v *Vault) containerExists(ctx context.Context, client *azcosmos.Client) (bool, error) {
 	cc, err := client.NewContainer(v.dbName, v.cName)
 	if err != nil {
@@ -401,42 +389,7 @@ func (v *Vault) containerExists(ctx context.Context, client *azcosmos.Client) (b
 	return true, nil
 }
 
-// for testing only
-func (v *Vault) recreateContainer(ctx context.Context, client *azcosmos.Client, indexPaths []azcosmos.IncludedPath) (string, error) {
-	exists, err := v.containerExists(ctx, client)
-	if err != nil {
-		return "", err
-	}
-	cc, err := client.NewContainer(v.dbName, v.cName)
-	if err != nil {
-		return "", fmt.Errorf(
-			"failed to connect to Cosmos DB container: endpoint=%q, container=%q. %w",
-			v.endpoint,
-			v.cName,
-			err,
-		)
-	}
-
-	if exists {
-		_, err = deleteContainer(ctx, cc)
-		if err != nil {
-			return "", fmt.Errorf("failed to delete Cosmos DB container: container=%s. %w", v.cName, err)
-		}
-	}
-
-	dc, err := client.NewDatabase(v.dbName)
-	if err != nil {
-		return "", fmt.Errorf("failed to create Cosmos DB database client: %w", err)
-	}
-	activityID, err := v.createContainer(ctx, dc, indexPaths)
-	if err != nil && !IsConflict(err) {
-		return "", fmt.Errorf("failed to create Cosmos DB container: container=%s. %w", v.cName, err)
-	}
-
-	return activityID, nil
-}
-
-// For deleting in testing.
+// deleteContainer deletes a container. This is for testing only.
 func deleteContainer(ctx context.Context, cc *azcosmos.ContainerClient) (string, error) {
 	response, err := cc.Delete(ctx, &azcosmos.DeleteContainerOptions{})
 	if err != nil {
@@ -445,7 +398,7 @@ func deleteContainer(ctx context.Context, cc *azcosmos.ContainerClient) (string,
 	return response.ActivityID, nil
 }
 
-// teardown is for testing only.
+// Teardown deletes a container. This is for testing only.
 func Teardown(ctx context.Context, dbName, cName string, cred azcore.TokenCredential, clientOpts *azcosmos.ClientOptions) error {
 	endpoint := fmt.Sprintf("https://%s.documents.azure.com:443/", dbName)
 

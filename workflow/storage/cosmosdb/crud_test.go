@@ -2,7 +2,6 @@ package cosmosdb
 
 import (
 	"context"
-	"fmt"
 	"sync"
 	"testing"
 
