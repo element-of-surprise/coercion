@@ -71,9 +71,6 @@ func (d deleter) deletePlan(ctx context.Context, plan *workflow.Plan) error {
 	}
 
 	itemOpt := &azcosmos.TransactionalBatchItemOptions{}
-	// Do I care about etag here? I don't have it for the other items unless I read.
-	// Once we're at the point where a plan needs to be deleted, I assume it's completed (whether failed or successful)
-	// and no important operations will take place on this other than to delete.
 	if d.EnforceETag() {
 		var ifMatchEtag *azcore.ETag = nil
 		if plan.State.ETag != "" {

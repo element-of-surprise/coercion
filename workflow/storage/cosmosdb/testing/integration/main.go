@@ -226,6 +226,8 @@ func main() {
 	if diff := pretty.Compare(plan, result); diff != "" {
 		fatalErr(logger, "mismatch in submitted and returned plan with ID %s: returned plan: -want/+got:\n%s", plan.ID, diff)
 	}
+
+	log.Println("Success")
 }
 
 // msiCred returns a managed identity credential.
