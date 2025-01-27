@@ -23,8 +23,6 @@ import (
 	"github.com/google/uuid"
 )
 
-// https://dev.azure.com/msazure/CloudNativeCompute/_git/aks-rp?path=/fleet/pkg/cosmosdb/testing/pager.go
-
 //+gocover:ignore:file No need to test mock store.
 
 var (
@@ -143,8 +141,8 @@ func init() {
 
 // needs to implement cosmosdb.go client interface
 
-// FakeCosmosDBClient has the methods for all of Create/Update/Delete/Query operation
-// on data model.
+// FakeCosmosDBClient has the methods for all of Create/Update/Delete/Query operations
+// on coercion data.
 type FakeCosmosDBClient struct {
 	partitionKey string
 	enforceETag  bool
@@ -162,6 +160,7 @@ type FakeCosmosDBClient struct {
 	deleteErr       error
 }
 
+// FakeContainerClient has the methods for operations on single container items.
 type FakeContainerClient struct {
 	mu sync.Mutex
 
@@ -174,6 +173,7 @@ type FakeContainerClient struct {
 	listErr error
 }
 
+// NewFakeCosmosDBClient returns a new FakeCosmosDBClient.
 func NewFakeCosmosDBClient() (*FakeCosmosDBClient, error) {
 	documents := make(map[string][]byte)
 
@@ -194,6 +194,7 @@ func NewFakeCosmosDBClient() (*FakeCosmosDBClient, error) {
 	}, nil
 }
 
+// NewQueryItemsPager returns a new QueryItemsPager with items from the fake cosmosdb documents.
 func (cc *FakeContainerClient) NewQueryItemsPager(query string, partitionKey azcosmos.PartitionKey, o *azcosmos.QueryOptions) *runtime.Pager[azcosmos.QueryItemsResponse] {
 	// convert map of documents to slice
 	queryItems := [][]byte{}
@@ -214,7 +215,6 @@ func (cc *FakeContainerClient) NewQueryItemsPager(query string, partitionKey azc
 			if _, ok := ids[c.ID]; len(ids) > 0 && !ok {
 				continue
 			}
-			// else set etag?
 			queryItems = append(queryItems, item)
 		}
 	}
@@ -231,6 +231,7 @@ func (cc *FakeContainerClient) NewQueryItemsPager(query string, partitionKey azc
 		},
 	})
 }
+
 func getIDsFromQueryParameters(params []azcosmos.QueryParameter) map[uuid.UUID]struct{} {
 	for _, param := range params {
 		if param.Name != "@ids" {
@@ -245,6 +246,7 @@ func getIDsFromQueryParameters(params []azcosmos.QueryParameter) map[uuid.UUID]s
 	return nil
 }
 
+// PatchItem increments the patchCallCount for the item type.
 func (cc *FakeContainerClient) PatchItem(ctx context.Context, partitionKey azcosmos.PartitionKey, itemId string, ops azcosmos.PatchOperations, o *azcosmos.ItemOptions) (azcosmos.ItemResponse, error) {
 	if cc.patchErr != nil {
 		return azcosmos.ItemResponse{}, cc.patchErr
@@ -253,7 +255,7 @@ func (cc *FakeContainerClient) PatchItem(ctx context.Context, partitionKey azcos
 	if !ok {
 		return azcosmos.ItemResponse{}, runtime.NewResponseError(&http.Response{StatusCode: http.StatusNotFound})
 	}
-	// just get type from documents map and validate it was called?
+	// Don't bother to actually patch the item. Just get type from documents map and validate it was called.
 	c, err := getCommonFields(item)
 	if err != nil {
 		return azcosmos.ItemResponse{}, err
@@ -262,10 +264,7 @@ func (cc *FakeContainerClient) PatchItem(ctx context.Context, partitionKey azcos
 	return azcosmos.ItemResponse{}, nil
 }
 
-func (cc *FakeContainerClient) Read(ctx context.Context, o *azcosmos.ReadContainerOptions) (azcosmos.ContainerResponse, error) {
-	return azcosmos.ContainerResponse{}, nil
-}
-
+// ReadItem returns the item from the documents map.
 func (cc *FakeContainerClient) ReadItem(ctx context.Context, partitionKey azcosmos.PartitionKey, itemId string, o *azcosmos.ItemOptions) (azcosmos.ItemResponse, error) {
 	item, ok := cc.documents[itemId]
 	if !ok {
@@ -276,6 +275,7 @@ func (cc *FakeContainerClient) ReadItem(ctx context.Context, partitionKey azcosm
 	}, nil
 }
 
+// FakeTransactionalBatch is a fake implementation of TransactionalBatch.
 type FakeTransactionalBatch struct {
 	// map of id to object
 	createItems map[string][]byte
@@ -283,6 +283,7 @@ type FakeTransactionalBatch struct {
 	deleteItems []string
 }
 
+// CreateItem adds an item to the createItems map.
 func (b *FakeTransactionalBatch) CreateItem(item []byte, o *azcosmos.TransactionalBatchItemOptions) {
 	c, err := getCommonFields(item)
 	if err != nil {
@@ -291,22 +292,27 @@ func (b *FakeTransactionalBatch) CreateItem(item []byte, o *azcosmos.Transaction
 	b.createItems[c.ID.String()] = item
 }
 
+// DeleteItem adds an item to the deleteItems map.
 func (b *FakeTransactionalBatch) DeleteItem(itemId string, o *azcosmos.TransactionalBatchItemOptions) {
 	b.deleteItems = append(b.deleteItems, itemId)
 }
 
+// GetContainerClient returns the container client.
 func (c *FakeCosmosDBClient) GetContainerClient() ContainerClient {
 	return c.client
 }
 
+// GetPK returns the partition key.
 func (c *FakeCosmosDBClient) GetPK() azcosmos.PartitionKey {
 	return partitionKey(c.partitionKey)
 }
 
+// GetPKString returns the partition key as a string.
 func (c *FakeCosmosDBClient) GetPKString() string {
 	return c.partitionKey
 }
 
+// NewTransactionalBatch returns a new fake TransactionalBatch.
 func (c *FakeCosmosDBClient) NewTransactionalBatch() TransactionalBatch {
 	// initialize maps
 	return &FakeTransactionalBatch{
@@ -315,10 +321,12 @@ func (c *FakeCosmosDBClient) NewTransactionalBatch() TransactionalBatch {
 	}
 }
 
+// SetBatch sets the batch.
 func (b *FakeCosmosDBClient) SetBatch(batch TransactionalBatch) {
 	b.batch = batch.(*FakeTransactionalBatch)
 }
 
+// ItemOptions returns the item options.
 func (b *FakeCosmosDBClient) ItemOptions() *azcosmos.ItemOptions {
 	return &azcosmos.ItemOptions{}
 }
@@ -328,6 +336,7 @@ func (c *FakeCosmosDBClient) EnforceETag() bool {
 	return c.enforceETag
 }
 
+// ExecuteTransactionalBatch executes the fake transactional batch by adding to or deleting from the documents map.
 func (c *FakeCosmosDBClient) ExecuteTransactionalBatch(ctx context.Context, b TransactionalBatch, o *azcosmos.TransactionalBatchOptions) (azcosmos.TransactionalBatchResponse, error) {
 	for id, item := range c.batch.createItems {
 		c.client.documents[id] = item
