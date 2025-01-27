@@ -42,7 +42,7 @@ func patchItemWithRetry(ctx context.Context, cc ContainerClient, pk azcosmos.Par
 	patchItem := func(ctx context.Context, r exponential.Record) error {
 		resp, err = cc.PatchItem(ctx, pk, id, patch, itemOpt)
 		if err != nil {
-			if r.Attempt >= 5 {
+			if !isRetriableError(err) || r.Attempt >= 5 {
 				return fmt.Errorf("%w: %w", err, exponential.ErrPermanent)
 			}
 			return err

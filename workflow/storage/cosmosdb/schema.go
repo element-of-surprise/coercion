@@ -29,8 +29,7 @@ const (
 )
 
 type plansEntry struct {
-	PartitionKey string `json:"partitionKey,omitempty"`
-	// todo: make type
+	PartitionKey   string                 `json:"partitionKey,omitempty"`
 	Type           Type                   `json:"type,omitempty"`
 	ID             uuid.UUID              `json:"id,omitempty"`
 	GroupID        uuid.UUID              `json:"groupID,omitempty"`

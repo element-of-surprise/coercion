@@ -39,10 +39,9 @@ func (u creator) Create(ctx context.Context, plan *workflow.Plan) error {
 		return fmt.Errorf("plan with ID(%s) already exists", plan.ID)
 	}
 
-	// need to be super careful about retriable and permanent errors.
 	commitPlan := func(ctx context.Context, r exponential.Record) error {
 		if err = u.commitPlan(ctx, plan); err != nil {
-			if r.Attempt >= 5 {
+			if !isRetriableError(err) || r.Attempt >= 5 {
 				return fmt.Errorf("%w: %w", err, exponential.ErrPermanent)
 			}
 			return err

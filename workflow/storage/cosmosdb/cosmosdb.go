@@ -101,7 +101,7 @@ func WithContainerProperties(props azcosmos.ContainerProperties) Option {
 	}
 }
 
-// WithItemOptions sets item options.
+// WithItemOptions sets item options. This is used for reads and updates.
 // IfMatchEtag (along with EnableContentResponseOnWrite) will be set during an operation, if appropriate.
 func WithItemOptions(opts azcosmos.ItemOptions) Option {
 	return func(r *Vault) error {

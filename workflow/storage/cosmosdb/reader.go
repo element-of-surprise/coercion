@@ -2,16 +2,13 @@ package cosmosdb
 
 import (
 	"context"
-	"errors"
 	"fmt"
-	"net/http"
 	"strings"
 
 	"github.com/element-of-surprise/coercion/plugins/registry"
 	"github.com/element-of-surprise/coercion/workflow"
 	"github.com/element-of-surprise/coercion/workflow/storage"
 
-	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
 	"github.com/Azure/azure-sdk-for-go/sdk/data/azcosmos"
 	"github.com/go-json-experiment/json"
 	"github.com/google/uuid"
@@ -32,19 +29,6 @@ type reader struct {
 	reg *registry.Register
 }
 
-// IsNotFound checks if the error that Azure returned is 404.
-func IsNotFound(err error) bool {
-	var resErr *azcore.ResponseError
-	return errors.As(err, &resErr) && resErr.StatusCode == http.StatusNotFound
-}
-
-// IsConflict checks if the error indicates there is a resource conflict.
-// Useful to check if a resource already exists in testing.
-func IsConflict(err error) bool {
-	var resErr *azcore.ResponseError
-	return errors.As(err, &resErr) && resErr.StatusCode == http.StatusConflict
-}
-
 // Exists returns true if the Plan ID exists in the storage.
 func (r reader) Exists(ctx context.Context, id uuid.UUID) (bool, error) {
 	_, err := r.GetContainerClient().ReadItem(ctx, r.GetPK(), id.String(), r.ItemOptions())
@@ -59,14 +43,12 @@ func (r reader) Exists(ctx context.Context, id uuid.UUID) (bool, error) {
 
 // Read returns a Plan from the storage.
 func (r reader) Read(ctx context.Context, id uuid.UUID) (*workflow.Plan, error) {
-	// need to be super careful about retriable and permanent errors.
 	var plan *workflow.Plan
 	var err error
 	fetchPlan := func(ctx context.Context, rec exponential.Record) error {
 		plan, err = r.fetchPlan(ctx, id)
 		if err != nil {
-			// if !errors.IsRetriableK8sError(err) || r.Attempt >= 5 {
-			if rec.Attempt >= 5 {
+			if !isRetriableError(err) || rec.Attempt >= 5 {
 				return fmt.Errorf("%w: %w", err, exponential.ErrPermanent)
 			}
 			return err
@@ -207,9 +189,8 @@ func (r reader) List(ctx context.Context, limit int) (chan storage.Stream[storag
 	return results, nil
 }
 
-// listResultsFunc is a helper function to convert a SQLite statement into a ListResult.
+// listResultsFunc is a helper function to convert a CosmosDB document into a ListResult.
 func (r reader) listResultsFunc(item []byte) (storage.ListResult, error) {
-	// still need to iterate through items here: response has Items of type [][]byte
 	var err error
 	var resp plansEntry
 	err = json.Unmarshal(item, &resp)

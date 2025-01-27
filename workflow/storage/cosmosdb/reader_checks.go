@@ -11,8 +11,8 @@ import (
 	"github.com/google/uuid"
 )
 
-// idToCheck reads a field from the statement and returns a workflow.Checks  object. stmt must be
-// from a Plan or Block query.
+// idToCheck reads a field from the CosmosDB docuemnt and returns a workflow.Checks  object.
+// The document must be from a Plan or Block query.
 func (p reader) idToCheck(ctx context.Context, id uuid.UUID) (*workflow.Checks, error) {
 	if id == uuid.Nil {
 		return nil, nil
@@ -24,7 +24,6 @@ func (p reader) idToCheck(ctx context.Context, id uuid.UUID) (*workflow.Checks, 
 func (p reader) fetchChecksByID(ctx context.Context, id uuid.UUID) (*workflow.Checks, error) {
 	res, err := p.GetContainerClient().ReadItem(ctx, p.GetPK(), id.String(), p.ItemOptions())
 	if err != nil {
-		// return p, fmt.Errorf("failed to read item through Cosmos DB API: %w", cosmosErr(err))
 		return nil, fmt.Errorf("couldn't fetch checks by id: %w", err)
 	}
 	check, err := p.docToChecks(ctx, &res)

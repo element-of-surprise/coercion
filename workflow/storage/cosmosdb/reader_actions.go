@@ -73,8 +73,6 @@ func (r reader) fetchActionsByIDs(ctx context.Context, ids []uuid.UUID) ([]*work
 	return actions, nil
 }
 
-var emptyAttemptsJSON = []byte(`[]`)
-
 // docToAction converts a cosmosdb document to a workflow.Action.
 func (r reader) docToAction(ctx context.Context, response []byte) (*workflow.Action, error) {
 	var err error

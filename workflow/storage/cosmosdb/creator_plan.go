@@ -41,14 +41,10 @@ func (u creator) commitPlan(ctx context.Context, p *workflow.Plan) (err error) {
 	if err != nil {
 		return fmt.Errorf("failed to marshal item: %w", err)
 	}
-	batch.CreateItem(itemJson, nil)
+	batch.CreateItem(itemJson, &azcosmos.TransactionalBatchItemOptions{})
 	u.SetBatch(batch)
 
-	opts := &azcosmos.TransactionalBatchOptions{
-		// EnableContentResponseOnWrite: u.ItemOptions().EnableContentResponseOnWrite,
-	}
-
-	if _, err = u.ExecuteTransactionalBatch(ctx, batch, opts); err != nil {
+	if _, err = u.ExecuteTransactionalBatch(ctx, batch, &azcosmos.TransactionalBatchOptions{}); err != nil {
 		return fmt.Errorf("failed to create plan through Cosmos DB API: %w", err)
 	}
 
@@ -133,7 +129,7 @@ func (u creator) commitChecks(ctx context.Context, batch TransactionalBatch, pla
 	if err != nil {
 		return fmt.Errorf("failed to marshal item: %w", err)
 	}
-	batch.CreateItem(itemJson, nil)
+	batch.CreateItem(itemJson, &azcosmos.TransactionalBatchItemOptions{})
 
 	return nil
 }
@@ -182,7 +178,7 @@ func (u creator) commitBlock(ctx context.Context, batch TransactionalBatch, plan
 	if err != nil {
 		return fmt.Errorf("failed to marshal item: %w", err)
 	}
-	batch.CreateItem(itemJson, nil)
+	batch.CreateItem(itemJson, &azcosmos.TransactionalBatchItemOptions{})
 
 	return nil
 }
@@ -245,7 +241,7 @@ func (u creator) commitSequence(ctx context.Context, batch TransactionalBatch, p
 	if err != nil {
 		return fmt.Errorf("failed to marshal item: %w", err)
 	}
-	batch.CreateItem(itemJson, nil)
+	batch.CreateItem(itemJson, &azcosmos.TransactionalBatchItemOptions{})
 
 	return nil
 }
@@ -282,7 +278,7 @@ func (u creator) commitAction(ctx context.Context, batch TransactionalBatch, pla
 	if err != nil {
 		return fmt.Errorf("failed to marshal item: %w", err)
 	}
-	batch.CreateItem(itemJson, nil)
+	batch.CreateItem(itemJson, &azcosmos.TransactionalBatchItemOptions{})
 
 	return nil
 }
