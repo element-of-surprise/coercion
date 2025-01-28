@@ -47,6 +47,9 @@ var (
 
 func TestEtoE(t *testing.T) {
 	flag.Parse()
+	if err := validateFlags(); err != nil {
+		t.Fatalf("TestEtoE: failed to validate flags: %v", err)
+	}
 
 	ctx := context.Background()
 	logger := slog.Default()
@@ -159,20 +162,21 @@ func TestEtoE(t *testing.T) {
 		}
 	}
 
-	cred, err := msiCred(*msi)
-	if err != nil {
-		fatalErr(logger, "Failed to create credential: %v", err)
-	}
-
+	var cred azcore.TokenCredential
 	if *vaultType == "cosmosdb" {
-		logger.Info(fmt.Sprintf("Using cosmosdb: %s, %s, %s", *dbName, *cName, *pk))
+		cred, err = msiCred(*msi)
+		if err != nil {
+			panic(err)
+		}
 	}
 
 	if *teardown == true {
 		defer func() {
-			// Teardown the cosmosdb container
-			if err := cosmosdb.Teardown(ctx, *dbName, *cName, cred, nil); err != nil {
-				fatalErr(logger, "Failed to teardown: %v", err)
+			if *vaultType == "cosmosdb" {
+				// Teardown the cosmosdb container
+				if err := cosmosdb.Teardown(ctx, *dbName, *cName, cred, nil); err != nil {
+					panic(err)
+				}
 			}
 		}()
 	}
@@ -182,9 +186,10 @@ func TestEtoE(t *testing.T) {
 	case "sqlite":
 		vault, err = sqlite.New(ctx, "", reg, sqlite.WithInMemory())
 	case "cosmosdb":
+		logger.Info(fmt.Sprintf("TestEtoE: Using cosmosdb: %s, %s, %s", *dbName, *cName, *pk))
 		vault, err = cosmosdb.New(ctx, *dbName, *cName, *pk, cred, reg, cosmosdb.WithEnforceETag())
 	default:
-		fatalErr(logger, "Unknown storage vualt type: %s", *vaultType)
+		panic(fmt.Errorf("TestEtoE: unknown storage vault type: %s", *vaultType))
 	}
 	if err != nil {
 		panic(err)
@@ -287,6 +292,7 @@ func testPlugResp(action *workflow.Action, want string) error {
 
 func TestBypassPlan(t *testing.T) {
 	ctx := context.Background()
+	logger := slog.Default()
 
 	plugCheck := &testplugin.Plugin{
 		AlwaysRespond: true,
@@ -371,7 +377,35 @@ func TestBypassPlan(t *testing.T) {
 		panic(err)
 	}
 
-	vault, err := sqlite.New(ctx, "", reg, sqlite.WithInMemory())
+	var cred azcore.TokenCredential
+	if *vaultType == "cosmosdb" {
+		cred, err = msiCred(*msi)
+		if err != nil {
+			panic(err)
+		}
+	}
+
+	if *teardown == true {
+		defer func() {
+			if *vaultType == "cosmosdb" {
+				// Teardown the cosmosdb container
+				if err := cosmosdb.Teardown(ctx, *dbName, *cName, cred, nil); err != nil {
+					panic(err)
+				}
+			}
+		}()
+	}
+
+	var vault storage.Vault
+	switch *vaultType {
+	case "sqlite":
+		vault, err = sqlite.New(ctx, "", reg, sqlite.WithInMemory())
+	case "cosmosdb":
+		logger.Info(fmt.Sprintf("TestBypassPlan: Using cosmosdb: %s, %s, %s", *dbName, *cName, *pk))
+		vault, err = cosmosdb.New(ctx, *dbName, *cName, *pk, cred, reg, cosmosdb.WithEnforceETag())
+	default:
+		panic(fmt.Errorf("TestBypassPlan: unknown storage vault type: %s", *vaultType))
+	}
 	if err != nil {
 		panic(err)
 	}
@@ -417,6 +451,7 @@ func TestBypassPlan(t *testing.T) {
 
 func TestBypassBlock(t *testing.T) {
 	ctx := context.Background()
+	logger := slog.Default()
 
 	plugCheck := &testplugin.Plugin{
 		AlwaysRespond: true,
@@ -525,7 +560,35 @@ func TestBypassBlock(t *testing.T) {
 		panic(err)
 	}
 
-	vault, err := sqlite.New(ctx, "", reg, sqlite.WithInMemory())
+	var cred azcore.TokenCredential
+	if *vaultType == "cosmosdb" {
+		cred, err = msiCred(*msi)
+		if err != nil {
+			panic(err)
+		}
+	}
+
+	if *teardown == true {
+		defer func() {
+			if *vaultType == "cosmosdb" {
+				// Teardown the cosmosdb container
+				if err := cosmosdb.Teardown(ctx, *dbName, *cName, cred, nil); err != nil {
+					panic(err)
+				}
+			}
+		}()
+	}
+
+	var vault storage.Vault
+	switch *vaultType {
+	case "sqlite":
+		vault, err = sqlite.New(ctx, "", reg, sqlite.WithInMemory())
+	case "cosmosdb":
+		logger.Info(fmt.Sprintf("TestBypassBlock: Using cosmosdb: %s, %s, %s", *dbName, *cName, *pk))
+		vault, err = cosmosdb.New(ctx, *dbName, *cName, *pk, cred, reg, cosmosdb.WithEnforceETag())
+	default:
+		panic(fmt.Errorf("TestBypassBlock: unknown storage vault type: %s", *vaultType))
+	}
 	if err != nil {
 		panic(err)
 	}
@@ -598,6 +661,21 @@ func TestBypassBlock(t *testing.T) {
 	}
 }
 
+func validateFlags() error {
+	if *vaultType == "cosmosdb" {
+		if *dbName == "" {
+			return fmt.Errorf("missing db name")
+		}
+		if *cName == "" {
+			return fmt.Errorf("missing container name")
+		}
+		if *pk == "" {
+			return fmt.Errorf("missing partition key")
+		}
+	}
+	return nil
+}
+
 // msiCred returns a managed identity credential.
 func msiCred(msi string) (azcore.TokenCredential, error) {
 	if msi != "" {
@@ -621,10 +699,4 @@ func msiCred(msi string) (azcore.TokenCredential, error) {
 
 	log.Println("Authentication is using az cli token.")
 	return azCred, nil
-}
-
-func fatalErr(logger *slog.Logger, msg string, args ...any) {
-	s := fmt.Sprintf(msg, args...)
-	logger.Error(s, "fatal", "true")
-	os.Exit(1)
 }
