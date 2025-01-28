@@ -16,7 +16,6 @@ func IsNotFound(err error) bool {
 }
 
 // IsConflict checks if the error indicates there is a resource conflict.
-// Useful to check if a resource already exists in testing.
 func IsConflict(err error) bool {
 	var resErr *azcore.ResponseError
 	return errors.As(err, &resErr) && resErr.StatusCode == http.StatusConflict

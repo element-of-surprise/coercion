@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
-	"os"
 	"sync"
 	"time"
 
@@ -38,14 +37,21 @@ var (
 )
 
 func init() {
-	plan = newTestPlan()
+	plan = NewTestPlan()
 
 	// test with multiple plans in storage
-	plan1 = newTestPlan()
-	plan2 = newTestPlan()
+	plan1 = NewTestPlan()
+	plan2 = NewTestPlan()
 }
 
-func newTestPlan() *workflow.Plan {
+type setters interface {
+	// SetID is a setter for the ID field.
+	SetID(uuid.UUID)
+	// SetState is a setter for the State settings.
+	SetState(*workflow.State)
+}
+
+func NewTestPlan() *workflow.Plan {
 	var plan *workflow.Plan
 	ctx := context.Background()
 
@@ -135,8 +141,6 @@ func newTestPlan() *workflow.Plan {
 	if err != nil {
 		panic(err)
 	}
-	// need to set to get this to match perfectly
-	// plan.SubmitTime = time.Now().UTC()
 
 	for item := range walk.Plan(context.Background(), plan) {
 		setter := item.Value.(setters)
@@ -173,19 +177,6 @@ type FakeCosmosDBClient struct {
 	deleteErr       error
 }
 
-// FakeContainerClient has the methods for operations on single container items.
-type FakeContainerClient struct {
-	mu sync.Mutex
-
-	patchCallCount map[Type]int
-	patchErr       error
-	patchErrs      []error
-
-	documents map[string][]byte
-
-	listErr error
-}
-
 // NewFakeCosmosDBClient returns a new FakeCosmosDBClient.
 func NewFakeCosmosDBClient() (*FakeCosmosDBClient, error) {
 	documents := make(map[string][]byte)
@@ -205,6 +196,90 @@ func NewFakeCosmosDBClient() (*FakeCosmosDBClient, error) {
 		createCallCount: map[Type]int{},
 		deleteCallCount: map[Type]int{},
 	}, nil
+}
+
+// GetContainerClient returns the container client.
+func (c *FakeCosmosDBClient) GetContainerClient() ContainerClient {
+	return c.client
+}
+
+// GetPK returns the partition key.
+func (c *FakeCosmosDBClient) GetPK() azcosmos.PartitionKey {
+	return partitionKey(c.partitionKey)
+}
+
+// GetPKString returns the partition key as a string.
+func (c *FakeCosmosDBClient) GetPKString() string {
+	return c.partitionKey
+}
+
+// NewTransactionalBatch returns a new fake TransactionalBatch.
+func (c *FakeCosmosDBClient) NewTransactionalBatch() TransactionalBatch {
+	// initialize maps
+	return &FakeTransactionalBatch{
+		createItems: map[string][]byte{},
+		deleteItems: []string{},
+	}
+}
+
+// SetBatch sets the batch.
+func (b *FakeCosmosDBClient) SetBatch(batch TransactionalBatch) {
+	b.batch = batch.(*FakeTransactionalBatch)
+}
+
+// ItemOptions returns the item options.
+func (b *FakeCosmosDBClient) ItemOptions() *azcosmos.ItemOptions {
+	return &azcosmos.ItemOptions{}
+}
+
+// EnforceETag returns whether enforcing etag match is required.
+func (c *FakeCosmosDBClient) EnforceETag() bool {
+	return c.enforceETag
+}
+
+// ExecuteTransactionalBatch executes the fake transactional batch by adding to or deleting from the documents map.
+func (c *FakeCosmosDBClient) ExecuteTransactionalBatch(ctx context.Context, b TransactionalBatch, o *azcosmos.TransactionalBatchOptions) (azcosmos.TransactionalBatchResponse, error) {
+	for id, item := range c.batch.createItems {
+		c.client.documents[id] = item
+
+		fields, err := getCommonFields(item)
+		if err != nil {
+			return azcosmos.TransactionalBatchResponse{}, err
+		}
+		c.createCallCount[fields.Type]++
+	}
+	// clear create items
+	c.batch.createItems = map[string][]byte{}
+
+	for _, id := range c.batch.deleteItems {
+		item, ok := c.client.documents[id]
+		delete(c.client.documents, id)
+
+		if ok {
+			fields, err := getCommonFields(item)
+			if err != nil {
+				return azcosmos.TransactionalBatchResponse{}, err
+			}
+			c.deleteCallCount[fields.Type]++
+		}
+	}
+	// clear delete items
+	c.batch.deleteItems = []string{}
+
+	return azcosmos.TransactionalBatchResponse{}, nil
+}
+
+// FakeContainerClient has the methods for operations on single container items.
+type FakeContainerClient struct {
+	mu sync.Mutex
+
+	patchCallCount map[Type]int
+	patchErr       error
+	patchErrs      []error
+
+	documents map[string][]byte
+
+	listErr error
 }
 
 // NewQueryItemsPager returns a new QueryItemsPager with items from the fake cosmosdb documents.
@@ -310,89 +385,12 @@ func (b *FakeTransactionalBatch) DeleteItem(itemId string, o *azcosmos.Transacti
 	b.deleteItems = append(b.deleteItems, itemId)
 }
 
-// GetContainerClient returns the container client.
-func (c *FakeCosmosDBClient) GetContainerClient() ContainerClient {
-	return c.client
-}
-
-// GetPK returns the partition key.
-func (c *FakeCosmosDBClient) GetPK() azcosmos.PartitionKey {
-	return partitionKey(c.partitionKey)
-}
-
-// GetPKString returns the partition key as a string.
-func (c *FakeCosmosDBClient) GetPKString() string {
-	return c.partitionKey
-}
-
-// NewTransactionalBatch returns a new fake TransactionalBatch.
-func (c *FakeCosmosDBClient) NewTransactionalBatch() TransactionalBatch {
-	// initialize maps
-	return &FakeTransactionalBatch{
-		createItems: map[string][]byte{},
-		deleteItems: []string{},
-	}
-}
-
-// SetBatch sets the batch.
-func (b *FakeCosmosDBClient) SetBatch(batch TransactionalBatch) {
-	b.batch = batch.(*FakeTransactionalBatch)
-}
-
-// ItemOptions returns the item options.
-func (b *FakeCosmosDBClient) ItemOptions() *azcosmos.ItemOptions {
-	return &azcosmos.ItemOptions{}
-}
-
-// EnforceETag returns whether enforcing etag match is required.
-func (c *FakeCosmosDBClient) EnforceETag() bool {
-	return c.enforceETag
-}
-
-// ExecuteTransactionalBatch executes the fake transactional batch by adding to or deleting from the documents map.
-func (c *FakeCosmosDBClient) ExecuteTransactionalBatch(ctx context.Context, b TransactionalBatch, o *azcosmos.TransactionalBatchOptions) (azcosmos.TransactionalBatchResponse, error) {
-	for id, item := range c.batch.createItems {
-		c.client.documents[id] = item
-
-		fields, err := getCommonFields(item)
-		if err != nil {
-			return azcosmos.TransactionalBatchResponse{}, err
-		}
-		c.createCallCount[fields.Type]++
-	}
-	// clear create items
-	c.batch.createItems = map[string][]byte{}
-
-	for _, id := range c.batch.deleteItems {
-		item, ok := c.client.documents[id]
-		delete(c.client.documents, id)
-
-		if ok {
-			fields, err := getCommonFields(item)
-			if err != nil {
-				return azcosmos.TransactionalBatchResponse{}, err
-			}
-			c.deleteCallCount[fields.Type]++
-		}
-	}
-	// clear delete items
-	c.batch.deleteItems = []string{}
-
-	return azcosmos.TransactionalBatchResponse{}, nil
-}
-
 func mustUUID() uuid.UUID {
 	id, err := uuid.NewV7()
 	if err != nil {
 		panic(err)
 	}
 	return id
-}
-
-func fatalErr(logger *slog.Logger, msg string, args ...any) {
-	s := fmt.Sprintf(msg, args...)
-	logger.Error(s, "fatal", "true")
-	os.Exit(1)
 }
 
 type commonFields struct {

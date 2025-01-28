@@ -11,15 +11,11 @@ import (
 
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
 	"github.com/Azure/azure-sdk-for-go/sdk/azidentity"
-	pluglib "github.com/element-of-surprise/coercion/plugins"
 	"github.com/element-of-surprise/coercion/plugins/registry"
 	"github.com/element-of-surprise/coercion/workflow"
-	"github.com/element-of-surprise/coercion/workflow/builder"
 	"github.com/element-of-surprise/coercion/workflow/storage"
 	"github.com/element-of-surprise/coercion/workflow/storage/cosmosdb"
 	"github.com/element-of-surprise/coercion/workflow/storage/sqlite/testing/plugins"
-	"github.com/element-of-surprise/coercion/workflow/utils/clone"
-	"github.com/element-of-surprise/coercion/workflow/utils/walk"
 	"github.com/google/uuid"
 	"github.com/kylelemons/godebug/pretty"
 )
@@ -36,104 +32,10 @@ var zeroTime = time.Unix(0, 0)
 
 var plan *workflow.Plan
 
-type setters interface {
-	SetID(uuid.UUID)
-	SetState(*workflow.State)
-}
-
 func init() {
 	flag.Parse()
 
-	ctx := context.Background()
-
-	build, err := builder.New("test", "test", builder.WithGroupID(mustUUID()))
-	if err != nil {
-		panic(err)
-	}
-
-	checkAction1 := &workflow.Action{Name: "action", Descr: "action", Plugin: plugins.CheckPluginName, Req: nil}
-	checkAction2 := &workflow.Action{Name: "action", Descr: "action", Plugin: plugins.CheckPluginName, Req: nil}
-	checkAction3 := &workflow.Action{Name: "action", Descr: "action", Plugin: plugins.CheckPluginName, Req: nil}
-	seqAction1 := &workflow.Action{
-		Name:   "action",
-		Descr:  "action",
-		Plugin: plugins.HelloPluginName,
-		Req:    plugins.HelloReq{Say: "hello"},
-		Attempts: []*workflow.Attempt{
-			{
-				Err:   &pluglib.Error{Message: "internal error"},
-				Start: time.Now().Add(-1 * time.Minute).UTC(),
-				End:   time.Now().UTC(),
-			},
-			{
-				Resp:  plugins.HelloResp{Said: "hello"},
-				Start: time.Now().Add(-1 * time.Second).UTC(),
-				End:   time.Now().UTC(),
-			},
-		},
-	}
-
-	build.AddChecks(builder.PreChecks, &workflow.Checks{})
-	build.AddAction(clone.Action(ctx, checkAction1))
-	build.Up()
-
-	build.AddChecks(builder.ContChecks, &workflow.Checks{Delay: 32 * time.Second})
-	build.AddAction(clone.Action(ctx, checkAction2))
-	build.Up()
-
-	build.AddChecks(builder.PostChecks, &workflow.Checks{})
-	build.AddAction(clone.Action(ctx, checkAction3))
-	build.Up()
-
-	build.AddBlock(builder.BlockArgs{
-		Name:              "block",
-		Descr:             "block",
-		EntranceDelay:     1 * time.Second,
-		ExitDelay:         1 * time.Second,
-		ToleratedFailures: 1,
-		Concurrency:       1,
-	})
-
-	build.AddChecks(builder.PreChecks, &workflow.Checks{})
-	build.AddAction(checkAction1)
-	build.Up()
-
-	build.AddChecks(builder.ContChecks, &workflow.Checks{Delay: 1 * time.Minute})
-	build.AddAction(checkAction2)
-	build.Up()
-
-	build.AddChecks(builder.PostChecks, &workflow.Checks{})
-	build.AddAction(checkAction3)
-	build.Up()
-
-	build.AddSequence(&workflow.Sequence{Name: "sequence", Descr: "sequence"})
-	build.AddAction(seqAction1)
-	build.Up()
-
-	plan, err = build.Plan()
-	if err != nil {
-		panic(err)
-	}
-
-	for item := range walk.Plan(context.Background(), plan) {
-		setter := item.Value.(setters)
-		setter.SetID(mustUUID())
-		setter.SetState(
-			&workflow.State{
-				Status: workflow.Running,
-				Start:  time.Now().UTC(),
-				End:    time.Now().UTC(),
-			},
-		)
-	}
-}
-
-func mustUUID() uuid.UUID {
-	id, err := uuid.NewV7()
-	if err != nil {
-		panic(err)
-	}
-	return id
+	plan = cosmosdb.NewTestPlan()
 }
 
 func main() {

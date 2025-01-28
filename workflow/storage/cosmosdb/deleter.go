@@ -20,8 +20,6 @@ type deleter struct {
 	reader reader
 }
 
-// consider using transactional batch here instead of updating everything separately.
-
 // Delete deletes a plan with "id" from the storage.
 func (d deleter) Delete(ctx context.Context, id uuid.UUID) error {
 	plan, err := d.reader.Read(ctx, id)

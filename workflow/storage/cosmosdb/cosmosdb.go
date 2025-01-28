@@ -11,18 +11,17 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"os"
 	"sync"
 
 	"github.com/element-of-surprise/coercion/internal/private"
 	"github.com/element-of-surprise/coercion/plugins"
 	"github.com/element-of-surprise/coercion/plugins/registry"
-	"github.com/element-of-surprise/coercion/workflow"
 	"github.com/element-of-surprise/coercion/workflow/storage"
 
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore/runtime"
 	"github.com/Azure/azure-sdk-for-go/sdk/data/azcosmos"
-	"github.com/google/uuid"
 	"github.com/gostdlib/ops/retry/exponential"
 
 	_ "embed"
@@ -130,13 +129,6 @@ type ContainerClient interface {
 type TransactionalBatch interface {
 	CreateItem(item []byte, o *azcosmos.TransactionalBatchItemOptions)
 	DeleteItem(itemID string, o *azcosmos.TransactionalBatchItemOptions)
-}
-
-type setters interface {
-	// SetID is a setter for the ID field.
-	SetID(uuid.UUID)
-	// SetState is a setter for the State settings.
-	SetState(*workflow.State)
 }
 
 func partitionKey(val string) azcosmos.PartitionKey {
@@ -417,4 +409,10 @@ func Teardown(ctx context.Context, dbName, cName string, cred azcore.TokenCreden
 		return fmt.Errorf("failed to delete Cosmos DB container: container=%s. %w", cName, err)
 	}
 	return nil
+}
+
+func fatalErr(logger *slog.Logger, msg string, args ...any) {
+	s := fmt.Sprintf(msg, args...)
+	logger.Error(s, "fatal", "true")
+	os.Exit(1)
 }
