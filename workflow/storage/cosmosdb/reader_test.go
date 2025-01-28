@@ -1,13 +1,19 @@
 package cosmosdb
 
 import (
+	"context"
+	"fmt"
+	"sync"
 	"testing"
 
 	"github.com/Azure/azure-sdk-for-go/sdk/data/azcosmos"
 	"github.com/google/uuid"
 	"github.com/kylelemons/godebug/pretty"
 
+	"github.com/element-of-surprise/coercion/plugins/registry"
+	"github.com/element-of-surprise/coercion/workflow"
 	"github.com/element-of-surprise/coercion/workflow/storage"
+	"github.com/element-of-surprise/coercion/workflow/storage/sqlite/testing/plugins"
 )
 
 func TestBuildSearchQuery(t *testing.T) {
@@ -83,6 +89,169 @@ func TestBuildSearchQuery(t *testing.T) {
 		}
 		if diff := pretty.Compare(test.wantParams, params); diff != "" {
 			t.Errorf("TestBuildSearchQuery(%s): returned params: -want/+got:\n%s", test.name, diff)
+		}
+	}
+}
+
+func TestExists(t *testing.T) {
+	t.Parallel()
+
+	plan0 := NewTestPlan()
+	id0 := plan0.ID
+	id1, err := uuid.NewV7()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	tests := []struct {
+		name    string
+		planID  uuid.UUID
+		err     error
+		want    bool
+		wantErr bool
+	}{
+		{
+			name:    "Error: container client error",
+			planID:  id1,
+			err:     fmt.Errorf("test error"),
+			want:    false,
+			wantErr: true,
+		},
+		{
+			name:    "Success: plan doesn't exist",
+			planID:  id1,
+			want:    false,
+			wantErr: false,
+		},
+		{
+			name:    "Success: exists",
+			planID:  id0,
+			want:    true,
+			wantErr: false,
+		},
+	}
+
+	for _, test := range tests {
+		ctx := context.Background()
+
+		cName := "test"
+
+		reg := registry.New()
+		reg.MustRegister(&plugins.CheckPlugin{})
+		reg.MustRegister(&plugins.HelloPlugin{})
+
+		cc, err := NewFakeCosmosDBClient()
+		if err != nil {
+			t.Fatal(err)
+		}
+		mu := &sync.Mutex{}
+		r := Vault{
+			dbName:       "test-db",
+			cName:        "test-container",
+			partitionKey: "test-partition",
+		}
+		r.reader = reader{cName: cName, Client: cc, reg: reg}
+		r.creator = creator{mu: mu, Client: cc, reader: r.reader}
+		r.updater = newUpdater(mu, cc, r.reader)
+		r.closer = closer{Client: cc}
+		r.deleter = deleter{mu: mu, Client: cc, reader: r.reader}
+		if err := r.Create(ctx, plan0); err != nil {
+			t.Fatalf("TestExists(%s): %s", test.name, err)
+		}
+		if test.err != nil {
+			cc.client.readErr = test.err
+		}
+
+		result, err := r.Exists(ctx, test.planID)
+		switch {
+		case test.wantErr && err == nil:
+			t.Errorf("TestExists(%s): got err == nil, want err != nil", test.name)
+			continue
+		case !test.wantErr && err != nil:
+			t.Errorf("TestExists(%s): got err != %s, want err == nil", test.name, err)
+			continue
+		case err != nil:
+			continue
+		}
+		if test.want != result {
+			t.Errorf("TestExists(%s): got exists == %t, want exists == %t", test.name, result, test.want)
+			continue
+		}
+	}
+}
+
+func TestRead(t *testing.T) {
+	t.Parallel()
+
+	plan0 := NewTestPlan()
+	id0 := plan0.ID
+	id1, err := uuid.NewV7()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	tests := []struct {
+		name     string
+		planID   uuid.UUID
+		wantPlan *workflow.Plan
+		wantErr  bool
+	}{
+		{
+			name:     "Error: plan doesn't exist",
+			planID:   id1,
+			wantPlan: nil,
+			wantErr:  true,
+		},
+		{
+			name:     "Success",
+			planID:   id0,
+			wantPlan: plan0,
+			wantErr:  false,
+		},
+	}
+
+	for _, test := range tests {
+		ctx := context.Background()
+
+		cName := "test"
+
+		reg := registry.New()
+		reg.MustRegister(&plugins.CheckPlugin{})
+		reg.MustRegister(&plugins.HelloPlugin{})
+
+		cc, err := NewFakeCosmosDBClient()
+		if err != nil {
+			t.Fatal(err)
+		}
+		mu := &sync.Mutex{}
+		r := Vault{
+			dbName:       "test-db",
+			cName:        "test-container",
+			partitionKey: "test-partition",
+		}
+		r.reader = reader{cName: cName, Client: cc, reg: reg}
+		r.creator = creator{mu: mu, Client: cc, reader: r.reader}
+		r.updater = newUpdater(mu, cc, r.reader)
+		r.closer = closer{Client: cc}
+		r.deleter = deleter{mu: mu, Client: cc, reader: r.reader}
+		if err := r.Create(ctx, plan0); err != nil {
+			t.Fatalf("TestRead(%s): %s", test.name, err)
+		}
+
+		result, err := r.Read(ctx, test.planID)
+		switch {
+		case test.wantErr && err == nil:
+			t.Errorf("TestRead(%s): got err == nil, want err != nil", test.name)
+			continue
+		case !test.wantErr && err != nil:
+			t.Errorf("TestRead(%s): got err != %s, want err == nil", test.name, err)
+			continue
+		case err != nil:
+			continue
+		}
+		if diff := pretty.Compare(test.wantPlan, result); diff != "" {
+			t.Errorf("TestRead(%s): returned params: -want/+got:\n%s", test.name, diff)
+			continue
 		}
 	}
 }

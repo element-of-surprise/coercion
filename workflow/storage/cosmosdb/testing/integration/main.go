@@ -74,8 +74,6 @@ func main() {
 		fatalErr(logger, "Failed to create vault: %v", err)
 	}
 
-	planID := plan.ID
-
 	if err := vault.Create(ctx, plan); err != nil {
 		fatalErr(logger, "Failed to create plan entry: %v", err)
 	}
@@ -92,7 +90,7 @@ func main() {
 
 	filters := storage.Filters{
 		ByIDs: []uuid.UUID{
-			planID,
+			plan.ID,
 		},
 	}
 	results, err = vault.Search(context.Background(), filters)
@@ -105,7 +103,7 @@ func main() {
 		}
 	}
 
-	result, err := vault.Read(ctx, planID)
+	result, err := vault.Read(ctx, plan.ID)
 	if err != nil {
 		fatalErr(logger, "Failed to read plan entry: %v", err)
 	}
@@ -121,7 +119,7 @@ func main() {
 		fatalErr(logger, "Failed to update plan entry: %v", err)
 	}
 
-	result, err = vault.Read(ctx, planID)
+	result, err = vault.Read(ctx, plan.ID)
 	if err != nil {
 		fatalErr(logger, "Failed to read plan entry: %v", err)
 	}

@@ -279,6 +279,7 @@ type FakeContainerClient struct {
 
 	documents map[string][]byte
 
+	readErr error
 	listErr error
 }
 
@@ -354,6 +355,9 @@ func (cc *FakeContainerClient) PatchItem(ctx context.Context, partitionKey azcos
 
 // ReadItem returns the item from the documents map.
 func (cc *FakeContainerClient) ReadItem(ctx context.Context, partitionKey azcosmos.PartitionKey, itemId string, o *azcosmos.ItemOptions) (azcosmos.ItemResponse, error) {
+	if cc.readErr != nil {
+		return azcosmos.ItemResponse{}, cc.readErr
+	}
 	item, ok := cc.documents[itemId]
 	if !ok {
 		return azcosmos.ItemResponse{}, runtime.NewResponseError(&http.Response{StatusCode: http.StatusNotFound})
