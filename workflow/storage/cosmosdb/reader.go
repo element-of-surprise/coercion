@@ -73,7 +73,6 @@ func (r reader) Search(ctx context.Context, filters storage.Filters) (chan stora
 	results := make(chan storage.Stream[storage.ListResult])
 	go func() {
 		defer close(results)
-		// need to check for ctx timeout
 		for pager.More() {
 			res, err := pager.NextPage(ctx)
 			if err != nil {
