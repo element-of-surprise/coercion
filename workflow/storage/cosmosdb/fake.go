@@ -239,6 +239,9 @@ func (c *FakeCosmosDBClient) EnforceETag() bool {
 
 // ExecuteTransactionalBatch executes the fake transactional batch by adding to or deleting from the documents map.
 func (c *FakeCosmosDBClient) ExecuteTransactionalBatch(ctx context.Context, b TransactionalBatch, o *azcosmos.TransactionalBatchOptions) (azcosmos.TransactionalBatchResponse, error) {
+	if c.createErr != nil {
+		return azcosmos.TransactionalBatchResponse{}, c.createErr
+	}
 	for id, item := range c.batch.createItems {
 		c.client.documents[id] = item
 
@@ -251,6 +254,9 @@ func (c *FakeCosmosDBClient) ExecuteTransactionalBatch(ctx context.Context, b Tr
 	// clear create items
 	c.batch.createItems = map[string][]byte{}
 
+	if c.deleteErr != nil {
+		return azcosmos.TransactionalBatchResponse{}, c.deleteErr
+	}
 	for _, id := range c.batch.deleteItems {
 		item, ok := c.client.documents[id]
 		delete(c.client.documents, id)
