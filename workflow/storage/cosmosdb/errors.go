@@ -11,12 +11,18 @@ import (
 
 // IsNotFound checks if the error that Azure returned is 404.
 func IsNotFound(err error) bool {
+	if err == nil {
+		return false
+	}
 	var resErr *azcore.ResponseError
 	return errors.As(err, &resErr) && resErr.StatusCode == http.StatusNotFound
 }
 
 // IsConflict checks if the error indicates there is a resource conflict.
 func IsConflict(err error) bool {
+	if err == nil {
+		return false
+	}
 	var resErr *azcore.ResponseError
 	return errors.As(err, &resErr) && resErr.StatusCode == http.StatusConflict
 }
