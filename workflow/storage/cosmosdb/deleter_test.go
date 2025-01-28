@@ -6,33 +6,21 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/google/uuid"
-
 	"github.com/element-of-surprise/coercion/plugins/registry"
 	"github.com/element-of-surprise/coercion/workflow"
 	"github.com/element-of-surprise/coercion/workflow/storage/sqlite/testing/plugins"
 )
 
-func TestCreate(t *testing.T) {
+func TestDelete(t *testing.T) {
 	t.Parallel()
-
-	plan0 := NewTestPlan()
-	plan1 := NewTestPlan()
-	plan2 := NewTestPlan()
-	plan2.ID = uuid.Nil
 
 	tests := []struct {
 		name      string
 		plan      *workflow.Plan
 		readErr   error
-		createErr error
+		deleteErr error
 		wantErr   bool
 	}{
-		{
-			name:    "Error: plan ID is nil",
-			plan:    plan2,
-			wantErr: true,
-		},
 		{
 			name:    "Error: container client read error",
 			plan:    plan1,
@@ -40,14 +28,13 @@ func TestCreate(t *testing.T) {
 			wantErr: true,
 		},
 		{
-			name:      "Error: container client create error",
+			name:      "Error: container client delete error",
 			plan:      plan1,
-			createErr: fmt.Errorf("test error"),
+			deleteErr: fmt.Errorf("test error"),
 			wantErr:   true,
 		},
 		{
-			name:    "Error: plan exists",
-			plan:    plan0,
+			name:    "Error: doesn't exist",
 			wantErr: true,
 		},
 		{
@@ -55,8 +42,6 @@ func TestCreate(t *testing.T) {
 			plan:    plan1,
 			wantErr: false,
 		},
-		// could test with bad plan data, like invalid list of actions, attempts encoding issue, etc.,
-		// to make sure it causes the entire plan creation to fail.
 	}
 
 	for _, test := range tests {
@@ -83,23 +68,29 @@ func TestCreate(t *testing.T) {
 		r.updater = newUpdater(mu, cc, r.reader)
 		r.closer = closer{Client: cc}
 		r.deleter = deleter{mu: mu, Client: cc, reader: r.reader}
-		if err := r.Create(ctx, plan0); err != nil {
-			t.Fatalf("TestExists(%s): %s", test.name, err)
+		testPlanID := mustUUID()
+		if test.plan != nil {
+			err = r.Create(ctx, test.plan)
+			if err != nil {
+				t.Fatalf("TestDelete(%s): %s", test.name, err)
+			}
+			testPlanID = test.plan.ID
 		}
+
 		if test.readErr != nil {
 			cc.client.readErr = test.readErr
 		}
-		if test.createErr != nil {
-			cc.createErr = test.createErr
+		if test.deleteErr != nil {
+			cc.deleteErr = test.deleteErr
 		}
 
-		err = r.Create(ctx, test.plan)
+		err = r.Delete(ctx, testPlanID)
 		switch {
 		case test.wantErr && err == nil:
-			t.Errorf("TestCreate(%s): got err == nil, want err != nil", test.name)
+			t.Errorf("TestDelete(%s): got err == nil, want err != nil", test.name)
 			continue
 		case !test.wantErr && err != nil:
-			t.Errorf("TestCreate(%s): got err != %s, want err == nil", test.name, err)
+			t.Errorf("TestDelete(%s): got err != %s, want err == nil", test.name, err)
 			continue
 		case err != nil:
 			continue
