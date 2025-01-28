@@ -10,6 +10,7 @@ import (
 
 	"github.com/element-of-surprise/coercion/plugins/registry"
 	"github.com/element-of-surprise/coercion/workflow"
+	"github.com/element-of-surprise/coercion/workflow/storage"
 	"github.com/element-of-surprise/coercion/workflow/storage/sqlite/testing/plugins"
 	"github.com/element-of-surprise/coercion/workflow/utils/walk"
 )
@@ -50,6 +51,20 @@ func TestStorageItemCRUD(t *testing.T) {
 	mustGetCreateCallCount(t, cc.createCallCount, Sequence, 1)
 	mustGetCreateCallCount(t, cc.createCallCount, Action, 11)
 
+	// Create other plans in same storage vault.
+	if err := r.Create(ctx, plan1); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.Create(ctx, plan2); err != nil {
+		t.Fatal(err)
+	}
+
+	mustGetCreateCallCount(t, cc.createCallCount, Plan, 3)
+	mustGetCreateCallCount(t, cc.createCallCount, Checks, 30)
+	mustGetCreateCallCount(t, cc.createCallCount, Block, 3)
+	mustGetCreateCallCount(t, cc.createCallCount, Sequence, 3)
+	mustGetCreateCallCount(t, cc.createCallCount, Action, 33)
+
 	exists, err := r.reader.Exists(ctx, plan.ID)
 	if err != nil {
 		t.Fatalf("error checking if plan %s exists: %v", plan.ID, err)
@@ -74,7 +89,6 @@ func TestStorageItemCRUD(t *testing.T) {
 		t.Errorf("TestStorageItemCRUD(%s): returned plan: -want/+got:\n%s", plan.ID, diff)
 	}
 
-	// not going to bother with testing search here, since I would need to fake that in the fake pager.
 	results, err := r.List(ctx, 0)
 	if err != nil {
 		t.Fatal(err)
@@ -86,11 +100,31 @@ func TestStorageItemCRUD(t *testing.T) {
 		}
 		resultCount++
 	}
+	if resultCount != 3 {
+		t.Fatalf("expected 3 result, got %d", resultCount)
+	}
+
+	// The fake pager only implements querying by ID. It's a pain to fake too much.
+	filters := storage.Filters{
+		ByIDs: []uuid.UUID{
+			plan.ID,
+		},
+	}
+	results, err = r.Search(ctx, filters)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resultCount = 0
+	for res := range results {
+		if res.Err != nil {
+			t.Fatalf("error when listing results: %v", res.Err)
+		}
+		resultCount++
+	}
 	if resultCount != 1 {
 		t.Fatalf("expected 1 result, got %d", resultCount)
 	}
 
-	// plan.State.Status = workflow.Completed
 	// test update, which is actually a patch and faking too much is a pain
 	if err := r.UpdatePlan(ctx, plan); err != nil {
 		t.Fatalf("error updating plan: %v", err)
@@ -102,32 +136,23 @@ func TestStorageItemCRUD(t *testing.T) {
 		t.Fatalf("expected 0 calls to patch block, got %d", v)
 	}
 
-	// test walk, to check that every type is found? checks, blocks, etc.
+	// Walk, to get some sample IDs for each type.
 	var block *workflow.Block
 	var checks *workflow.Checks
 	var action *workflow.Action
 	var sequence *workflow.Sequence
-	idsFound := make(map[workflow.ObjectType]map[uuid.UUID]int)
 	for item := range walk.Plan(ctx, result) {
-		if _, ok := idsFound[item.Value.Type()]; !ok {
-			idsFound[item.Value.Type()] = make(map[uuid.UUID]int)
-		}
 		switch item.Value.Type() {
 		case workflow.OTPlan:
-			p := item.Plan()
-			idsFound[workflow.OTPlan][p.ID]++
+			continue
 		case workflow.OTBlock:
 			block = item.Block()
-			idsFound[workflow.OTBlock][block.ID]++
 		case workflow.OTCheck:
 			checks = item.Checks()
-			idsFound[workflow.OTCheck][checks.ID]++
 		case workflow.OTAction:
 			action = item.Action()
-			idsFound[workflow.OTAction][action.ID]++
 		case workflow.OTSequence:
 			sequence = item.Sequence()
-			idsFound[workflow.OTSequence][sequence.ID]++
 		default:
 			t.Fatalf("unexpected type: %s", item.Value.Type())
 		}
@@ -177,19 +202,6 @@ func TestStorageItemCRUD(t *testing.T) {
 		t.Fatalf("expected 1 call to patch action, got %d", v)
 	}
 
-	if len(idsFound[workflow.OTBlock]) != 1 {
-		t.Fatalf("expected 1 block when reading plan, got %d", len(idsFound[workflow.OTBlock]))
-	}
-	if len(idsFound[workflow.OTCheck]) != 10 {
-		t.Fatalf("expected 10 checks when reading plan, got %d", len(idsFound[workflow.OTCheck]))
-	}
-	if len(idsFound[workflow.OTSequence]) != 1 {
-		t.Fatalf("expected 1 sequence when reading plan, got %d", len(idsFound[workflow.OTSequence]))
-	}
-	if len(idsFound[workflow.OTAction]) != 11 {
-		t.Fatalf("expected 11 actions when reading plan, got %d", len(idsFound[workflow.OTAction]))
-	}
-
 	// test delete
 	if err := r.Delete(ctx, plan.ID); err != nil {
 		t.Fatal(err)
@@ -206,7 +218,6 @@ func TestStorageItemCRUD(t *testing.T) {
 	mustGetDeleteCallCount(t, cc.deleteCallCount, Block, 1)
 	mustGetDeleteCallCount(t, cc.deleteCallCount, Sequence, 1)
 	mustGetDeleteCallCount(t, cc.deleteCallCount, Action, 11)
-	// test with multiple plans?
 }
 
 func mustGetCreateCallCount(t *testing.T, m map[Type]int, dt Type, val int) {

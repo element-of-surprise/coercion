@@ -37,12 +37,14 @@ var pConfig = pretty.Config{
 }
 
 var (
-	vaultType = flag.String("vault", "sqlite", "the type of storage vault to use")
-	dbName    = flag.String("db-name", os.Getenv("AZURE_COSMOSDB_DBNAME"), "the name of the cosmosdb database")
-	cName     = flag.String("container-name", os.Getenv("AZURE_COSMOSDB_CNAME"), "the name of the cosmosdb container")
-	pk        = flag.String("partition-key", os.Getenv("AZURE_COSMOSDB_PK"), "the name of the cosmosdb partition key")
-	msi       = flag.String("msi", "", "the identity with vmss contributor role. If empty, az login is used")
-	teardown  = flag.Bool("teardown", false, "teardown the cosmosdb container")
+	vaultType = flag.String("vault", "sqlite", "The type of storage vault to use.")
+
+	// CosmosDB flags
+	dbName   = flag.String("db-name", os.Getenv("AZURE_COSMOSDB_DBNAME"), "The name of the cosmosdb database.")
+	cName    = flag.String("container-name", os.Getenv("AZURE_COSMOSDB_CNAME"), "The name of the cosmosdb container.")
+	pk       = flag.String("partition-key", os.Getenv("AZURE_COSMOSDB_PK"), "The name of the cosmosdb partition key.")
+	msi      = flag.String("msi", "", "The identity with vmss contributor role. If empty, az login is used.")
+	teardown = flag.Bool("teardown", false, "Teardown the cosmosdb container.")
 )
 
 func TestEtoE(t *testing.T) {
@@ -99,8 +101,7 @@ func TestEtoE(t *testing.T) {
 				Name:   "check",
 				Descr:  "check",
 				Plugin: "check",
-				// need this to be longer while testing with cosmosdb I think
-				Req: testplugin.Req{Sleep: 1 * time.Second},
+				Req:    testplugin.Req{Sleep: 1 * time.Second},
 			},
 		},
 	}
@@ -136,6 +137,7 @@ func TestEtoE(t *testing.T) {
 			Concurrency:   2,
 		},
 	)
+	build.AddChecks(builder.BypassChecks, clone.Checks(ctx, bypassChecks, cloneOpts...)).Up()
 	build.AddChecks(builder.PreChecks, clone.Checks(ctx, checks, cloneOpts...)).Up()
 	build.AddChecks(builder.PostChecks, clone.Checks(ctx, checks, cloneOpts...)).Up()
 	build.AddChecks(builder.ContChecks, clone.Checks(ctx, checks, cloneOpts...)).Up()

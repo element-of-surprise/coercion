@@ -33,17 +33,16 @@ var _ storage.Vault = &Vault{}
 
 // Vault implements the storage.Vault interface.
 type Vault struct {
-	// dbName is the cosmosdb database name for the storage.
+	// dbName is the CosmosDB database name for the storage.
 	dbName string
-	// cName is the cosmosdb container name for the storage.
+	// cName is the CosmosDB container name for the storage.
 	cName string
-	// endpoint is the cosmosdb account endpoint
+	// endpoint is the CosmosDB account endpoint
 	endpoint string
 	// partitionKey is the partition key for the storage.
 	// This assumes the service will use a single partition.
 	partitionKey string
 
-	// todo: make this specify operation type (on update, on delete)
 	enforceEtag    bool
 	clientOpts     *azcosmos.ClientOptions
 	containerProps azcosmos.ContainerProperties
@@ -119,7 +118,7 @@ func WithEnforceETag() Option {
 	}
 }
 
-// ContainerClient is the interface for the cosmosdb container client.
+// ContainerClient is the interface for the CosmosDB container client.
 // This allows for faking the azcosmos container client.
 type ContainerClient interface {
 	NewQueryItemsPager(string, azcosmos.PartitionKey, *azcosmos.QueryOptions) *runtime.Pager[azcosmos.QueryItemsResponse]
@@ -127,7 +126,7 @@ type ContainerClient interface {
 	PatchItem(context.Context, azcosmos.PartitionKey, string, azcosmos.PatchOperations, *azcosmos.ItemOptions) (azcosmos.ItemResponse, error)
 }
 
-// TransactionalBatch is the interface for the cosmosdb transactional batch.
+// TransactionalBatch is the interface for the CosmosDB transactional batch.
 type TransactionalBatch interface {
 	CreateItem(item []byte, o *azcosmos.TransactionalBatchItemOptions)
 	DeleteItem(itemID string, o *azcosmos.TransactionalBatchItemOptions)
@@ -144,7 +143,7 @@ func partitionKey(val string) azcosmos.PartitionKey {
 	return azcosmos.NewPartitionKeyString(val)
 }
 
-// Client is the interface for the cosmosdb client.
+// Client is the interface for the CosmosDB client.
 type Client interface {
 	// GetContainerClient returns the container client.
 	GetContainerClient() ContainerClient
@@ -164,8 +163,8 @@ type Client interface {
 	EnforceETag() bool
 }
 
-// CosmosDBClient has the methods for all of Create/Update/Delete/Query operation
-// on data model.
+// CosmosDBClient has the methods for all of Create/Update/Delete/Query operations
+// on the CosmosDB data.
 type CosmosDBClient struct {
 	partitionKey string
 
@@ -211,9 +210,8 @@ func (c *CosmosDBClient) EnforceETag() bool {
 	return c.enforceETag
 }
 
-// ExecuteTransactionalBatch executes a transactional batch. This allows for faking.
-// can I use generics here instead of type assertion? something would have to be pretty wrong for someone to end up with a transactional batch of the wrong type
-// in production code, so it's probably fine.
+// ExecuteTransactionalBatch executes a transactional batch. This allows for faking by accepting the TransactionalBatch
+// interface. This is only used internally, so asserting type here should be fine.
 func (c *CosmosDBClient) ExecuteTransactionalBatch(ctx context.Context, b TransactionalBatch, opts *azcosmos.TransactionalBatchOptions) (azcosmos.TransactionalBatchResponse, error) {
 	if b == nil {
 		return azcosmos.TransactionalBatchResponse{}, fmt.Errorf("nil transactional batch")
@@ -281,7 +279,6 @@ func New(ctx context.Context, dbName, cName, pk string, cred azcore.TokenCredent
 }
 
 // Use this function to create a new CosmosDBClient struct.
-// dbEndpoint - the Cosmos DB's https endpoint
 func (v *Vault) createContainerClient(
 	ctx context.Context,
 	azCosmosClient *azcosmos.Client) (*CosmosDBClient, error) {
@@ -397,7 +394,7 @@ func deleteContainer(ctx context.Context, cc *azcosmos.ContainerClient) (string,
 	return response.ActivityID, nil
 }
 
-// Teardown deletes a container. This is for testing only.
+// Teardown deletes a container from a given CosmosDB database. This is for testing only.
 func Teardown(ctx context.Context, dbName, cName string, cred azcore.TokenCredential, clientOpts *azcosmos.ClientOptions) error {
 	endpoint := fmt.Sprintf("https://%s.documents.azure.com:443/", dbName)
 

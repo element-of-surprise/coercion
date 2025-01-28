@@ -27,13 +27,26 @@ import (
 
 var (
 	ErrCosmosDBNotFound error = fmt.Errorf("cosmosdb error: %w", &azcore.ResponseError{StatusCode: http.StatusNotFound})
-
-	testPlanID uuid.UUID
 )
 
-var plan *workflow.Plan
+var (
+	plan *workflow.Plan
+
+	// test with multiple plans in storage
+	plan1 *workflow.Plan
+	plan2 *workflow.Plan
+)
 
 func init() {
+	plan = newTestPlan()
+
+	// test with multiple plans in storage
+	plan1 = newTestPlan()
+	plan2 = newTestPlan()
+}
+
+func newTestPlan() *workflow.Plan {
+	var plan *workflow.Plan
 	ctx := context.Background()
 
 	build, err := builder.New("test", "test", builder.WithGroupID(mustUUID()))
@@ -124,7 +137,6 @@ func init() {
 	}
 	// need to set to get this to match perfectly
 	// plan.SubmitTime = time.Now().UTC()
-	testPlanID = plan.ID
 
 	for item := range walk.Plan(context.Background(), plan) {
 		setter := item.Value.(setters)
@@ -137,6 +149,7 @@ func init() {
 			},
 		)
 	}
+	return plan
 }
 
 // needs to implement cosmosdb.go client interface
