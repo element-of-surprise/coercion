@@ -33,6 +33,7 @@ func TestStorageItemCRUD(t *testing.T) {
 		dbName:       "test-db",
 		cName:        "test-container",
 		partitionKey: "test-partition",
+		enforceEtag:  true,
 	}
 	r.reader = reader{cName: cName, Client: cc, reg: reg}
 	r.creator = creator{mu: mu, Client: cc, reader: r.reader}

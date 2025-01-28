@@ -76,6 +76,116 @@ func TestBuildSearchQuery(t *testing.T) {
 				},
 			},
 		},
+		{
+			name: "Success: by IDs with single Group ID",
+			filters: storage.Filters{
+				ByGroupIDs: []uuid.UUID{
+					id1,
+				},
+			},
+			wantQuery: `SELECT p.id, p.groupID, p.name, p.descr, p.submitTime, p.stateStatus, p.stateStart, p.stateEnd FROM test p WHERE p.type=1 AND ARRAY_CONTAINS(@group_ids, p.groupID) ORDER BY p.submitTime DESC`,
+			wantParams: []azcosmos.QueryParameter{
+				{
+					Name: "@group_ids",
+					Value: []uuid.UUID{
+						id1,
+					},
+				},
+			},
+		},
+		{
+			name: "Success: by IDs with multiple Group IDs",
+			filters: storage.Filters{
+				ByGroupIDs: []uuid.UUID{
+					id1,
+					id2,
+				},
+			},
+			wantQuery: `SELECT p.id, p.groupID, p.name, p.descr, p.submitTime, p.stateStatus, p.stateStart, p.stateEnd FROM test p WHERE p.type=1 AND ARRAY_CONTAINS(@group_ids, p.groupID) ORDER BY p.submitTime DESC`,
+			wantParams: []azcosmos.QueryParameter{
+				{
+					Name: "@group_ids",
+					Value: []uuid.UUID{
+						id1,
+						id2,
+					},
+				},
+			},
+		},
+		{
+			name: "Success: by Status with single Status",
+			filters: storage.Filters{
+				ByStatus: []workflow.Status{
+					workflow.Completed,
+				},
+			},
+			wantQuery: `SELECT p.id, p.groupID, p.name, p.descr, p.submitTime, p.stateStatus, p.stateStart, p.stateEnd FROM test p WHERE p.type=1 AND p.stateStatus = @status0 ORDER BY p.submitTime DESC`,
+			wantParams: []azcosmos.QueryParameter{
+				{
+					Name:  "@status0",
+					Value: workflow.Completed,
+				},
+			},
+		},
+		{
+			name: "Success: by Status with multiple Statuses",
+			filters: storage.Filters{
+				ByStatus: []workflow.Status{
+					workflow.Completed,
+					workflow.Failed,
+				},
+			},
+			wantQuery: `SELECT p.id, p.groupID, p.name, p.descr, p.submitTime, p.stateStatus, p.stateStart, p.stateEnd FROM test p WHERE p.type=1 AND (p.stateStatus = @status0 OR p.stateStatus = @status1) ORDER BY p.submitTime DESC`,
+			wantParams: []azcosmos.QueryParameter{
+				{
+					Name:  "@status0",
+					Value: workflow.Completed,
+				},
+				{
+					Name:  "@status1",
+					Value: workflow.Failed,
+				},
+			},
+		},
+
+		{
+			name: "Success: with multiple filters",
+			filters: storage.Filters{
+				ByIDs: []uuid.UUID{
+					id1,
+				},
+				ByGroupIDs: []uuid.UUID{
+					id2,
+				},
+				ByStatus: []workflow.Status{
+					workflow.Completed,
+					workflow.Failed,
+				},
+			},
+			wantQuery: `SELECT p.id, p.groupID, p.name, p.descr, p.submitTime, p.stateStatus, p.stateStart, p.stateEnd FROM test p WHERE p.type=1 AND ARRAY_CONTAINS(@ids, p.id) AND ARRAY_CONTAINS(@group_ids, p.groupID) AND (p.stateStatus = @status0 OR p.stateStatus = @status1) ORDER BY p.submitTime DESC`,
+			wantParams: []azcosmos.QueryParameter{
+				{
+					Name:  "@status0",
+					Value: workflow.Completed,
+				},
+				{
+					Name:  "@status1",
+					Value: workflow.Failed,
+				},
+				{
+					Name: "@ids",
+					Value: []uuid.UUID{
+						id1,
+					},
+				},
+				{
+					Name: "@group_ids",
+					Value: []uuid.UUID{
+						id2,
+					},
+				},
+			},
+		},
 	}
 
 	for _, test := range tests {

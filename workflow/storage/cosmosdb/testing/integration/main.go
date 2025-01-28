@@ -20,6 +20,8 @@ import (
 	"github.com/kylelemons/godebug/pretty"
 )
 
+//+gocover:ignore:file No need to test fake store.
+
 var (
 	dbName   = flag.String("db-name", os.Getenv("AZURE_COSMOSDB_DBNAME"), "the name of the cosmosdb database")
 	cName    = flag.String("container-name", os.Getenv("AZURE_COSMOSDB_CNAME"), "the name of the cosmosdb container")
@@ -92,15 +94,23 @@ func main() {
 		ByIDs: []uuid.UUID{
 			plan.ID,
 		},
+		ByStatus: []workflow.Status{
+			workflow.Running,
+		},
 	}
+	var resultCount int
 	results, err = vault.Search(context.Background(), filters)
 	if err != nil {
 		fatalErr(logger, "Failed to list plan entries: %v", err)
 	}
 	for res := range results {
+		resultCount++
 		if res.Err != nil {
 			fatalErr(logger, "result err: %v", res.Err)
 		}
+	}
+	if resultCount != 1 {
+		fatalErr(logger, "expected 1 search result, got %d", resultCount)
 	}
 
 	result, err := vault.Read(ctx, plan.ID)

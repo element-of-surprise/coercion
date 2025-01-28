@@ -22,7 +22,7 @@ import (
 	"github.com/google/uuid"
 )
 
-//+gocover:ignore:file No need to test mock store.
+//+gocover:ignore:file No need to test fake store.
 
 var (
 	ErrCosmosDBNotFound error = fmt.Errorf("cosmosdb error: %w", &azcore.ResponseError{StatusCode: http.StatusNotFound})

@@ -127,18 +127,25 @@ func (r reader) buildSearchQuery(filters storage.Filters) (string, []azcosmos.Qu
 		if numFilters > 0 {
 			build.WriteString(" AND")
 		}
+		build.WriteString(" ")
+		if len(filters.ByStatus) > 1 {
+			build.WriteString("(")
+		}
 		numFilters++ // I know this says inEffectual assignment and it is, but it is here for completeness.
 		for i, s := range filters.ByStatus {
 			name := fmt.Sprintf("@status%d", i)
 			if i == 0 {
-				build.WriteString(fmt.Sprintf(" p.stateStatus = %s", name))
+				build.WriteString(fmt.Sprintf("p.stateStatus = %s", name))
 			} else {
-				build.WriteString(fmt.Sprintf(" AND p.stateStatus = %s", name))
+				build.WriteString(fmt.Sprintf(" OR p.stateStatus = %s", name))
 			}
 			parameters = append(parameters, azcosmos.QueryParameter{
 				Name:  name,
 				Value: int64(s),
 			})
+		}
+		if len(filters.ByStatus) > 1 {
+			build.WriteString(")")
 		}
 	}
 	build.WriteString(" ORDER BY p.submitTime DESC")
