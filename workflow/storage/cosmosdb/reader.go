@@ -55,7 +55,7 @@ func (r reader) Read(ctx context.Context, id uuid.UUID) (*workflow.Plan, error) 
 		}
 		return nil
 	}
-	if err := backoff.Retry(ctx, fetchPlan); err != nil {
+	if err := backoff.Retry(context.WithoutCancel(ctx), fetchPlan); err != nil {
 		return nil, fmt.Errorf("failed to fetch plan: %w", err)
 	}
 	return plan, nil
@@ -90,7 +90,14 @@ func (r reader) Search(ctx context.Context, filters storage.Filters) (chan stora
 					}
 					return
 				}
-				results <- storage.Stream[storage.ListResult]{Result: result}
+				select {
+				case <-ctx.Done():
+					results <- storage.Stream[storage.ListResult]{
+						Err: ctx.Err(),
+					}
+					return
+				case results <- storage.Stream[storage.ListResult]{Result: result}:
+				}
 			}
 		}
 		return
@@ -182,7 +189,14 @@ func (r reader) List(ctx context.Context, limit int) (chan storage.Stream[storag
 					}
 					return
 				}
-				results <- storage.Stream[storage.ListResult]{Result: result}
+				select {
+				case <-ctx.Done():
+					results <- storage.Stream[storage.ListResult]{
+						Err: ctx.Err(),
+					}
+					return
+				case results <- storage.Stream[storage.ListResult]{Result: result}:
+				}
 			}
 		}
 	}()

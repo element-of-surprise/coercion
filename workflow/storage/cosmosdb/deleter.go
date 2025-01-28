@@ -41,7 +41,7 @@ func (d deleter) Delete(ctx context.Context, id uuid.UUID) error {
 		}
 		return nil
 	}
-	if err := backoff.Retry(ctx, deletePlan); err != nil {
+	if err := backoff.Retry(context.WithoutCancel(ctx), deletePlan); err != nil {
 		return fmt.Errorf("couldn't delete plan: %w", err)
 	}
 

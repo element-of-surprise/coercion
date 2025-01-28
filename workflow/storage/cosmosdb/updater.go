@@ -49,7 +49,7 @@ func patchItemWithRetry(ctx context.Context, cc ContainerClient, pk azcosmos.Par
 		}
 		return nil
 	}
-	if err := backoff.Retry(ctx, patchItem); err != nil {
+	if err := backoff.Retry(context.WithoutCancel(ctx), patchItem); err != nil {
 		return azcosmos.ItemResponse{}, fmt.Errorf("failed to patch item through Cosmos DB API: %w", err)
 	}
 	return resp, nil

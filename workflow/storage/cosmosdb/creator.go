@@ -48,7 +48,7 @@ func (u creator) Create(ctx context.Context, plan *workflow.Plan) error {
 		}
 		return nil
 	}
-	if err := backoff.Retry(ctx, commitPlan); err != nil {
+	if err := backoff.Retry(context.WithoutCancel(ctx), commitPlan); err != nil {
 		return fmt.Errorf("failed to commit plan: %w", err)
 	}
 	return nil
