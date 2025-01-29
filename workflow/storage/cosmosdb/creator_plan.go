@@ -23,19 +23,19 @@ func (c creator) commitPlan(ctx context.Context, p *workflow.Plan) (err error) {
 
 	batch := c.NewTransactionalBatch()
 
-	plan, err := planToEntry(ctx, c.GetPKString(), p)
+	plan, err := planToEntry(c.GetPKString(), p)
 	if err != nil {
 		return err
 	}
 
 	for _, check := range [5]*workflow.Checks{p.BypassChecks, p.PreChecks, p.PostChecks, p.ContChecks, p.DeferredChecks} {
-		if err := c.commitChecks(ctx, batch, p.ID, check); err != nil {
+		if err := c.commitChecks(batch, p.ID, check); err != nil {
 			return fmt.Errorf("planToEntry(commitChecks): %w", err)
 		}
 	}
 
 	for i, b := range p.Blocks {
-		if err := c.commitBlock(ctx, batch, p.ID, i, b); err != nil {
+		if err := c.commitBlock(batch, p.ID, i, b); err != nil {
 			return fmt.Errorf("planToEntry(commitBlocks): %w", err)
 		}
 	}
@@ -64,7 +64,7 @@ func (c creator) commitPlan(ctx context.Context, p *workflow.Plan) (err error) {
 	return nil
 }
 
-func planToEntry(ctx context.Context, pk string, p *workflow.Plan) (plansEntry, error) {
+func planToEntry(pk string, p *workflow.Plan) (plansEntry, error) {
 	if p == nil {
 		return plansEntry{}, fmt.Errorf("planToEntry: plan cannot be nil")
 	}
@@ -114,18 +114,18 @@ func planToEntry(ctx context.Context, pk string, p *workflow.Plan) (plansEntry, 
 	return plan, nil
 }
 
-func (c creator) commitChecks(ctx context.Context, batch TransactionalBatch, planID uuid.UUID, ch *workflow.Checks) error {
+func (c creator) commitChecks(batch TransactionalBatch, planID uuid.UUID, ch *workflow.Checks) error {
 	if ch == nil {
 		return nil
 	}
 
-	checks, err := checkToEntry(ctx, c.GetPKString(), planID, ch)
+	checks, err := checkToEntry(c.GetPKString(), planID, ch)
 	if err != nil {
 		return err
 	}
 
 	for i, a := range ch.Actions {
-		if err := c.commitAction(ctx, batch, planID, i, a); err != nil {
+		if err := c.commitAction(batch, planID, i, a); err != nil {
 			return fmt.Errorf("commitAction: %w", err)
 		}
 	}
@@ -138,7 +138,7 @@ func (c creator) commitChecks(ctx context.Context, batch TransactionalBatch, pla
 	return nil
 }
 
-func checkToEntry(ctx context.Context, pk string, planID uuid.UUID, c *workflow.Checks) (checksEntry, error) {
+func checkToEntry(pk string, planID uuid.UUID, c *workflow.Checks) (checksEntry, error) {
 	if c == nil {
 		return checksEntry{}, nil
 	}
@@ -161,24 +161,24 @@ func checkToEntry(ctx context.Context, pk string, planID uuid.UUID, c *workflow.
 	}, nil
 }
 
-func (c creator) commitBlock(ctx context.Context, batch TransactionalBatch, planID uuid.UUID, pos int, b *workflow.Block) error {
+func (c creator) commitBlock(batch TransactionalBatch, planID uuid.UUID, pos int, b *workflow.Block) error {
 	if b == nil {
 		return fmt.Errorf("commitBlock: block cannot be nil")
 	}
 
-	block, err := blockToEntry(ctx, c.GetPKString(), planID, pos, b)
+	block, err := blockToEntry(c.GetPKString(), planID, pos, b)
 	if err != nil {
 		return err
 	}
 
 	for _, check := range [5]*workflow.Checks{b.BypassChecks, b.PreChecks, b.PostChecks, b.ContChecks, b.DeferredChecks} {
-		if err := c.commitChecks(ctx, batch, planID, check); err != nil {
+		if err := c.commitChecks(batch, planID, check); err != nil {
 			return fmt.Errorf("commitBlock(commitChecks): %w", err)
 		}
 	}
 
 	for i, seq := range b.Sequences {
-		if err := c.commitSequence(ctx, batch, planID, i, seq); err != nil {
+		if err := c.commitSequence(batch, planID, i, seq); err != nil {
 			return fmt.Errorf("(commitSequence: %w", err)
 		}
 	}
@@ -191,7 +191,7 @@ func (c creator) commitBlock(ctx context.Context, batch TransactionalBatch, plan
 	return nil
 }
 
-func blockToEntry(ctx context.Context, pk string, planID uuid.UUID, pos int, b *workflow.Block) (blocksEntry, error) {
+func blockToEntry(pk string, planID uuid.UUID, pos int, b *workflow.Block) (blocksEntry, error) {
 	if b == nil {
 		return blocksEntry{}, fmt.Errorf("blockToEntry: block cannot be nil")
 	}
@@ -238,18 +238,18 @@ func blockToEntry(ctx context.Context, pk string, planID uuid.UUID, pos int, b *
 	return block, nil
 }
 
-func (c creator) commitSequence(ctx context.Context, batch TransactionalBatch, planID uuid.UUID, pos int, seq *workflow.Sequence) error {
+func (c creator) commitSequence(batch TransactionalBatch, planID uuid.UUID, pos int, seq *workflow.Sequence) error {
 	if seq == nil {
 		return fmt.Errorf("commitSequence: sequence cannot be nil")
 	}
 
-	sequence, err := sequenceToEntry(ctx, c.GetPKString(), planID, pos, seq)
+	sequence, err := sequenceToEntry(c.GetPKString(), planID, pos, seq)
 	if err != nil {
 		return err
 	}
 
 	for i, a := range seq.Actions {
-		if err := c.commitAction(ctx, batch, planID, i, a); err != nil {
+		if err := c.commitAction(batch, planID, i, a); err != nil {
 			return fmt.Errorf("planToEntry(commitAction): %w", err)
 		}
 	}
@@ -262,7 +262,7 @@ func (c creator) commitSequence(ctx context.Context, batch TransactionalBatch, p
 	return nil
 }
 
-func sequenceToEntry(ctx context.Context, pk string, planID uuid.UUID, pos int, seq *workflow.Sequence) (sequencesEntry, error) {
+func sequenceToEntry(pk string, planID uuid.UUID, pos int, seq *workflow.Sequence) (sequencesEntry, error) {
 	if seq == nil {
 		return sequencesEntry{}, fmt.Errorf("sequenceToEntry: sequence cannot be nil")
 	}
@@ -288,12 +288,12 @@ func sequenceToEntry(ctx context.Context, pk string, planID uuid.UUID, pos int, 
 	}, nil
 }
 
-func (c creator) commitAction(ctx context.Context, batch TransactionalBatch, planID uuid.UUID, pos int, a *workflow.Action) error {
+func (c creator) commitAction(batch TransactionalBatch, planID uuid.UUID, pos int, a *workflow.Action) error {
 	if a == nil {
 		return fmt.Errorf("commitAction: action cannot be nil")
 	}
 
-	action, err := actionToEntry(ctx, c.GetPKString(), planID, pos, a)
+	action, err := actionToEntry(c.GetPKString(), planID, pos, a)
 	if err != nil {
 		return err
 	}
@@ -307,7 +307,7 @@ func (c creator) commitAction(ctx context.Context, batch TransactionalBatch, pla
 	return nil
 }
 
-func actionToEntry(ctx context.Context, pk string, planID uuid.UUID, pos int, a *workflow.Action) (actionsEntry, error) {
+func actionToEntry(pk string, planID uuid.UUID, pos int, a *workflow.Action) (actionsEntry, error) {
 	if a == nil {
 		return actionsEntry{}, fmt.Errorf("actionToEntry: action cannot be nil")
 	}
