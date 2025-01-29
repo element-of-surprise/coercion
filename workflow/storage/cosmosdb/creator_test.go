@@ -3,16 +3,13 @@ package cosmosdb
 import (
 	"context"
 	"fmt"
-	"sync"
 	"testing"
 	"time"
 
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
 	"github.com/google/uuid"
 
-	"github.com/element-of-surprise/coercion/plugins/registry"
 	"github.com/element-of-surprise/coercion/workflow"
-	"github.com/element-of-surprise/coercion/workflow/storage/sqlite/testing/plugins"
 	"github.com/element-of-surprise/coercion/workflow/utils/walk"
 )
 
@@ -130,27 +127,8 @@ func TestCreate(t *testing.T) {
 	for _, test := range tests {
 		ctx := context.Background()
 
-		cName := "test"
+		r, cc := dbSetup(test.enforceETag)
 
-		reg := registry.New()
-		reg.MustRegister(&plugins.CheckPlugin{})
-		reg.MustRegister(&plugins.HelloPlugin{})
-
-		cc, err := NewFakeCosmosDBClient(test.enforceETag)
-		if err != nil {
-			t.Fatal(err)
-		}
-		mu := &sync.Mutex{}
-		r := Vault{
-			dbName:       "test-db",
-			cName:        "test-container",
-			partitionKey: "test-partition",
-		}
-		r.reader = reader{cName: cName, Client: cc, reg: reg}
-		r.creator = creator{mu: mu, Client: cc, reader: r.reader}
-		r.updater = newUpdater(mu, cc, r.reader)
-		r.closer = closer{Client: cc}
-		r.deleter = deleter{mu: mu, Client: cc, reader: r.reader}
 		if err := r.Create(ctx, existingPlan); err != nil {
 			t.Fatalf("TestExists(%s): %s", test.name, err)
 		}
@@ -161,7 +139,7 @@ func TestCreate(t *testing.T) {
 			cc.createErr = test.createErr
 		}
 
-		err = r.Create(ctx, test.plan)
+		err := r.Create(ctx, test.plan)
 		switch {
 		case test.wantErr && err == nil:
 			t.Errorf("TestCreate(%s): got err == nil, want err != nil", test.name)

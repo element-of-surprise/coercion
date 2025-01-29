@@ -3,15 +3,12 @@ package cosmosdb
 import (
 	"context"
 	"fmt"
-	"sync"
 	"testing"
 	"time"
 
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
 
-	"github.com/element-of-surprise/coercion/plugins/registry"
 	"github.com/element-of-surprise/coercion/workflow"
-	"github.com/element-of-surprise/coercion/workflow/storage/sqlite/testing/plugins"
 	"github.com/element-of-surprise/coercion/workflow/utils/walk"
 )
 
@@ -96,32 +93,11 @@ func TestDelete(t *testing.T) {
 	for _, test := range tests {
 		ctx := context.Background()
 
-		cName := "test"
+		r, cc := dbSetup(test.enforceETag)
 
-		reg := registry.New()
-		reg.MustRegister(&plugins.CheckPlugin{})
-		reg.MustRegister(&plugins.HelloPlugin{})
-
-		cc, err := NewFakeCosmosDBClient(test.enforceETag)
-		if err != nil {
-			t.Fatal(err)
-		}
-		mu := &sync.Mutex{}
-		r := Vault{
-			dbName:       "test-db",
-			cName:        "test-container",
-			partitionKey: "test-partition",
-			enforceETag:  test.enforceETag,
-		}
-		r.reader = reader{cName: cName, Client: cc, reg: reg}
-		r.creator = creator{mu: mu, Client: cc, reader: r.reader}
-		r.updater = newUpdater(mu, cc, r.reader)
-		r.closer = closer{Client: cc}
-		r.deleter = deleter{mu: mu, Client: cc, reader: r.reader}
 		testPlanID := mustUUID()
 		if test.plan != nil {
-			err = r.Create(ctx, test.plan)
-			if err != nil {
+			if err := r.Create(ctx, test.plan); err != nil {
 				t.Fatalf("TestDelete(%s): %s", test.name, err)
 			}
 			testPlanID = test.plan.ID
@@ -134,7 +110,7 @@ func TestDelete(t *testing.T) {
 			cc.deleteErr = test.deleteErr
 		}
 
-		err = r.Delete(ctx, testPlanID)
+		err := r.Delete(ctx, testPlanID)
 		switch {
 		case test.wantErr && err == nil:
 			t.Errorf("TestDelete(%s): got err == nil, want err != nil", test.name)

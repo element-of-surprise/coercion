@@ -27,12 +27,12 @@ func (u creator) Create(ctx context.Context, plan *workflow.Plan) error {
 		return fmt.Errorf("plan cannot be nil")
 	}
 
-	u.mu.Lock()
-	defer u.mu.Unlock()
-
 	if plan.ID == uuid.Nil {
 		return fmt.Errorf("plan ID cannot be nil")
 	}
+
+	u.mu.Lock()
+	defer u.mu.Unlock()
 
 	exist, err := u.reader.Exists(ctx, plan.ID)
 	if err != nil {

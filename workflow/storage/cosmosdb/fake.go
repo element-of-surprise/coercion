@@ -12,14 +12,16 @@ import (
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore/runtime"
 	"github.com/Azure/azure-sdk-for-go/sdk/data/azcosmos"
+	"github.com/go-json-experiment/json"
+	"github.com/google/uuid"
+
 	pluglib "github.com/element-of-surprise/coercion/plugins"
+	"github.com/element-of-surprise/coercion/plugins/registry"
 	"github.com/element-of-surprise/coercion/workflow"
 	"github.com/element-of-surprise/coercion/workflow/builder"
 	"github.com/element-of-surprise/coercion/workflow/storage/sqlite/testing/plugins"
 	"github.com/element-of-surprise/coercion/workflow/utils/clone"
 	"github.com/element-of-surprise/coercion/workflow/utils/walk"
-	"github.com/go-json-experiment/json"
-	"github.com/google/uuid"
 )
 
 //+gocover:ignore:file No need to test fake store.
@@ -178,7 +180,7 @@ type FakeCosmosDBClient struct {
 }
 
 // NewFakeCosmosDBClient returns a new FakeCosmosDBClient.
-func NewFakeCosmosDBClient(enforceETag bool) (*FakeCosmosDBClient, error) {
+func NewFakeCosmosDBClient(enforceETag bool) *FakeCosmosDBClient {
 	documents := make(map[string][]byte)
 
 	partitionKey := "fakePartitionKey"
@@ -195,7 +197,7 @@ func NewFakeCosmosDBClient(enforceETag bool) (*FakeCosmosDBClient, error) {
 
 		createCallCount: map[Type]int{},
 		deleteCallCount: map[Type]int{},
-	}, nil
+	}
 }
 
 // GetContainerClient returns the container client.
@@ -417,4 +419,27 @@ func getCommonFields(data []byte) (commonFields, error) {
 		return c, err
 	}
 	return c, nil
+}
+
+func dbSetup(enforceETag bool) (*Vault, *FakeCosmosDBClient) {
+	cName := "test-container"
+
+	reg := registry.New()
+	reg.MustRegister(&plugins.CheckPlugin{})
+	reg.MustRegister(&plugins.HelloPlugin{})
+
+	cc := NewFakeCosmosDBClient(enforceETag)
+	mu := &sync.Mutex{}
+	r := &Vault{
+		dbName:       "test-db",
+		cName:        cName,
+		partitionKey: "test-partition",
+	}
+	r.reader = reader{cName: cName, Client: cc, reg: reg}
+	r.creator = creator{mu: mu, Client: cc, reader: r.reader}
+	r.updater = newUpdater(mu, cc, r.reader)
+	r.closer = closer{Client: cc}
+	r.deleter = deleter{mu: mu, Client: cc, reader: r.reader}
+
+	return r, cc
 }

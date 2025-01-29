@@ -3,17 +3,14 @@ package cosmosdb
 import (
 	"context"
 	"fmt"
-	"sync"
 	"testing"
 
 	"github.com/Azure/azure-sdk-for-go/sdk/data/azcosmos"
 	"github.com/google/uuid"
 	"github.com/kylelemons/godebug/pretty"
 
-	"github.com/element-of-surprise/coercion/plugins/registry"
 	"github.com/element-of-surprise/coercion/workflow"
 	"github.com/element-of-surprise/coercion/workflow/storage"
-	"github.com/element-of-surprise/coercion/workflow/storage/sqlite/testing/plugins"
 )
 
 func TestBuildSearchQuery(t *testing.T) {
@@ -244,29 +241,9 @@ func TestExists(t *testing.T) {
 	for _, test := range tests {
 		ctx := context.Background()
 
-		cName := "test"
-
-		reg := registry.New()
-		reg.MustRegister(&plugins.CheckPlugin{})
-		reg.MustRegister(&plugins.HelloPlugin{})
-
 		enforceETag := true
+		r, cc := dbSetup(enforceETag)
 
-		cc, err := NewFakeCosmosDBClient(enforceETag)
-		if err != nil {
-			t.Fatal(err)
-		}
-		mu := &sync.Mutex{}
-		r := Vault{
-			dbName:       "test-db",
-			cName:        "test-container",
-			partitionKey: "test-partition",
-		}
-		r.reader = reader{cName: cName, Client: cc, reg: reg}
-		r.creator = creator{mu: mu, Client: cc, reader: r.reader}
-		r.updater = newUpdater(mu, cc, r.reader)
-		r.closer = closer{Client: cc}
-		r.deleter = deleter{mu: mu, Client: cc, reader: r.reader}
 		if err := r.Create(ctx, plan0); err != nil {
 			t.Fatalf("TestExists(%s): %s", test.name, err)
 		}
@@ -325,29 +302,9 @@ func TestRead(t *testing.T) {
 	for _, test := range tests {
 		ctx := context.Background()
 
-		cName := "test"
-
-		reg := registry.New()
-		reg.MustRegister(&plugins.CheckPlugin{})
-		reg.MustRegister(&plugins.HelloPlugin{})
-
 		enforceETag := true
+		r, _ := dbSetup(enforceETag)
 
-		cc, err := NewFakeCosmosDBClient(enforceETag)
-		if err != nil {
-			t.Fatal(err)
-		}
-		mu := &sync.Mutex{}
-		r := Vault{
-			dbName:       "test-db",
-			cName:        "test-container",
-			partitionKey: "test-partition",
-		}
-		r.reader = reader{cName: cName, Client: cc, reg: reg}
-		r.creator = creator{mu: mu, Client: cc, reader: r.reader}
-		r.updater = newUpdater(mu, cc, r.reader)
-		r.closer = closer{Client: cc}
-		r.deleter = deleter{mu: mu, Client: cc, reader: r.reader}
 		if err := r.Create(ctx, plan0); err != nil {
 			t.Fatalf("TestRead(%s): %s", test.name, err)
 		}
