@@ -23,6 +23,10 @@ type creator struct {
 
 // Create writes Plan data to storage, and all underlying data.
 func (u creator) Create(ctx context.Context, plan *workflow.Plan) error {
+	if plan == nil {
+		return fmt.Errorf("plan cannot be nil")
+	}
+
 	u.mu.Lock()
 	defer u.mu.Unlock()
 

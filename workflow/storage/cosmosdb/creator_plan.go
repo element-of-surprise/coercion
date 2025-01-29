@@ -16,22 +16,26 @@ import (
 var zeroTime = time.Unix(0, 0)
 
 // commitPlan commits a plan to the database. This commits the entire plan and all sub-objects.
-func (u creator) commitPlan(ctx context.Context, p *workflow.Plan) (err error) {
-	batch := u.NewTransactionalBatch()
+func (c creator) commitPlan(ctx context.Context, p *workflow.Plan) (err error) {
+	if p == nil {
+		return fmt.Errorf("commitPlan: plan cannot be nil")
+	}
 
-	plan, err := planToEntry(ctx, u.GetPKString(), p)
+	batch := c.NewTransactionalBatch()
+
+	plan, err := planToEntry(ctx, c.GetPKString(), p)
 	if err != nil {
 		return err
 	}
 
-	for _, c := range [5]*workflow.Checks{p.BypassChecks, p.PreChecks, p.PostChecks, p.ContChecks, p.DeferredChecks} {
-		if err := u.commitChecks(ctx, batch, p.ID, c); err != nil {
+	for _, check := range [5]*workflow.Checks{p.BypassChecks, p.PreChecks, p.PostChecks, p.ContChecks, p.DeferredChecks} {
+		if err := c.commitChecks(ctx, batch, p.ID, check); err != nil {
 			return fmt.Errorf("planToEntry(commitChecks): %w", err)
 		}
 	}
 
 	for i, b := range p.Blocks {
-		if err := u.commitBlock(ctx, batch, p.ID, i, b); err != nil {
+		if err := c.commitBlock(ctx, batch, p.ID, i, b); err != nil {
 			return fmt.Errorf("planToEntry(commitBlocks): %w", err)
 		}
 	}
@@ -42,15 +46,15 @@ func (u creator) commitPlan(ctx context.Context, p *workflow.Plan) (err error) {
 		return fmt.Errorf("failed to marshal item: %w", err)
 	}
 	batch.CreateItem(itemJson, &azcosmos.TransactionalBatchItemOptions{})
-	u.SetBatch(batch)
+	c.SetBatch(batch)
 
-	if _, err = u.ExecuteTransactionalBatch(ctx, batch, &azcosmos.TransactionalBatchOptions{}); err != nil {
+	if _, err = c.ExecuteTransactionalBatch(ctx, batch, &azcosmos.TransactionalBatchOptions{}); err != nil {
 		return fmt.Errorf("failed to create plan through Cosmos DB API: %w", err)
 	}
 
-	if u.EnforceETag() {
+	if c.EnforceETag() {
 		// need to reread plan, because batch response does not contain ETag for each item
-		result, err := u.reader.fetchPlan(ctx, p.ID)
+		result, err := c.reader.fetchPlan(ctx, p.ID)
 		if err != nil {
 			return fmt.Errorf("failed to fetch plan: %w", err)
 		}
@@ -110,18 +114,18 @@ func planToEntry(ctx context.Context, pk string, p *workflow.Plan) (plansEntry, 
 	return plan, nil
 }
 
-func (u creator) commitChecks(ctx context.Context, batch TransactionalBatch, planID uuid.UUID, c *workflow.Checks) error {
-	if c == nil {
+func (c creator) commitChecks(ctx context.Context, batch TransactionalBatch, planID uuid.UUID, ch *workflow.Checks) error {
+	if ch == nil {
 		return nil
 	}
 
-	checks, err := checkToEntry(ctx, u.GetPKString(), planID, c)
+	checks, err := checkToEntry(ctx, c.GetPKString(), planID, ch)
 	if err != nil {
 		return err
 	}
 
-	for i, a := range c.Actions {
-		if err := u.commitAction(ctx, batch, planID, i, a); err != nil {
+	for i, a := range ch.Actions {
+		if err := c.commitAction(ctx, batch, planID, i, a); err != nil {
 			return fmt.Errorf("commitAction: %w", err)
 		}
 	}
@@ -157,20 +161,24 @@ func checkToEntry(ctx context.Context, pk string, planID uuid.UUID, c *workflow.
 	}, nil
 }
 
-func (u creator) commitBlock(ctx context.Context, batch TransactionalBatch, planID uuid.UUID, pos int, b *workflow.Block) error {
-	block, err := blockToEntry(ctx, u.GetPKString(), planID, pos, b)
+func (c creator) commitBlock(ctx context.Context, batch TransactionalBatch, planID uuid.UUID, pos int, b *workflow.Block) error {
+	if b == nil {
+		return fmt.Errorf("commitBlock: block cannot be nil")
+	}
+
+	block, err := blockToEntry(ctx, c.GetPKString(), planID, pos, b)
 	if err != nil {
 		return err
 	}
 
-	for _, c := range [5]*workflow.Checks{b.BypassChecks, b.PreChecks, b.PostChecks, b.ContChecks, b.DeferredChecks} {
-		if err := u.commitChecks(ctx, batch, planID, c); err != nil {
+	for _, check := range [5]*workflow.Checks{b.BypassChecks, b.PreChecks, b.PostChecks, b.ContChecks, b.DeferredChecks} {
+		if err := c.commitChecks(ctx, batch, planID, check); err != nil {
 			return fmt.Errorf("commitBlock(commitChecks): %w", err)
 		}
 	}
 
 	for i, seq := range b.Sequences {
-		if err := u.commitSequence(ctx, batch, planID, i, seq); err != nil {
+		if err := c.commitSequence(ctx, batch, planID, i, seq); err != nil {
 			return fmt.Errorf("(commitSequence: %w", err)
 		}
 	}
@@ -184,6 +192,10 @@ func (u creator) commitBlock(ctx context.Context, batch TransactionalBatch, plan
 }
 
 func blockToEntry(ctx context.Context, pk string, planID uuid.UUID, pos int, b *workflow.Block) (blocksEntry, error) {
+	if b == nil {
+		return blocksEntry{}, fmt.Errorf("blockToEntry: block cannot be nil")
+	}
+
 	sequences, err := objsToIDs(b.Sequences)
 	if err != nil {
 		return blocksEntry{}, fmt.Errorf("objsToIDs(sequences): %w", err)
@@ -226,14 +238,18 @@ func blockToEntry(ctx context.Context, pk string, planID uuid.UUID, pos int, b *
 	return block, nil
 }
 
-func (u creator) commitSequence(ctx context.Context, batch TransactionalBatch, planID uuid.UUID, pos int, seq *workflow.Sequence) error {
-	sequence, err := sequenceToEntry(ctx, u.GetPKString(), planID, pos, seq)
+func (c creator) commitSequence(ctx context.Context, batch TransactionalBatch, planID uuid.UUID, pos int, seq *workflow.Sequence) error {
+	if seq == nil {
+		return fmt.Errorf("commitSequence: sequence cannot be nil")
+	}
+
+	sequence, err := sequenceToEntry(ctx, c.GetPKString(), planID, pos, seq)
 	if err != nil {
 		return err
 	}
 
 	for i, a := range seq.Actions {
-		if err := u.commitAction(ctx, batch, planID, i, a); err != nil {
+		if err := c.commitAction(ctx, batch, planID, i, a); err != nil {
 			return fmt.Errorf("planToEntry(commitAction): %w", err)
 		}
 	}
@@ -247,6 +263,10 @@ func (u creator) commitSequence(ctx context.Context, batch TransactionalBatch, p
 }
 
 func sequenceToEntry(ctx context.Context, pk string, planID uuid.UUID, pos int, seq *workflow.Sequence) (sequencesEntry, error) {
+	if seq == nil {
+		return sequencesEntry{}, fmt.Errorf("sequenceToEntry: sequence cannot be nil")
+	}
+
 	actions, err := objsToIDs(seq.Actions)
 	if err != nil {
 		return sequencesEntry{}, fmt.Errorf("objsToIDs(actions): %w", err)
@@ -268,8 +288,12 @@ func sequenceToEntry(ctx context.Context, pk string, planID uuid.UUID, pos int, 
 	}, nil
 }
 
-func (u creator) commitAction(ctx context.Context, batch TransactionalBatch, planID uuid.UUID, pos int, a *workflow.Action) error {
-	action, err := actionToEntry(ctx, u.GetPKString(), planID, pos, a)
+func (c creator) commitAction(ctx context.Context, batch TransactionalBatch, planID uuid.UUID, pos int, a *workflow.Action) error {
+	if a == nil {
+		return fmt.Errorf("commitAction: action cannot be nil")
+	}
+
+	action, err := actionToEntry(ctx, c.GetPKString(), planID, pos, a)
 	if err != nil {
 		return err
 	}
@@ -284,6 +308,10 @@ func (u creator) commitAction(ctx context.Context, batch TransactionalBatch, pla
 }
 
 func actionToEntry(ctx context.Context, pk string, planID uuid.UUID, pos int, a *workflow.Action) (actionsEntry, error) {
+	if a == nil {
+		return actionsEntry{}, fmt.Errorf("actionToEntry: action cannot be nil")
+	}
+
 	req, err := json.Marshal(a.Req)
 	if err != nil {
 		return actionsEntry{}, fmt.Errorf("json.Marshal(req): %w", err)

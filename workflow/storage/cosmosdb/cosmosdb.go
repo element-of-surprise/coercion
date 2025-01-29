@@ -155,6 +155,8 @@ type Client interface {
 	EnforceETag() bool
 }
 
+var _ Client = &CosmosDBClient{}
+
 // CosmosDBClient has the methods for all of Create/Update/Delete/Query operations
 // on the CosmosDB data.
 type CosmosDBClient struct {
@@ -274,6 +276,9 @@ func New(ctx context.Context, dbName, cName, pk string, cred azcore.TokenCredent
 func (v *Vault) createContainerClient(
 	ctx context.Context,
 	azCosmosClient *azcosmos.Client) (*CosmosDBClient, error) {
+	if azCosmosClient == nil {
+		return nil, fmt.Errorf("azCosmosClient cannot be nil")
+	}
 
 	client := &CosmosDBClient{
 		partitionKey: v.partitionKey,
