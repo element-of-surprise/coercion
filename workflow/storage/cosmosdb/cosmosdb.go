@@ -57,6 +57,9 @@ type Vault struct {
 	private.Storage
 }
 
+// maxRetryAttempts is the maximum number of retry attempts for a CosmosDB request.
+const maxRetryAttempts = 5
+
 var backoff *exponential.Backoff
 
 func init() {

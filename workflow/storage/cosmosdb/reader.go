@@ -48,7 +48,7 @@ func (r reader) Read(ctx context.Context, id uuid.UUID) (*workflow.Plan, error) 
 	fetchPlan := func(ctx context.Context, rec exponential.Record) error {
 		plan, err = r.fetchPlan(ctx, id)
 		if err != nil {
-			if !isRetriableError(err) || rec.Attempt >= 5 {
+			if !isRetriableError(err) || rec.Attempt >= maxRetryAttempts {
 				return fmt.Errorf("%w: %w", err, exponential.ErrPermanent)
 			}
 			return err

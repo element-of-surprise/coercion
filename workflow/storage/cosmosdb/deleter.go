@@ -32,7 +32,7 @@ func (d deleter) Delete(ctx context.Context, id uuid.UUID) error {
 
 	deletePlan := func(ctx context.Context, r exponential.Record) error {
 		if err := d.deletePlan(ctx, plan); err != nil {
-			if !isRetriableError(err) || r.Attempt >= 5 {
+			if !isRetriableError(err) || r.Attempt >= maxRetryAttempts {
 				return fmt.Errorf("%w: %w", err, exponential.ErrPermanent)
 			}
 			return err

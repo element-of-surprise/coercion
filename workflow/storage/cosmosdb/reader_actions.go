@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"reflect"
-	"time"
 
 	"github.com/Azure/azure-sdk-for-go/sdk/data/azcosmos"
 	"github.com/element-of-surprise/coercion/workflow"
@@ -88,7 +87,7 @@ func (r reader) docToAction(ctx context.Context, response []byte) (*workflow.Act
 		Name:    resp.Name,
 		Descr:   resp.Descr,
 		Plugin:  resp.Plugin,
-		Timeout: time.Duration(resp.Timeout),
+		Timeout: resp.Timeout,
 		Retries: resp.Retries,
 		State: &workflow.State{
 			Status: resp.StateStatus,

@@ -45,7 +45,7 @@ func (u creator) Create(ctx context.Context, plan *workflow.Plan) error {
 
 	commitPlan := func(ctx context.Context, r exponential.Record) error {
 		if err = u.commitPlan(ctx, plan); err != nil {
-			if !isRetriableError(err) || r.Attempt >= 5 {
+			if !isRetriableError(err) || r.Attempt >= maxRetryAttempts {
 				return fmt.Errorf("%w: %w", err, exponential.ErrPermanent)
 			}
 			return err
