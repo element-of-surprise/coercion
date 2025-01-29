@@ -386,6 +386,9 @@ func objsToIDs[T any](objs []T) ([]uuid.UUID, error) {
 	for _, o := range objs {
 		if ider, ok := any(o).(ider); ok {
 			id := ider.GetID()
+			if id == uuid.Nil {
+				return nil, fmt.Errorf("objsToIDs: object %T has nil ID", o)
+			}
 			ids = append(ids, id)
 		} else {
 			return nil, fmt.Errorf("objsToIDs: object %T does not implement ider", o)

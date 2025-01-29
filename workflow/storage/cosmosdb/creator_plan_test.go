@@ -61,6 +61,12 @@ func TestObjsToIDs(t *testing.T) {
 			want:    nil,
 			wantErr: true,
 		},
+		{
+			name:    "Error: object is missing ID",
+			objs:    []any{&workflow.Action{ID: id1}, &workflow.Action{}},
+			want:    nil,
+			wantErr: true,
+		},
 	}
 
 	for _, test := range tests {

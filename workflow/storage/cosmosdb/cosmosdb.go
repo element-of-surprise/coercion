@@ -42,7 +42,7 @@ type Vault struct {
 	// This assumes the service will use a single partition.
 	partitionKey string
 
-	enforceEtag    bool
+	enforceETag    bool
 	clientOpts     *azcosmos.ClientOptions
 	containerProps azcosmos.ContainerProperties
 	throughput     int32
@@ -112,7 +112,7 @@ func WithItemOptions(opts azcosmos.ItemOptions) Option {
 // We need to make sure to retry on conflict so we don't lose updates to attempts and such.
 func WithEnforceETag() Option {
 	return func(r *Vault) error {
-		r.enforceEtag = true
+		r.enforceETag = true
 		return nil
 	}
 }
@@ -248,7 +248,7 @@ func New(ctx context.Context, dbName, cName, pk string, cred azcore.TokenCredent
 		}
 	}
 
-	if r.enforceEtag {
+	if r.enforceETag {
 		r.itemOpts.EnableContentResponseOnWrite = true
 	}
 
@@ -283,7 +283,7 @@ func (v *Vault) createContainerClient(
 	client := &CosmosDBClient{
 		partitionKey: v.partitionKey,
 		itemOpts:     v.itemOpts,
-		enforceETag:  v.enforceEtag,
+		enforceETag:  v.enforceETag,
 	}
 
 	dc, err := azCosmosClient.NewDatabase(v.dbName)

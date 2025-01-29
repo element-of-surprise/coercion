@@ -5,31 +5,58 @@ import (
 	"fmt"
 	"sync"
 	"testing"
+	"time"
+
+	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
 
 	"github.com/element-of-surprise/coercion/plugins/registry"
 	"github.com/element-of-surprise/coercion/workflow"
 	"github.com/element-of-surprise/coercion/workflow/storage/sqlite/testing/plugins"
+	"github.com/element-of-surprise/coercion/workflow/utils/walk"
 )
 
 func TestDelete(t *testing.T) {
 	t.Parallel()
 
+	goodPlan := NewTestPlan()
+
+	planWithETag := NewTestPlan()
+	for item := range walk.Plan(context.Background(), planWithETag) {
+		setter := item.Value.(setters)
+		setter.SetState(
+			&workflow.State{
+				Status: workflow.Running,
+				Start:  time.Now().UTC(),
+				End:    time.Now().UTC(),
+				ETag:   string(azcore.ETag(planWithETag.ID.String())),
+			},
+		)
+	}
+
+	planWithNilChecks := NewTestPlan()
+	planWithNilChecks.BypassChecks = nil
+	planWithNilChecks.DeferredChecks = nil
+
+	planWithNilBlocks := NewTestPlan()
+	planWithNilBlocks.Blocks = nil
+
 	tests := []struct {
-		name      string
-		plan      *workflow.Plan
-		readErr   error
-		deleteErr error
-		wantErr   bool
+		name        string
+		plan        *workflow.Plan
+		readErr     error
+		deleteErr   error
+		enforceETag bool
+		wantErr     bool
 	}{
 		{
 			name:    "Error: container client read error",
-			plan:    plan1,
+			plan:    goodPlan,
 			readErr: fmt.Errorf("test error"),
 			wantErr: true,
 		},
 		{
 			name:      "Error: container client delete error",
-			plan:      plan1,
+			plan:      goodPlan,
 			deleteErr: fmt.Errorf("test error"),
 			wantErr:   true,
 		},
@@ -39,7 +66,29 @@ func TestDelete(t *testing.T) {
 		},
 		{
 			name:    "Success",
-			plan:    plan1,
+			plan:    goodPlan,
+			wantErr: false,
+		},
+		{
+			name:        "Success with enforce etag and no etag set",
+			plan:        goodPlan,
+			enforceETag: true,
+			wantErr:     false,
+		},
+		{
+			name:        "Success with enforce etag and etag set",
+			plan:        planWithETag,
+			enforceETag: true,
+			wantErr:     false,
+		},
+		{
+			name:    "Success: not all checks defined",
+			plan:    planWithNilChecks,
+			wantErr: false,
+		},
+		{
+			name:    "Success: nil blocks",
+			plan:    planWithNilBlocks,
 			wantErr: false,
 		},
 	}
@@ -53,7 +102,7 @@ func TestDelete(t *testing.T) {
 		reg.MustRegister(&plugins.CheckPlugin{})
 		reg.MustRegister(&plugins.HelloPlugin{})
 
-		cc, err := NewFakeCosmosDBClient()
+		cc, err := NewFakeCosmosDBClient(test.enforceETag)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -62,6 +111,7 @@ func TestDelete(t *testing.T) {
 			dbName:       "test-db",
 			cName:        "test-container",
 			partitionKey: "test-partition",
+			enforceETag:  test.enforceETag,
 		}
 		r.reader = reader{cName: cName, Client: cc, reg: reg}
 		r.creator = creator{mu: mu, Client: cc, reader: r.reader}

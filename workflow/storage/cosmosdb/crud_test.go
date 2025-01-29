@@ -24,7 +24,9 @@ func TestStorageItemCRUD(t *testing.T) {
 	reg.MustRegister(&plugins.CheckPlugin{})
 	reg.MustRegister(&plugins.HelloPlugin{})
 
-	cc, err := NewFakeCosmosDBClient()
+	enforceETag := true
+
+	cc, err := NewFakeCosmosDBClient(enforceETag)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -33,7 +35,7 @@ func TestStorageItemCRUD(t *testing.T) {
 		dbName:       "test-db",
 		cName:        "test-container",
 		partitionKey: "test-partition",
-		enforceEtag:  true,
+		enforceETag:  enforceETag,
 	}
 	r.reader = reader{cName: cName, Client: cc, reg: reg}
 	r.creator = creator{mu: mu, Client: cc, reader: r.reader}

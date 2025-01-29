@@ -178,7 +178,7 @@ type FakeCosmosDBClient struct {
 }
 
 // NewFakeCosmosDBClient returns a new FakeCosmosDBClient.
-func NewFakeCosmosDBClient() (*FakeCosmosDBClient, error) {
+func NewFakeCosmosDBClient(enforceETag bool) (*FakeCosmosDBClient, error) {
 	documents := make(map[string][]byte)
 
 	partitionKey := "fakePartitionKey"
@@ -190,7 +190,7 @@ func NewFakeCosmosDBClient() (*FakeCosmosDBClient, error) {
 	}
 	return &FakeCosmosDBClient{
 		partitionKey: partitionKey,
-		enforceETag:  true,
+		enforceETag:  enforceETag,
 		client:       &fakeContainerClient,
 
 		createCallCount: map[Type]int{},

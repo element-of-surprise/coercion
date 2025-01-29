@@ -250,7 +250,9 @@ func TestExists(t *testing.T) {
 		reg.MustRegister(&plugins.CheckPlugin{})
 		reg.MustRegister(&plugins.HelloPlugin{})
 
-		cc, err := NewFakeCosmosDBClient()
+		enforceETag := true
+
+		cc, err := NewFakeCosmosDBClient(enforceETag)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -329,7 +331,9 @@ func TestRead(t *testing.T) {
 		reg.MustRegister(&plugins.CheckPlugin{})
 		reg.MustRegister(&plugins.HelloPlugin{})
 
-		cc, err := NewFakeCosmosDBClient()
+		enforceETag := true
+
+		cc, err := NewFakeCosmosDBClient(enforceETag)
 		if err != nil {
 			t.Fatal(err)
 		}
