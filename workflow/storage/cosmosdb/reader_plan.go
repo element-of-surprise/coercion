@@ -22,13 +22,13 @@ func (p reader) fetchPlan(ctx context.Context, id uuid.UUID) (*workflow.Plan, er
 func (p reader) docToPlan(ctx context.Context, response *azcosmos.ItemResponse) (*workflow.Plan, error) {
 	var err error
 	var resp plansEntry
-	err = json.Unmarshal(response.Value, &resp)
-	if err != nil {
+	if err = json.Unmarshal(response.Value, &resp); err != nil {
 		return nil, err
 	}
 
 	plan := &workflow.Plan{
 		ID:         resp.ID,
+		GroupID:    resp.GroupID,
 		Name:       resp.Name,
 		Descr:      resp.Descr,
 		SubmitTime: resp.SubmitTime,
@@ -38,12 +38,6 @@ func (p reader) docToPlan(ctx context.Context, response *azcosmos.ItemResponse) 
 			End:    resp.StateEnd,
 			ETag:   string(resp.ETag),
 		},
-	}
-	gid := resp.GroupID
-	if gid == uuid.Nil {
-		plan.GroupID = uuid.Nil
-	} else {
-		plan.GroupID = resp.GroupID
 	}
 	plan.BypassChecks, err = p.idToCheck(ctx, resp.BypassChecks)
 	if err != nil {

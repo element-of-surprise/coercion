@@ -39,12 +39,12 @@ var pConfig = pretty.Config{
 var (
 	vaultType = flag.String("vault", "sqlite", "The type of storage vault to use.")
 
-	// CosmosDB flags
-	dbName   = flag.String("db-name", os.Getenv("AZURE_COSMOSDB_DBNAME"), "The name of the cosmosdb database.")
-	cName    = flag.String("container-name", os.Getenv("AZURE_COSMOSDB_CNAME"), "The name of the cosmosdb container.")
-	pk       = flag.String("partition-key", os.Getenv("AZURE_COSMOSDB_PK"), "The name of the cosmosdb partition key.")
-	msi      = flag.String("msi", "", "The identity with vmss contributor role. If empty, az login is used.")
-	teardown = flag.Bool("teardown", false, "Teardown the cosmosdb container.")
+	// CosmosDB flags that are only used if vault is set to "cosmosdb".
+	db        = flag.String("db", os.Getenv("AZURE_COSMOSDB_DBNAME"), "The name of the cosmosdb database.")
+	container = flag.String("container", os.Getenv("AZURE_COSMOSDB_CNAME"), "The name of the cosmosdb container.")
+	pk        = flag.String("partition-key", os.Getenv("AZURE_COSMOSDB_PK"), "The name of the cosmosdb partition key.")
+	msi       = flag.String("msi", "", "The identity with vmss contributor role. If empty, az login is used.")
+	teardown  = flag.Bool("teardown", false, "Teardown the cosmosdb container.")
 )
 
 func TestEtoE(t *testing.T) {
@@ -176,7 +176,7 @@ func TestEtoE(t *testing.T) {
 		defer func() {
 			if *vaultType == "cosmosdb" {
 				// Teardown the cosmosdb container
-				if err := cosmosdb.Teardown(ctx, *dbName, *cName, cred, nil); err != nil {
+				if err := cosmosdb.Teardown(ctx, *db, *container, cred, nil); err != nil {
 					panic(err)
 				}
 			}
@@ -188,8 +188,8 @@ func TestEtoE(t *testing.T) {
 	case "sqlite":
 		vault, err = sqlite.New(ctx, "", reg, sqlite.WithInMemory())
 	case "cosmosdb":
-		logger.Info(fmt.Sprintf("TestEtoE: Using cosmosdb: %s, %s, %s", *dbName, *cName, *pk))
-		vault, err = cosmosdb.New(ctx, *dbName, *cName, *pk, cred, reg, cosmosdb.WithEnforceETag())
+		logger.Info(fmt.Sprintf("TestEtoE: Using cosmosdb: %s, %s, %s", *db, *container, *pk))
+		vault, err = cosmosdb.New(ctx, *db, *container, *pk, cred, reg, cosmosdb.WithEnforceETag())
 	default:
 		panic(fmt.Errorf("TestEtoE: unknown storage vault type: %s", *vaultType))
 	}
@@ -391,7 +391,7 @@ func TestBypassPlan(t *testing.T) {
 		defer func() {
 			if *vaultType == "cosmosdb" {
 				// Teardown the cosmosdb container
-				if err := cosmosdb.Teardown(ctx, *dbName, *cName, cred, nil); err != nil {
+				if err := cosmosdb.Teardown(ctx, *db, *container, cred, nil); err != nil {
 					panic(err)
 				}
 			}
@@ -403,8 +403,8 @@ func TestBypassPlan(t *testing.T) {
 	case "sqlite":
 		vault, err = sqlite.New(ctx, "", reg, sqlite.WithInMemory())
 	case "cosmosdb":
-		logger.Info(fmt.Sprintf("TestBypassPlan: Using cosmosdb: %s, %s, %s", *dbName, *cName, *pk))
-		vault, err = cosmosdb.New(ctx, *dbName, *cName, *pk, cred, reg, cosmosdb.WithEnforceETag())
+		logger.Info(fmt.Sprintf("TestBypassPlan: Using cosmosdb: %s, %s, %s", *db, *container, *pk))
+		vault, err = cosmosdb.New(ctx, *db, *container, *pk, cred, reg, cosmosdb.WithEnforceETag())
 	default:
 		panic(fmt.Errorf("TestBypassPlan: unknown storage vault type: %s", *vaultType))
 	}
@@ -574,7 +574,7 @@ func TestBypassBlock(t *testing.T) {
 		defer func() {
 			if *vaultType == "cosmosdb" {
 				// Teardown the cosmosdb container
-				if err := cosmosdb.Teardown(ctx, *dbName, *cName, cred, nil); err != nil {
+				if err := cosmosdb.Teardown(ctx, *db, *container, cred, nil); err != nil {
 					panic(err)
 				}
 			}
@@ -586,8 +586,8 @@ func TestBypassBlock(t *testing.T) {
 	case "sqlite":
 		vault, err = sqlite.New(ctx, "", reg, sqlite.WithInMemory())
 	case "cosmosdb":
-		logger.Info(fmt.Sprintf("TestBypassBlock: Using cosmosdb: %s, %s, %s", *dbName, *cName, *pk))
-		vault, err = cosmosdb.New(ctx, *dbName, *cName, *pk, cred, reg, cosmosdb.WithEnforceETag())
+		logger.Info(fmt.Sprintf("TestBypassBlock: Using cosmosdb: %s, %s, %s", *db, *container, *pk))
+		vault, err = cosmosdb.New(ctx, *db, *container, *pk, cred, reg, cosmosdb.WithEnforceETag())
 	default:
 		panic(fmt.Errorf("TestBypassBlock: unknown storage vault type: %s", *vaultType))
 	}
@@ -665,10 +665,10 @@ func TestBypassBlock(t *testing.T) {
 
 func validateFlags() error {
 	if *vaultType == "cosmosdb" {
-		if *dbName == "" {
+		if *db == "" {
 			return fmt.Errorf("missing db name")
 		}
-		if *cName == "" {
+		if *container == "" {
 			return fmt.Errorf("missing container name")
 		}
 		if *pk == "" {

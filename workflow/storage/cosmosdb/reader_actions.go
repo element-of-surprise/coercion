@@ -31,7 +31,7 @@ FROM actions a
 WHERE a.type=5 AND ARRAY_CONTAINS(@ids, a.id)
 ORDER BY a.pos ASC`
 
-// idsToActions converts the "actions" field in a cosmosdb document to a list of workflow.Actions.
+// idsToActions converts the "actions" field in a cosmosdb document to a list of *workflow.Actions.
 func (r reader) idsToActions(ctx context.Context, actionIDs []uuid.UUID) ([]*workflow.Action, error) {
 	actions, err := r.fetchActionsByIDs(ctx, actionIDs)
 	if err != nil {
@@ -72,12 +72,11 @@ func (r reader) fetchActionsByIDs(ctx context.Context, ids []uuid.UUID) ([]*work
 	return actions, nil
 }
 
-// docToAction converts a cosmosdb document to a workflow.Action.
+// docToAction converts a cosmosdb document to a *workflow.Action.
 func (r reader) docToAction(ctx context.Context, response []byte) (*workflow.Action, error) {
 	var err error
 	var resp actionsEntry
-	err = json.Unmarshal(response, &resp)
-	if err != nil {
+	if err = json.Unmarshal(response, &resp); err != nil {
 		return nil, err
 	}
 

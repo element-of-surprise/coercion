@@ -187,7 +187,7 @@ func TestBuildSearchQuery(t *testing.T) {
 
 	for _, test := range tests {
 		r := reader{
-			cName: "test",
+			container: "test",
 		}
 		query, params := r.buildSearchQuery(test.filters)
 		if test.wantQuery != query {

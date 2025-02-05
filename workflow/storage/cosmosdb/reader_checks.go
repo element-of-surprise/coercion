@@ -11,7 +11,7 @@ import (
 	"github.com/google/uuid"
 )
 
-// idToCheck reads a field from the CosmosDB docuemnt and returns a workflow.Checks  object.
+// idToCheck reads a field from the CosmosDB docuemnt and returns a *workflow.Checks  object.
 // The document must be from a Plan or Block query.
 func (p reader) idToCheck(ctx context.Context, id uuid.UUID) (*workflow.Checks, error) {
 	if id == uuid.Nil {
@@ -39,8 +39,7 @@ func (p reader) fetchChecksByID(ctx context.Context, id uuid.UUID) (*workflow.Ch
 func (p reader) docToChecks(ctx context.Context, response *azcosmos.ItemResponse) (*workflow.Checks, error) {
 	var err error
 	var resp checksEntry
-	err = json.Unmarshal(response.Value, &resp)
-	if err != nil {
+	if err = json.Unmarshal(response.Value, &resp); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal check: %w", err)
 	}
 

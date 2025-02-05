@@ -23,11 +23,11 @@ import (
 //+gocover:ignore:file No need to test fake store.
 
 var (
-	dbName   = flag.String("db-name", os.Getenv("AZURE_COSMOSDB_DBNAME"), "the name of the cosmosdb database")
-	cName    = flag.String("container-name", os.Getenv("AZURE_COSMOSDB_CNAME"), "the name of the cosmosdb container")
-	pk       = flag.String("partition-key", os.Getenv("AZURE_COSMOSDB_PK"), "the name of the cosmosdb partition key")
-	msi      = flag.String("msi", "", "the identity with vmss contributor role. If empty, az login is used")
-	teardown = flag.Bool("teardown", false, "teardown the cosmosdb container")
+	db        = flag.String("db-name", os.Getenv("AZURE_COSMOSDB_DBNAME"), "the name of the cosmosdb database")
+	container = flag.String("container-name", os.Getenv("AZURE_COSMOSDB_CNAME"), "the name of the cosmosdb container")
+	pk        = flag.String("partition-key", os.Getenv("AZURE_COSMOSDB_PK"), "the name of the cosmosdb partition key")
+	msi       = flag.String("msi", "", "the identity with vmss contributor role. If empty, az login is used")
+	teardown  = flag.Bool("teardown", false, "teardown the cosmosdb container")
 )
 
 var zeroTime = time.Unix(0, 0)
@@ -65,13 +65,13 @@ func main() {
 	if *teardown == true {
 		defer func() {
 			// Teardown the cosmosdb container
-			if err := cosmosdb.Teardown(ctx, *dbName, *cName, cred, nil); err != nil {
+			if err := cosmosdb.Teardown(ctx, *db, *container, cred, nil); err != nil {
 				fatalErr(logger, "Failed to teardown: %v", err)
 			}
 		}()
 	}
 
-	vault, err := cosmosdb.New(ctx, *dbName, *cName, *pk, cred, reg, cosmosdb.WithEnforceETag())
+	vault, err := cosmosdb.New(ctx, *db, *container, *pk, cred, reg, cosmosdb.WithEnforceETag())
 	if err != nil {
 		fatalErr(logger, "Failed to create vault: %v", err)
 	}

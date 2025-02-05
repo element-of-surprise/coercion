@@ -3,13 +3,11 @@ package cosmosdb
 import (
 	"context"
 	"errors"
-	"fmt"
 	"log/slog"
 	"net/http"
 	"sync"
 	"time"
 
-	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore/runtime"
 	"github.com/Azure/azure-sdk-for-go/sdk/data/azcosmos"
 	"github.com/go-json-experiment/json"
@@ -25,10 +23,6 @@ import (
 )
 
 //+gocover:ignore:file No need to test fake store.
-
-var (
-	ErrCosmosDBNotFound error = fmt.Errorf("cosmosdb error: %w", &azcore.ResponseError{StatusCode: http.StatusNotFound})
-)
 
 var (
 	plan *workflow.Plan
@@ -422,7 +416,7 @@ func getCommonFields(data []byte) (commonFields, error) {
 }
 
 func dbSetup(enforceETag bool) (*Vault, *FakeCosmosDBClient) {
-	cName := "test-container"
+	container := "test-container"
 
 	reg := registry.New()
 	reg.MustRegister(&plugins.CheckPlugin{})
@@ -431,11 +425,11 @@ func dbSetup(enforceETag bool) (*Vault, *FakeCosmosDBClient) {
 	cc := NewFakeCosmosDBClient(enforceETag)
 	mu := &sync.Mutex{}
 	r := &Vault{
-		dbName:       "test-db",
-		cName:        cName,
+		db:           "test-db",
+		container:    container,
 		partitionKey: "test-partition",
 	}
-	r.reader = reader{cName: cName, Client: cc, reg: reg}
+	r.reader = reader{container: container, Client: cc, reg: reg}
 	r.creator = creator{mu: mu, Client: cc, reader: r.reader}
 	r.updater = newUpdater(mu, cc, r.reader)
 	r.closer = closer{Client: cc}

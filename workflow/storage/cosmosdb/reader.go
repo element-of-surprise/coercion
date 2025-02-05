@@ -5,14 +5,15 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/element-of-surprise/coercion/plugins/registry"
-	"github.com/element-of-surprise/coercion/workflow"
-	"github.com/element-of-surprise/coercion/workflow/storage"
-
 	"github.com/Azure/azure-sdk-for-go/sdk/data/azcosmos"
 	"github.com/go-json-experiment/json"
 	"github.com/google/uuid"
 	"github.com/gostdlib/ops/retry/exponential"
+
+	"github.com/element-of-surprise/coercion/internal/private"
+	"github.com/element-of-surprise/coercion/plugins/registry"
+	"github.com/element-of-surprise/coercion/workflow"
+	"github.com/element-of-surprise/coercion/workflow/storage"
 )
 
 const (
@@ -24,9 +25,11 @@ const (
 
 // reader implements the storage.PlanReader interface.
 type reader struct {
-	cName string
+	container string
 	Client
 	reg *registry.Register
+
+	private.Storage
 }
 
 // Exists returns true if the Plan ID exists in the storage.
@@ -70,7 +73,7 @@ func (r reader) Search(ctx context.Context, filters storage.Filters) (chan stora
 	q, parameters := r.buildSearchQuery(filters)
 
 	pager := r.GetContainerClient().NewQueryItemsPager(q, r.GetPK(), &azcosmos.QueryOptions{QueryParameters: parameters})
-	results := make(chan storage.Stream[storage.ListResult])
+	results := make(chan storage.Stream[storage.ListResult], 1)
 	go func() {
 		defer close(results)
 		for pager.More() {
@@ -108,7 +111,7 @@ func (r reader) buildSearchQuery(filters storage.Filters) (string, []azcosmos.Qu
 	parameters := []azcosmos.QueryParameter{}
 
 	build := strings.Builder{}
-	build.WriteString(fmt.Sprintf(searchPlans, r.cName))
+	build.WriteString(fmt.Sprintf(searchPlans, r.container))
 
 	numFilters := 0
 
@@ -170,13 +173,13 @@ func (r reader) buildSearchQuery(filters storage.Filters) (string, []azcosmos.Qu
 // return with most recent submiited first. Limit sets the maximum number of
 // entries to return
 func (r reader) List(ctx context.Context, limit int) (chan storage.Stream[storage.ListResult], error) {
-	q := fmt.Sprintf(listPlans, r.cName)
+	q := fmt.Sprintf(listPlans, r.container)
 	if limit > 0 {
 		q += fmt.Sprintf(" OFFSET 0 LIMIT %d", limit)
 	}
 
 	pager := r.GetContainerClient().NewQueryItemsPager(q, r.GetPK(), &azcosmos.QueryOptions{QueryParameters: []azcosmos.QueryParameter{}})
-	results := make(chan storage.Stream[storage.ListResult])
+	results := make(chan storage.Stream[storage.ListResult], 1)
 	go func() {
 		defer close(results)
 		for pager.More() {
@@ -213,8 +216,7 @@ func (r reader) List(ctx context.Context, limit int) (chan storage.Stream[storag
 func (r reader) listResultsFunc(item []byte) (storage.ListResult, error) {
 	var err error
 	var resp plansEntry
-	err = json.Unmarshal(item, &resp)
-	if err != nil {
+	if err = json.Unmarshal(item, &resp); err != nil {
 		return storage.ListResult{}, err
 	}
 
@@ -232,8 +234,4 @@ func (r reader) listResultsFunc(item []byte) (storage.ListResult, error) {
 		},
 	}
 	return result, nil
-}
-
-func (r reader) private() {
-	return
 }

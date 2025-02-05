@@ -10,7 +10,7 @@ import (
 	"github.com/google/uuid"
 )
 
-// idsToBlocks converts the "blocks" field in a cosmosdb document to a list of workflow.Blocks.
+// idsToBlocks converts the "blocks" field in a cosmosdb document to a list of *workflow.Blocks.
 func (p reader) idsToBlocks(ctx context.Context, blockIDs []uuid.UUID) ([]*workflow.Block, error) {
 	blocks := make([]*workflow.Block, 0, len(blockIDs))
 	for _, id := range blockIDs {
@@ -27,19 +27,17 @@ func (p reader) idsToBlocks(ctx context.Context, blockIDs []uuid.UUID) ([]*workf
 func (p reader) fetchBlockByID(ctx context.Context, id uuid.UUID) (*workflow.Block, error) {
 	res, err := p.GetContainerClient().ReadItem(ctx, p.GetPK(), id.String(), p.ItemOptions())
 	if err != nil {
-		// return p, fmt.Errorf("failed to read item through Cosmos DB API: %w", cosmosErr(err))
 		return nil, fmt.Errorf("couldn't fetch block by id: %w", err)
 	}
 
 	return p.docToBlock(ctx, &res)
 }
 
-// docToBlock converts a cosmosdb document to a workflow.Block.
+// docToBlock converts a cosmosdb document to a *workflow.Block.
 func (p reader) docToBlock(ctx context.Context, response *azcosmos.ItemResponse) (*workflow.Block, error) {
 	var err error
 	var resp blocksEntry
-	err = json.Unmarshal(response.Value, &resp)
-	if err != nil {
+	if err = json.Unmarshal(response.Value, &resp); err != nil {
 		return nil, err
 	}
 

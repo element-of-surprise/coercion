@@ -32,21 +32,21 @@ var _ storage.Vault = &Vault{}
 
 // Vault implements the storage.Vault interface.
 type Vault struct {
-	// dbName is the CosmosDB database name for the storage.
-	dbName string
-	// cName is the CosmosDB container name for the storage.
-	cName string
+	// db is the CosmosDB database name for the storage.
+	db string
+	// container is the CosmosDB container name for the storage.
+	container string
 	// endpoint is the CosmosDB account endpoint
 	endpoint string
 	// partitionKey is the partition key for the storage.
 	// This assumes the service will use a single partition.
 	partitionKey string
 
-	enforceETag    bool
-	clientOpts     *azcosmos.ClientOptions
-	containerProps azcosmos.ContainerProperties
-	throughput     int32
-	itemOpts       azcosmos.ItemOptions
+	enforceETag bool
+	clientOpts  *azcosmos.ClientOptions
+	props       azcosmos.ContainerProperties
+	throughput  int32
+	itemOpts    azcosmos.ItemOptions
 
 	reader
 	creator
@@ -97,7 +97,7 @@ func WithThroughput(throughput int32) Option {
 // Any changes to container name, partition key, and indexing policy here will be overriden.
 func WithContainerProperties(props azcosmos.ContainerProperties) Option {
 	return func(r *Vault) error {
-		r.containerProps = props
+		r.props = props
 		return nil
 	}
 }
@@ -234,15 +234,15 @@ var indexPaths = []azcosmos.IncludedPath{
 	pathToScalar("pos"), // actions
 }
 
-// New is the constructor for *Vault. dbName, cName, and pk are used to identify the storage container.
+// New is the constructor for *Vault. db, container, and pk are used to identify the storage container.
 // If the container does not exist, it will be created.
-func New(ctx context.Context, dbName, cName, pk string, cred azcore.TokenCredential, reg *registry.Register, options ...Option) (*Vault, error) {
+func New(ctx context.Context, db, container, pk string, cred azcore.TokenCredential, reg *registry.Register, options ...Option) (*Vault, error) {
 	ctx = context.WithoutCancel(ctx)
 
 	r := &Vault{
-		dbName:       dbName,
-		cName:        cName,
-		endpoint:     fmt.Sprintf("https://%s.documents.azure.com:443/", dbName),
+		db:           db,
+		container:    container,
+		endpoint:     fmt.Sprintf("https://%s.documents.azure.com:443/", db),
 		partitionKey: pk,
 	}
 	for _, o := range options {
@@ -267,7 +267,7 @@ func New(ctx context.Context, dbName, cName, pk string, cred azcore.TokenCredent
 
 	mu := &sync.Mutex{}
 
-	r.reader = reader{cName: cName, Client: cc, reg: reg}
+	r.reader = reader{container: container, Client: cc, reg: reg}
 	r.creator = creator{mu: mu, Client: cc, reader: r.reader}
 	r.updater = newUpdater(mu, cc, r.reader)
 	r.closer = closer{Client: cc}
@@ -289,7 +289,7 @@ func (v *Vault) createContainerClient(
 		enforceETag:  v.enforceETag,
 	}
 
-	dc, err := azCosmosClient.NewDatabase(v.dbName)
+	dc, err := azCosmosClient.NewDatabase(v.db)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create Cosmos DB database client: %w", err)
 	}
@@ -303,18 +303,18 @@ func (v *Vault) createContainerClient(
 		if err != nil {
 			switch {
 			case IsConflict(err):
-				slog.Default().Warn(fmt.Sprintf("Container %s already exists: %s", v.cName, err))
+				slog.Default().Warn(fmt.Sprintf("Container %s already exists: %s", v.container, err))
 			default:
-				return nil, fmt.Errorf("failed to create Cosmos DB container: container=%s. %w", v.cName, err)
+				return nil, fmt.Errorf("failed to create Cosmos DB container: container=%s. %w", v.container, err)
 			}
 		} else {
 			slog.Default().Info(activityID)
 		}
 	}
 
-	cc, err := azCosmosClient.NewContainer(v.dbName, v.cName)
+	cc, err := azCosmosClient.NewContainer(v.db, v.container)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create Cosmos DB container client: container=%s. %w", v.cName, err)
+		return nil, fmt.Errorf("failed to create Cosmos DB container client: container=%s. %w", v.container, err)
 	}
 
 	client.client = cc
@@ -323,7 +323,7 @@ func (v *Vault) createContainerClient(
 		return nil, fmt.Errorf(
 			"failed to connect to Cosmos DB container: endpoint=%q, container=%q. %w",
 			v.endpoint,
-			v.cName,
+			v.container,
 			err,
 		)
 	}
@@ -333,11 +333,11 @@ func (v *Vault) createContainerClient(
 
 // createContainer creates a container. Check for existence first.
 func (v *Vault) createContainer(ctx context.Context, database *azcosmos.DatabaseClient, indexPaths []azcosmos.IncludedPath) (string, error) {
-	v.containerProps.ID = v.cName
-	v.containerProps.PartitionKeyDefinition = azcosmos.PartitionKeyDefinition{
+	v.props.ID = v.container
+	v.props.PartitionKeyDefinition = azcosmos.PartitionKeyDefinition{
 		Paths: []string{"/partitionKey"},
 	}
-	v.containerProps.IndexingPolicy = &azcosmos.IndexingPolicy{
+	v.props.IndexingPolicy = &azcosmos.IndexingPolicy{
 		IncludedPaths: indexPaths,
 		// exclude by default
 		ExcludedPaths: []azcosmos.ExcludedPath{
@@ -353,7 +353,7 @@ func (v *Vault) createContainer(ctx context.Context, database *azcosmos.Database
 		v.throughput = 400
 	}
 	throughput := azcosmos.NewManualThroughputProperties(v.throughput)
-	response, err := database.CreateContainer(ctx, v.containerProps, &azcosmos.CreateContainerOptions{ThroughputProperties: &throughput})
+	response, err := database.CreateContainer(ctx, v.props, &azcosmos.CreateContainerOptions{ThroughputProperties: &throughput})
 	if err != nil {
 		return "", err
 	}
@@ -362,12 +362,12 @@ func (v *Vault) createContainer(ctx context.Context, database *azcosmos.Database
 
 // containerExists checks if the container exists.
 func (v *Vault) containerExists(ctx context.Context, client *azcosmos.Client) (bool, error) {
-	cc, err := client.NewContainer(v.dbName, v.cName)
+	cc, err := client.NewContainer(v.db, v.container)
 	if err != nil {
 		return false, fmt.Errorf(
 			"failed to connect to Cosmos DB container: endpoint=%q, container=%q. %w",
 			v.endpoint,
-			v.cName,
+			v.container,
 			err,
 		)
 	}
@@ -376,7 +376,7 @@ func (v *Vault) containerExists(ctx context.Context, client *azcosmos.Client) (b
 			return false, fmt.Errorf(
 				"failed to connect to Cosmos DB container: endpoint=%q, container=%q. %w",
 				v.endpoint,
-				v.cName,
+				v.container,
 				err,
 			)
 		}
@@ -395,26 +395,26 @@ func deleteContainer(ctx context.Context, cc *azcosmos.ContainerClient) (string,
 }
 
 // Teardown deletes a container from a given CosmosDB database. This is for testing only.
-func Teardown(ctx context.Context, dbName, cName string, cred azcore.TokenCredential, clientOpts *azcosmos.ClientOptions) error {
-	endpoint := fmt.Sprintf("https://%s.documents.azure.com:443/", dbName)
+func Teardown(ctx context.Context, db, container string, cred azcore.TokenCredential, clientOpts *azcosmos.ClientOptions) error {
+	endpoint := fmt.Sprintf("https://%s.documents.azure.com:443/", db)
 
 	client, err := azcosmos.NewClient(endpoint, cred, clientOpts)
 	if err != nil {
 		return err
 	}
 
-	cc, err := client.NewContainer(dbName, cName)
+	cc, err := client.NewContainer(db, container)
 	if err != nil {
 		return fmt.Errorf(
 			"failed to connect to Cosmos DB container: endpoint=%q, container=%q. %w",
 			endpoint,
-			cName,
+			container,
 			err,
 		)
 	}
 
 	if _, err := deleteContainer(ctx, cc); err != nil {
-		return fmt.Errorf("failed to delete Cosmos DB container: container=%s. %w", cName, err)
+		return fmt.Errorf("failed to delete Cosmos DB container: container=%s. %w", container, err)
 	}
 	return nil
 }
