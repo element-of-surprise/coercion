@@ -22,7 +22,7 @@ import (
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore/runtime"
 	"github.com/Azure/azure-sdk-for-go/sdk/data/azcosmos"
-	"github.com/gostdlib/ops/retry/exponential"
+	"github.com/Azure/retry/exponential"
 
 	_ "embed"
 )
@@ -42,11 +42,10 @@ type Vault struct {
 	// This assumes the service will use a single partition.
 	partitionKey string
 
-	enforceETag bool
-	clientOpts  *azcosmos.ClientOptions
-	props       azcosmos.ContainerProperties
-	throughput  int32
-	itemOpts    azcosmos.ItemOptions
+	clientOpts *azcosmos.ClientOptions
+	props      azcosmos.ContainerProperties
+	throughput int32
+	itemOpts   azcosmos.ItemOptions
 
 	reader
 	creator
@@ -57,15 +56,14 @@ type Vault struct {
 	private.Storage
 }
 
-// maxRetryAttempts is the maximum number of retry attempts for a CosmosDB request.
-const maxRetryAttempts = 5
-
 var backoff *exponential.Backoff
 
 func init() {
 	var err error
 	// This ensures that a custom retry policy is going to work. backoff is reusable.
 	// should this be different for read and write?
+	policy := plugins.SecondsRetryPolicy()
+	policy.MaxAttempts = 5
 	backoff, err = exponential.New(exponential.WithPolicy(plugins.SecondsRetryPolicy()))
 	if err != nil {
 		fatalErr(slog.Default(), "failed to create backoff policy: %v", err)
@@ -84,7 +82,7 @@ func WithClientOptions(opts *azcosmos.ClientOptions) Option {
 	}
 }
 
-// WithThroughput sets container throughtput in RUs in manual mode.
+// WithThroughput sets container throughtput in RU/s in manual mode. Default is 400.
 func WithThroughput(throughput int32) Option {
 	return func(r *Vault) error {
 		r.throughput = throughput
@@ -111,25 +109,16 @@ func WithItemOptions(opts azcosmos.ItemOptions) Option {
 	}
 }
 
-// WithEnforceETag enables enforcing etag match on update.
-// We need to make sure to retry on conflict so we don't lose updates to attempts and such.
-func WithEnforceETag() Option {
-	return func(r *Vault) error {
-		r.enforceETag = true
-		return nil
-	}
-}
-
 // ContainerClient is the interface for the CosmosDB container client.
 // This allows for faking the azcosmos container client.
-type ContainerClient interface {
+type containerClient interface {
 	NewQueryItemsPager(string, azcosmos.PartitionKey, *azcosmos.QueryOptions) *runtime.Pager[azcosmos.QueryItemsResponse]
 	ReadItem(context.Context, azcosmos.PartitionKey, string, *azcosmos.ItemOptions) (azcosmos.ItemResponse, error)
 	PatchItem(context.Context, azcosmos.PartitionKey, string, azcosmos.PatchOperations, *azcosmos.ItemOptions) (azcosmos.ItemResponse, error)
 }
 
-// TransactionalBatch is the interface for the CosmosDB transactional batch.
-type TransactionalBatch interface {
+// transactionalBatch is the interface for the CosmosDB transactional batch.
+type transactionalBatch interface {
 	CreateItem(item []byte, o *azcosmos.TransactionalBatchItemOptions)
 	DeleteItem(itemID string, o *azcosmos.TransactionalBatchItemOptions)
 }
@@ -139,77 +128,69 @@ func partitionKey(val string) azcosmos.PartitionKey {
 }
 
 // Client is the interface for the CosmosDB client.
-type Client interface {
-	// GetContainerClient returns the container client.
-	GetContainerClient() ContainerClient
-	// GetPK returns the partition key.
-	GetPK() azcosmos.PartitionKey
-	// GetPKString returns the partition key as a string.
-	GetPKString() string
-	// NewTransactionalBatch returns a TransactionalBatch. This allows using a fake TransactionalBatch.
-	NewTransactionalBatch() TransactionalBatch
-	// ExecuteTransactionalBatch executes a transactional batch.
-	ExecuteTransactionalBatch(context.Context, TransactionalBatch, *azcosmos.TransactionalBatchOptions) (azcosmos.TransactionalBatchResponse, error)
-	// SetBatch allows for setting the fake batch in tests.
-	SetBatch(TransactionalBatch)
-	// ItemOptions returns the item options.
-	ItemOptions() *azcosmos.ItemOptions
-	// EnforceETag returns whether to enforce etag match on update.
-	EnforceETag() bool
+type client interface {
+	// getContainerClient returns the container client.
+	getContainerClient() containerClient
+	// getPK returns the partition key.
+	getPK() azcosmos.PartitionKey
+	// getPKString returns the partition key as a string.
+	getPKString() string
+	// newTransactionalBatch returns a TransactionalBatch. This allows using a fake TransactionalBatch.
+	newTransactionalBatch() transactionalBatch
+	// executeTransactionalBatch executes a transactional batch.
+	executeTransactionalBatch(context.Context, transactionalBatch, *azcosmos.TransactionalBatchOptions) (azcosmos.TransactionalBatchResponse, error)
+	// setBatch allows for setting the fake batch in tests.
+	setBatch(transactionalBatch)
+	// itemOptions returns the item options.
+	itemOptions() *azcosmos.ItemOptions
 }
 
-var _ Client = &CosmosDBClient{}
+var _ client = &cosmosDBClient{}
 
-// CosmosDBClient has the methods for all of Create/Update/Delete/Query operations
+// cosmosDBClient has the methods for all of Create/Update/Delete/Query operations
 // on the CosmosDB data.
-type CosmosDBClient struct {
+type cosmosDBClient struct {
 	partitionKey string
 
 	client *azcosmos.ContainerClient
 
-	itemOpts    azcosmos.ItemOptions
-	enforceETag bool
+	itemOpts azcosmos.ItemOptions
 }
 
-// GetContainerClient returns the container client.
-func (c *CosmosDBClient) GetContainerClient() ContainerClient {
+// getContainerClient returns the container client.
+func (c *cosmosDBClient) getContainerClient() containerClient {
 	return c.client
 }
 
-// GetPK returns the partition key.
-func (c *CosmosDBClient) GetPK() azcosmos.PartitionKey {
+// getPK returns the partition key.
+func (c *cosmosDBClient) getPK() azcosmos.PartitionKey {
 	return partitionKey(c.partitionKey)
 }
 
-// GetPKString returns the partition key as a string.
-func (c *CosmosDBClient) GetPKString() string {
+// getPKString returns the partition key as a string.
+func (c *cosmosDBClient) getPKString() string {
 	return c.partitionKey
 }
 
-// NewTransactionalBatch returns a TransactionalBatch. This allows using a fake TransactionalBatch.
-func (c *CosmosDBClient) NewTransactionalBatch() TransactionalBatch {
-	batch := c.client.NewTransactionalBatch(c.GetPK())
+// newTransactionalBatch returns a transactionalBatch. This allows using a fake TransactionalBatch.
+func (c *cosmosDBClient) newTransactionalBatch() transactionalBatch {
+	batch := c.client.NewTransactionalBatch(c.getPK())
 	return &batch
 }
 
-// SetBatch sets the batch for testing with the fake client, so nothing is
+// setBatch sets the batch for testing with the fake client, so nothing is
 // needed to be done for the real client.
-func (c *CosmosDBClient) SetBatch(batch TransactionalBatch) {
+func (c *cosmosDBClient) setBatch(batch transactionalBatch) {
 }
 
-// ItemOptions returns the item options.
-func (c *CosmosDBClient) ItemOptions() *azcosmos.ItemOptions {
+// itemOptions returns the item options.
+func (c *cosmosDBClient) itemOptions() *azcosmos.ItemOptions {
 	return &c.itemOpts
 }
 
-// EnforceETag returns whether enforcing etag match is required.
-func (c *CosmosDBClient) EnforceETag() bool {
-	return c.enforceETag
-}
-
-// ExecuteTransactionalBatch executes a transactional batch. This allows for faking by accepting the TransactionalBatch
+// ExecuteTransactionalBatch executes a transactional batch. This allows for faking by accepting the transactionalBatch
 // interface. This is only used internally, so asserting type here should be fine.
-func (c *CosmosDBClient) ExecuteTransactionalBatch(ctx context.Context, b TransactionalBatch, opts *azcosmos.TransactionalBatchOptions) (azcosmos.TransactionalBatchResponse, error) {
+func (c *cosmosDBClient) executeTransactionalBatch(ctx context.Context, b transactionalBatch, opts *azcosmos.TransactionalBatchOptions) (azcosmos.TransactionalBatchResponse, error) {
 	if b == nil {
 		return azcosmos.TransactionalBatchResponse{}, fmt.Errorf("nil transactional batch")
 	}
@@ -251,9 +232,8 @@ func New(ctx context.Context, db, container, pk string, cred azcore.TokenCredent
 		}
 	}
 
-	if r.enforceETag {
-		r.itemOpts.EnableContentResponseOnWrite = true
-	}
+	// This is necessary for enforcing ETag.
+	r.itemOpts.EnableContentResponseOnWrite = true
 
 	client, err := azcosmos.NewClient(r.endpoint, cred, r.clientOpts)
 	if err != nil {
@@ -267,26 +247,25 @@ func New(ctx context.Context, db, container, pk string, cred azcore.TokenCredent
 
 	mu := &sync.Mutex{}
 
-	r.reader = reader{container: container, Client: cc, reg: reg}
-	r.creator = creator{mu: mu, Client: cc, reader: r.reader}
+	r.reader = reader{container: container, client: cc, reg: reg}
+	r.creator = creator{mu: mu, client: cc, reader: r.reader}
 	r.updater = newUpdater(mu, cc, r.reader)
-	r.closer = closer{Client: cc}
-	r.deleter = deleter{mu: mu, Client: cc, reader: r.reader}
+	r.closer = closer{client: cc}
+	r.deleter = deleter{mu: mu, client: cc, reader: r.reader}
 	return r, nil
 }
 
-// Use this function to create a new CosmosDBClient struct.
+// Use this function to create a new cosmosDBClient struct.
 func (v *Vault) createContainerClient(
 	ctx context.Context,
-	azCosmosClient *azcosmos.Client) (*CosmosDBClient, error) {
+	azCosmosClient *azcosmos.Client) (*cosmosDBClient, error) {
 	if azCosmosClient == nil {
 		return nil, fmt.Errorf("azCosmosClient cannot be nil")
 	}
 
-	client := &CosmosDBClient{
+	client := &cosmosDBClient{
 		partitionKey: v.partitionKey,
 		itemOpts:     v.itemOpts,
-		enforceETag:  v.enforceETag,
 	}
 
 	dc, err := azCosmosClient.NewDatabase(v.db)

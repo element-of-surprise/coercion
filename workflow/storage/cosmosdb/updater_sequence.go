@@ -16,7 +16,7 @@ var _ storage.SequenceUpdater = sequenceUpdater{}
 // sequenceUpdater implements the storage.sequenceUpdater interface.
 type sequenceUpdater struct {
 	mu *sync.Mutex
-	Client
+	client
 
 	private.Storage
 }
@@ -31,24 +31,19 @@ func (u sequenceUpdater) UpdateSequence(ctx context.Context, seq *workflow.Seque
 	patch.AppendReplace("/stateStart", seq.State.Start)
 	patch.AppendReplace("/stateEnd", seq.State.End)
 
-	itemOpt := u.ItemOptions()
-	if u.EnforceETag() {
-		var ifMatchEtag *azcore.ETag = nil
-		if seq.State.ETag != "" {
-			ifMatchEtag = (*azcore.ETag)(&seq.State.ETag)
-		}
-		itemOpt.IfMatchEtag = ifMatchEtag
+	itemOpt := u.itemOptions()
+	var ifMatchEtag *azcore.ETag = nil
+	if seq.State.ETag != "" {
+		ifMatchEtag = (*azcore.ETag)(&seq.State.ETag)
 	}
+	itemOpt.IfMatchEtag = ifMatchEtag
 
-	// save the item into Cosmos DB
-	resp, err := patchItemWithRetry(ctx, u.GetContainerClient(), u.GetPK(), seq.ID.String(), patch, itemOpt)
+	resp, err := patchItemWithRetry(ctx, u.getContainerClient(), u.getPK(), seq.ID.String(), patch, itemOpt)
 	if err != nil {
 		return err
 	}
 
-	if u.EnforceETag() {
-		seq.State.ETag = string(resp.ETag)
-	}
+	seq.State.ETag = string(resp.ETag)
 
 	return nil
 }

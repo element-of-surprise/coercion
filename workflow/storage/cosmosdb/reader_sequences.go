@@ -25,7 +25,7 @@ func (p reader) idsToSequences(ctx context.Context, sequenceIDs []uuid.UUID) ([]
 
 // fetchSequenceByID fetches a sequence by its id.
 func (p reader) fetchSequenceByID(ctx context.Context, id uuid.UUID) (*workflow.Sequence, error) {
-	res, err := p.GetContainerClient().ReadItem(ctx, p.GetPK(), id.String(), p.ItemOptions())
+	res, err := p.getContainerClient().ReadItem(ctx, p.getPK(), id.String(), p.itemOptions())
 	if err != nil {
 		return nil, fmt.Errorf("couldn't fetch sequence by id: %w", err)
 	}

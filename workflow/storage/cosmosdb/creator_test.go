@@ -49,12 +49,11 @@ func TestCreate(t *testing.T) {
 	planWithBadIDs.Blocks[0].ID = uuid.Nil
 
 	tests := []struct {
-		name        string
-		plan        *workflow.Plan
-		readErr     error
-		createErr   error
-		enforceETag bool
-		wantErr     bool
+		name      string
+		plan      *workflow.Plan
+		readErr   error
+		createErr error
+		wantErr   bool
 	}{
 		{
 			name:    "Error: plan is nil",
@@ -89,16 +88,9 @@ func TestCreate(t *testing.T) {
 			wantErr: false,
 		},
 		{
-			name:        "Success with enforce etag and no etag set",
-			plan:        goodPlan,
-			enforceETag: true,
-			wantErr:     false,
-		},
-		{
-			name:        "Success with enforce etag and etag set",
-			plan:        planWithETag,
-			enforceETag: true,
-			wantErr:     false,
+			name:    "Success and etag set",
+			plan:    planWithETag,
+			wantErr: false,
 		},
 		{
 			name:    "Success: not all checks defined",
@@ -127,7 +119,7 @@ func TestCreate(t *testing.T) {
 	for _, test := range tests {
 		ctx := context.Background()
 
-		r, cc := dbSetup(test.enforceETag)
+		r, cc := dbSetup()
 
 		if err := r.Create(ctx, existingPlan); err != nil {
 			t.Fatalf("TestExists(%s): %s", test.name, err)

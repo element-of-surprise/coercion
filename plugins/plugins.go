@@ -5,7 +5,7 @@ import (
 	"context"
 	"time"
 
-	"github.com/gostdlib/ops/retry/exponential"
+	"github.com/Azure/retry/exponential"
 )
 
 // ErrCode is the type for error codes that are returned by plugins. Unlike most typed error codes,

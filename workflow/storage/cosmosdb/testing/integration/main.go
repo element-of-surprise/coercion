@@ -71,7 +71,7 @@ func main() {
 		}()
 	}
 
-	vault, err := cosmosdb.New(ctx, *db, *container, *pk, cred, reg, cosmosdb.WithEnforceETag())
+	vault, err := cosmosdb.New(ctx, *db, *container, *pk, cred, reg)
 	if err != nil {
 		fatalErr(logger, "Failed to create vault: %v", err)
 	}

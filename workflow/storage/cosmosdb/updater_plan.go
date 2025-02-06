@@ -16,7 +16,7 @@ var _ storage.PlanUpdater = planUpdater{}
 // planUpdater implements the storage.PlanUpdater interface.
 type planUpdater struct {
 	mu *sync.Mutex
-	Client
+	client
 
 	private.Storage
 }
@@ -32,24 +32,19 @@ func (u planUpdater) UpdatePlan(ctx context.Context, p *workflow.Plan) error {
 	patch.AppendReplace("/stateStart", p.State.Start)
 	patch.AppendReplace("/stateEnd", p.State.End)
 
-	itemOpt := u.ItemOptions()
-	if u.EnforceETag() {
-		var ifMatchEtag *azcore.ETag = nil
-		if p.State.ETag != "" {
-			ifMatchEtag = (*azcore.ETag)(&p.State.ETag)
-		}
-		itemOpt.IfMatchEtag = ifMatchEtag
+	itemOpt := u.itemOptions()
+	var ifMatchEtag *azcore.ETag = nil
+	if p.State.ETag != "" {
+		ifMatchEtag = (*azcore.ETag)(&p.State.ETag)
 	}
+	itemOpt.IfMatchEtag = ifMatchEtag
 
-	// save the item into Cosmos DB
-	resp, err := patchItemWithRetry(ctx, u.GetContainerClient(), u.GetPK(), p.ID.String(), patch, itemOpt)
+	resp, err := patchItemWithRetry(ctx, u.getContainerClient(), u.getPK(), p.ID.String(), patch, itemOpt)
 	if err != nil {
 		return err
 	}
 
-	if u.EnforceETag() {
-		p.State.ETag = string(resp.ETag)
-	}
+	p.State.ETag = string(resp.ETag)
 
 	return nil
 }

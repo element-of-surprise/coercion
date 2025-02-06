@@ -6,9 +6,9 @@ import (
 	"strings"
 
 	"github.com/Azure/azure-sdk-for-go/sdk/data/azcosmos"
+	"github.com/Azure/retry/exponential"
 	"github.com/go-json-experiment/json"
 	"github.com/google/uuid"
-	"github.com/gostdlib/ops/retry/exponential"
 
 	"github.com/element-of-surprise/coercion/internal/private"
 	"github.com/element-of-surprise/coercion/plugins/registry"
@@ -26,7 +26,7 @@ const (
 // reader implements the storage.PlanReader interface.
 type reader struct {
 	container string
-	Client
+	client
 	reg *registry.Register
 
 	private.Storage
@@ -34,7 +34,7 @@ type reader struct {
 
 // Exists returns true if the Plan ID exists in the storage.
 func (r reader) Exists(ctx context.Context, id uuid.UUID) (bool, error) {
-	_, err := r.GetContainerClient().ReadItem(ctx, r.GetPK(), id.String(), r.ItemOptions())
+	_, err := r.getContainerClient().ReadItem(ctx, r.getPK(), id.String(), r.itemOptions())
 	if err != nil {
 		if IsNotFound(err) {
 			return false, nil
@@ -51,7 +51,7 @@ func (r reader) Read(ctx context.Context, id uuid.UUID) (*workflow.Plan, error) 
 	fetchPlan := func(ctx context.Context, rec exponential.Record) error {
 		plan, err = r.fetchPlan(ctx, id)
 		if err != nil {
-			if !isRetriableError(err) || rec.Attempt >= maxRetryAttempts {
+			if !isRetriableError(err) {
 				return fmt.Errorf("%w: %w", err, exponential.ErrPermanent)
 			}
 			return err
@@ -72,7 +72,7 @@ func (r reader) Search(ctx context.Context, filters storage.Filters) (chan stora
 
 	q, parameters := r.buildSearchQuery(filters)
 
-	pager := r.GetContainerClient().NewQueryItemsPager(q, r.GetPK(), &azcosmos.QueryOptions{QueryParameters: parameters})
+	pager := r.getContainerClient().NewQueryItemsPager(q, r.getPK(), &azcosmos.QueryOptions{QueryParameters: parameters})
 	results := make(chan storage.Stream[storage.ListResult], 1)
 	go func() {
 		defer close(results)
@@ -178,7 +178,7 @@ func (r reader) List(ctx context.Context, limit int) (chan storage.Stream[storag
 		q += fmt.Sprintf(" OFFSET 0 LIMIT %d", limit)
 	}
 
-	pager := r.GetContainerClient().NewQueryItemsPager(q, r.GetPK(), &azcosmos.QueryOptions{QueryParameters: []azcosmos.QueryParameter{}})
+	pager := r.getContainerClient().NewQueryItemsPager(q, r.getPK(), &azcosmos.QueryOptions{QueryParameters: []azcosmos.QueryParameter{}})
 	results := make(chan storage.Stream[storage.ListResult], 1)
 	go func() {
 		defer close(results)

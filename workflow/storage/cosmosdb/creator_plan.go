@@ -21,9 +21,9 @@ func (c creator) commitPlan(ctx context.Context, p *workflow.Plan) (err error) {
 		return fmt.Errorf("commitPlan: plan cannot be nil")
 	}
 
-	batch := c.NewTransactionalBatch()
+	batch := c.newTransactionalBatch()
 
-	plan, err := planToEntry(c.GetPKString(), p)
+	plan, err := planToEntry(c.getPKString(), p)
 	if err != nil {
 		return err
 	}
@@ -40,26 +40,23 @@ func (c creator) commitPlan(ctx context.Context, p *workflow.Plan) (err error) {
 		}
 	}
 
-	// save the JSON format document into Cosmos DB.
 	itemJson, err := json.Marshal(plan)
 	if err != nil {
 		return fmt.Errorf("failed to marshal item: %w", err)
 	}
 	batch.CreateItem(itemJson, &azcosmos.TransactionalBatchItemOptions{})
-	c.SetBatch(batch)
+	c.setBatch(batch)
 
-	if _, err = c.ExecuteTransactionalBatch(ctx, batch, &azcosmos.TransactionalBatchOptions{}); err != nil {
+	if _, err = c.executeTransactionalBatch(ctx, batch, &azcosmos.TransactionalBatchOptions{}); err != nil {
 		return fmt.Errorf("failed to create plan through Cosmos DB API: %w", err)
 	}
 
-	if c.EnforceETag() {
-		// need to reread plan, because batch response does not contain ETag for each item
-		result, err := c.reader.fetchPlan(ctx, p.ID)
-		if err != nil {
-			return fmt.Errorf("failed to fetch plan: %w", err)
-		}
-		*p = *result
+	// need to reread plan, because batch response does not contain ETag for each item
+	result, err := c.reader.fetchPlan(ctx, p.ID)
+	if err != nil {
+		return fmt.Errorf("failed to fetch plan: %w", err)
 	}
+	*p = *result
 
 	return nil
 }
@@ -114,12 +111,12 @@ func planToEntry(pk string, p *workflow.Plan) (plansEntry, error) {
 	return plan, nil
 }
 
-func (c creator) commitChecks(batch TransactionalBatch, planID uuid.UUID, ch *workflow.Checks) error {
+func (c creator) commitChecks(batch transactionalBatch, planID uuid.UUID, ch *workflow.Checks) error {
 	if ch == nil {
 		return nil
 	}
 
-	checks, err := checkToEntry(c.GetPKString(), planID, ch)
+	checks, err := checkToEntry(c.getPKString(), planID, ch)
 	if err != nil {
 		return err
 	}
@@ -161,12 +158,12 @@ func checkToEntry(pk string, planID uuid.UUID, c *workflow.Checks) (checksEntry,
 	}, nil
 }
 
-func (c creator) commitBlock(batch TransactionalBatch, planID uuid.UUID, pos int, b *workflow.Block) error {
+func (c creator) commitBlock(batch transactionalBatch, planID uuid.UUID, pos int, b *workflow.Block) error {
 	if b == nil {
 		return fmt.Errorf("commitBlock: block cannot be nil")
 	}
 
-	block, err := blockToEntry(c.GetPKString(), planID, pos, b)
+	block, err := blockToEntry(c.getPKString(), planID, pos, b)
 	if err != nil {
 		return err
 	}
@@ -238,12 +235,12 @@ func blockToEntry(pk string, planID uuid.UUID, pos int, b *workflow.Block) (bloc
 	return block, nil
 }
 
-func (c creator) commitSequence(batch TransactionalBatch, planID uuid.UUID, pos int, seq *workflow.Sequence) error {
+func (c creator) commitSequence(batch transactionalBatch, planID uuid.UUID, pos int, seq *workflow.Sequence) error {
 	if seq == nil {
 		return fmt.Errorf("commitSequence: sequence cannot be nil")
 	}
 
-	sequence, err := sequenceToEntry(c.GetPKString(), planID, pos, seq)
+	sequence, err := sequenceToEntry(c.getPKString(), planID, pos, seq)
 	if err != nil {
 		return err
 	}
@@ -288,12 +285,12 @@ func sequenceToEntry(pk string, planID uuid.UUID, pos int, seq *workflow.Sequenc
 	}, nil
 }
 
-func (c creator) commitAction(batch TransactionalBatch, planID uuid.UUID, pos int, a *workflow.Action) error {
+func (c creator) commitAction(batch transactionalBatch, planID uuid.UUID, pos int, a *workflow.Action) error {
 	if a == nil {
 		return fmt.Errorf("commitAction: action cannot be nil")
 	}
 
-	action, err := actionToEntry(c.GetPKString(), planID, pos, a)
+	action, err := actionToEntry(c.getPKString(), planID, pos, a)
 	if err != nil {
 		return err
 	}
@@ -340,7 +337,7 @@ func actionToEntry(pk string, planID uuid.UUID, pos int, a *workflow.Action) (ac
 	}, nil
 }
 
-// encodeAttempts encodes a slice of attempts into a JSON array hodling JSON encoded attempts as byte slices.
+// encodeAttempts encodes a slice of attempts into a JSON array holding JSON encoded attempts as byte slices.
 func encodeAttempts(attempts []*workflow.Attempt) ([]byte, error) {
 	if len(attempts) == 0 {
 		return nil, nil

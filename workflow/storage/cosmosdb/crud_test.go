@@ -15,8 +15,7 @@ import (
 func TestStorageItemCRUD(t *testing.T) {
 	ctx := context.Background()
 
-	enforceETag := true
-	r, cc := dbSetup(enforceETag)
+	r, cc := dbSetup()
 
 	// use test plan
 	if err := r.Create(ctx, plan); err != nil {

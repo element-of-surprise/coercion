@@ -154,15 +154,14 @@ func NewTestPlan() *workflow.Plan {
 
 // needs to implement cosmosdb.go client interface
 
-// FakeCosmosDBClient has the methods for all of Create/Update/Delete/Query operations
+// fakeCosmosDBClient has the methods for all of Create/Update/Delete/Query operations
 // on coercion data.
-type FakeCosmosDBClient struct {
+type fakeCosmosDBClient struct {
 	partitionKey string
-	enforceETag  bool
 
-	client *FakeContainerClient
+	client *fakeContainerClient
 
-	batch *FakeTransactionalBatch
+	batch *fakeTransactionalBatch
 
 	// create count per document type during ExecuteTransactionalBatch
 	createCallCount map[Type]int
@@ -173,20 +172,19 @@ type FakeCosmosDBClient struct {
 	deleteErr       error
 }
 
-// NewFakeCosmosDBClient returns a new FakeCosmosDBClient.
-func NewFakeCosmosDBClient(enforceETag bool) *FakeCosmosDBClient {
+// newFakeCosmosDBClient returns a new FakeCosmosDBClient.
+func newFakeCosmosDBClient() *fakeCosmosDBClient {
 	documents := make(map[string][]byte)
 
 	partitionKey := "fakePartitionKey"
 
-	fakeContainerClient := FakeContainerClient{
+	fakeContainerClient := fakeContainerClient{
 		documents: documents,
 
 		patchCallCount: map[Type]int{},
 	}
-	return &FakeCosmosDBClient{
+	return &fakeCosmosDBClient{
 		partitionKey: partitionKey,
-		enforceETag:  enforceETag,
 		client:       &fakeContainerClient,
 
 		createCallCount: map[Type]int{},
@@ -194,47 +192,42 @@ func NewFakeCosmosDBClient(enforceETag bool) *FakeCosmosDBClient {
 	}
 }
 
-// GetContainerClient returns the container client.
-func (c *FakeCosmosDBClient) GetContainerClient() ContainerClient {
+// getContainerClient returns the container client.
+func (c *fakeCosmosDBClient) getContainerClient() containerClient {
 	return c.client
 }
 
-// GetPK returns the partition key.
-func (c *FakeCosmosDBClient) GetPK() azcosmos.PartitionKey {
+// getPK returns the partition key.
+func (c *fakeCosmosDBClient) getPK() azcosmos.PartitionKey {
 	return partitionKey(c.partitionKey)
 }
 
-// GetPKString returns the partition key as a string.
-func (c *FakeCosmosDBClient) GetPKString() string {
+// getPKString returns the partition key as a string.
+func (c *fakeCosmosDBClient) getPKString() string {
 	return c.partitionKey
 }
 
-// NewTransactionalBatch returns a new fake TransactionalBatch.
-func (c *FakeCosmosDBClient) NewTransactionalBatch() TransactionalBatch {
+// newTransactionalBatch returns a new fake TransactionalBatch.
+func (c *fakeCosmosDBClient) newTransactionalBatch() transactionalBatch {
 	// initialize maps
-	return &FakeTransactionalBatch{
+	return &fakeTransactionalBatch{
 		createItems: map[string][]byte{},
 		deleteItems: []string{},
 	}
 }
 
 // SetBatch sets the batch.
-func (b *FakeCosmosDBClient) SetBatch(batch TransactionalBatch) {
-	b.batch = batch.(*FakeTransactionalBatch)
+func (b *fakeCosmosDBClient) setBatch(batch transactionalBatch) {
+	b.batch = batch.(*fakeTransactionalBatch)
 }
 
-// ItemOptions returns the item options.
-func (b *FakeCosmosDBClient) ItemOptions() *azcosmos.ItemOptions {
+// itemOptions returns the item options.
+func (b *fakeCosmosDBClient) itemOptions() *azcosmos.ItemOptions {
 	return &azcosmos.ItemOptions{}
 }
 
-// EnforceETag returns whether enforcing etag match is required.
-func (c *FakeCosmosDBClient) EnforceETag() bool {
-	return c.enforceETag
-}
-
 // ExecuteTransactionalBatch executes the fake transactional batch by adding to or deleting from the documents map.
-func (c *FakeCosmosDBClient) ExecuteTransactionalBatch(ctx context.Context, b TransactionalBatch, o *azcosmos.TransactionalBatchOptions) (azcosmos.TransactionalBatchResponse, error) {
+func (c *fakeCosmosDBClient) executeTransactionalBatch(ctx context.Context, b transactionalBatch, o *azcosmos.TransactionalBatchOptions) (azcosmos.TransactionalBatchResponse, error) {
 	if c.createErr != nil {
 		return azcosmos.TransactionalBatchResponse{}, c.createErr
 	}
@@ -271,8 +264,8 @@ func (c *FakeCosmosDBClient) ExecuteTransactionalBatch(ctx context.Context, b Tr
 	return azcosmos.TransactionalBatchResponse{}, nil
 }
 
-// FakeContainerClient has the methods for operations on single container items.
-type FakeContainerClient struct {
+// fakeContainerClient has the methods for operations on single container items.
+type fakeContainerClient struct {
 	mu sync.Mutex
 
 	patchCallCount map[Type]int
@@ -286,7 +279,7 @@ type FakeContainerClient struct {
 }
 
 // NewQueryItemsPager returns a new QueryItemsPager with items from the fake cosmosdb documents.
-func (cc *FakeContainerClient) NewQueryItemsPager(query string, partitionKey azcosmos.PartitionKey, o *azcosmos.QueryOptions) *runtime.Pager[azcosmos.QueryItemsResponse] {
+func (cc *fakeContainerClient) NewQueryItemsPager(query string, partitionKey azcosmos.PartitionKey, o *azcosmos.QueryOptions) *runtime.Pager[azcosmos.QueryItemsResponse] {
 	// convert map of documents to slice
 	queryItems := [][]byte{}
 	queryType := Plan
@@ -338,7 +331,7 @@ func getIDsFromQueryParameters(params []azcosmos.QueryParameter) map[uuid.UUID]s
 }
 
 // PatchItem increments the patchCallCount for the item type.
-func (cc *FakeContainerClient) PatchItem(ctx context.Context, partitionKey azcosmos.PartitionKey, itemId string, ops azcosmos.PatchOperations, o *azcosmos.ItemOptions) (azcosmos.ItemResponse, error) {
+func (cc *fakeContainerClient) PatchItem(ctx context.Context, partitionKey azcosmos.PartitionKey, itemId string, ops azcosmos.PatchOperations, o *azcosmos.ItemOptions) (azcosmos.ItemResponse, error) {
 	if cc.patchErr != nil {
 		return azcosmos.ItemResponse{}, cc.patchErr
 	}
@@ -356,7 +349,7 @@ func (cc *FakeContainerClient) PatchItem(ctx context.Context, partitionKey azcos
 }
 
 // ReadItem returns the item from the documents map.
-func (cc *FakeContainerClient) ReadItem(ctx context.Context, partitionKey azcosmos.PartitionKey, itemId string, o *azcosmos.ItemOptions) (azcosmos.ItemResponse, error) {
+func (cc *fakeContainerClient) ReadItem(ctx context.Context, partitionKey azcosmos.PartitionKey, itemId string, o *azcosmos.ItemOptions) (azcosmos.ItemResponse, error) {
 	if cc.readErr != nil {
 		return azcosmos.ItemResponse{}, cc.readErr
 	}
@@ -369,8 +362,8 @@ func (cc *FakeContainerClient) ReadItem(ctx context.Context, partitionKey azcosm
 	}, nil
 }
 
-// FakeTransactionalBatch is a fake implementation of TransactionalBatch.
-type FakeTransactionalBatch struct {
+// fakeTransactionalBatch is a fake implementation of TransactionalBatch.
+type fakeTransactionalBatch struct {
 	// map of id to object
 	createItems map[string][]byte
 	// ids to remove from documents
@@ -378,7 +371,7 @@ type FakeTransactionalBatch struct {
 }
 
 // CreateItem adds an item to the createItems map.
-func (b *FakeTransactionalBatch) CreateItem(item []byte, o *azcosmos.TransactionalBatchItemOptions) {
+func (b *fakeTransactionalBatch) CreateItem(item []byte, o *azcosmos.TransactionalBatchItemOptions) {
 	c, err := getCommonFields(item)
 	if err != nil {
 		fatalErr(slog.Default(), "failed to get type and id from item: %v", err)
@@ -387,7 +380,7 @@ func (b *FakeTransactionalBatch) CreateItem(item []byte, o *azcosmos.Transaction
 }
 
 // DeleteItem adds an item to the deleteItems map.
-func (b *FakeTransactionalBatch) DeleteItem(itemId string, o *azcosmos.TransactionalBatchItemOptions) {
+func (b *fakeTransactionalBatch) DeleteItem(itemId string, o *azcosmos.TransactionalBatchItemOptions) {
 	b.deleteItems = append(b.deleteItems, itemId)
 }
 
@@ -415,25 +408,25 @@ func getCommonFields(data []byte) (commonFields, error) {
 	return c, nil
 }
 
-func dbSetup(enforceETag bool) (*Vault, *FakeCosmosDBClient) {
+func dbSetup() (*Vault, *fakeCosmosDBClient) {
 	container := "test-container"
 
 	reg := registry.New()
 	reg.MustRegister(&plugins.CheckPlugin{})
 	reg.MustRegister(&plugins.HelloPlugin{})
 
-	cc := NewFakeCosmosDBClient(enforceETag)
+	cc := newFakeCosmosDBClient()
 	mu := &sync.Mutex{}
 	r := &Vault{
 		db:           "test-db",
 		container:    container,
 		partitionKey: "test-partition",
 	}
-	r.reader = reader{container: container, Client: cc, reg: reg}
-	r.creator = creator{mu: mu, Client: cc, reader: r.reader}
+	r.reader = reader{container: container, client: cc, reg: reg}
+	r.creator = creator{mu: mu, client: cc, reader: r.reader}
 	r.updater = newUpdater(mu, cc, r.reader)
-	r.closer = closer{Client: cc}
-	r.deleter = deleter{mu: mu, Client: cc, reader: r.reader}
+	r.closer = closer{client: cc}
+	r.deleter = deleter{mu: mu, client: cc, reader: r.reader}
 
 	return r, cc
 }

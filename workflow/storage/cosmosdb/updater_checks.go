@@ -16,7 +16,7 @@ var _ storage.ChecksUpdater = checksUpdater{}
 // checksUpdater implements the storage.checksUpdater interface.
 type checksUpdater struct {
 	mu *sync.Mutex
-	Client
+	client
 
 	private.Storage
 }
@@ -31,24 +31,19 @@ func (u checksUpdater) UpdateChecks(ctx context.Context, check *workflow.Checks)
 	patch.AppendReplace("/stateStart", check.State.Start)
 	patch.AppendReplace("/stateEnd", check.State.End)
 
-	itemOpt := u.ItemOptions()
-	if u.EnforceETag() {
-		var ifMatchEtag *azcore.ETag = nil
-		if check.State.ETag != "" {
-			ifMatchEtag = (*azcore.ETag)(&check.State.ETag)
-		}
-		itemOpt.IfMatchEtag = ifMatchEtag
+	itemOpt := u.itemOptions()
+	var ifMatchEtag *azcore.ETag = nil
+	if check.State.ETag != "" {
+		ifMatchEtag = (*azcore.ETag)(&check.State.ETag)
 	}
+	itemOpt.IfMatchEtag = ifMatchEtag
 
-	// save the item into Cosmos DB
-	resp, err := patchItemWithRetry(ctx, u.GetContainerClient(), u.GetPK(), check.ID.String(), patch, itemOpt)
+	resp, err := patchItemWithRetry(ctx, u.getContainerClient(), u.getPK(), check.ID.String(), patch, itemOpt)
 	if err != nil {
 		return err
 	}
 
-	if u.EnforceETag() {
-		check.State.ETag = string(resp.ETag)
-	}
+	check.State.ETag = string(resp.ETag)
 
 	return nil
 }

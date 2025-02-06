@@ -38,12 +38,11 @@ func TestDelete(t *testing.T) {
 	planWithNilBlocks.Blocks = nil
 
 	tests := []struct {
-		name        string
-		plan        *workflow.Plan
-		readErr     error
-		deleteErr   error
-		enforceETag bool
-		wantErr     bool
+		name      string
+		plan      *workflow.Plan
+		readErr   error
+		deleteErr error
+		wantErr   bool
 	}{
 		{
 			name:    "Error: container client read error",
@@ -67,16 +66,9 @@ func TestDelete(t *testing.T) {
 			wantErr: false,
 		},
 		{
-			name:        "Success with enforce etag and no etag set",
-			plan:        goodPlan,
-			enforceETag: true,
-			wantErr:     false,
-		},
-		{
-			name:        "Success with enforce etag and etag set",
-			plan:        planWithETag,
-			enforceETag: true,
-			wantErr:     false,
+			name:    "Success and etag set",
+			plan:    planWithETag,
+			wantErr: false,
 		},
 		{
 			name:    "Success: not all checks defined",
@@ -93,7 +85,7 @@ func TestDelete(t *testing.T) {
 	for _, test := range tests {
 		ctx := context.Background()
 
-		r, cc := dbSetup(test.enforceETag)
+		r, cc := dbSetup()
 
 		testPlanID := mustUUID()
 		if test.plan != nil {

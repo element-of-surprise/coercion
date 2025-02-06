@@ -8,14 +8,14 @@ import (
 	"github.com/element-of-surprise/coercion/internal/private"
 	"github.com/element-of-surprise/coercion/workflow"
 
+	"github.com/Azure/retry/exponential"
 	"github.com/google/uuid"
-	"github.com/gostdlib/ops/retry/exponential"
 )
 
 // creator implements the storage.creator interface.
 type creator struct {
 	mu *sync.Mutex
-	Client
+	client
 	reader reader
 
 	private.Storage
@@ -45,7 +45,7 @@ func (u creator) Create(ctx context.Context, plan *workflow.Plan) error {
 
 	commitPlan := func(ctx context.Context, r exponential.Record) error {
 		if err = u.commitPlan(ctx, plan); err != nil {
-			if !isRetriableError(err) || r.Attempt >= maxRetryAttempts {
+			if !isRetriableError(err) {
 				return fmt.Errorf("%w: %w", err, exponential.ErrPermanent)
 			}
 			return err

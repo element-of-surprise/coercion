@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Azure/retry/exponential"
 	"github.com/element-of-surprise/coercion/internal/execute/sm"
 	testplugins "github.com/element-of-surprise/coercion/internal/execute/sm/testing/plugins"
 	pluginsLib "github.com/element-of-surprise/coercion/plugins"
@@ -17,7 +18,6 @@ import (
 	"github.com/element-of-surprise/coercion/workflow/storage"
 	"github.com/element-of-surprise/coercion/workflow/utils/walk"
 	"github.com/google/uuid"
-	"github.com/gostdlib/ops/retry/exponential"
 	"github.com/gostdlib/ops/statemachine"
 	"github.com/kylelemons/godebug/pretty"
 )

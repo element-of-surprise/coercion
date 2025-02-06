@@ -241,8 +241,7 @@ func TestExists(t *testing.T) {
 	for _, test := range tests {
 		ctx := context.Background()
 
-		enforceETag := true
-		r, cc := dbSetup(enforceETag)
+		r, cc := dbSetup()
 
 		if err := r.Create(ctx, plan0); err != nil {
 			t.Fatalf("TestExists(%s): %s", test.name, err)
@@ -302,8 +301,7 @@ func TestRead(t *testing.T) {
 	for _, test := range tests {
 		ctx := context.Background()
 
-		enforceETag := true
-		r, _ := dbSetup(enforceETag)
+		r, _ := dbSetup()
 
 		if err := r.Create(ctx, plan0); err != nil {
 			t.Fatalf("TestRead(%s): %s", test.name, err)

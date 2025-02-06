@@ -17,7 +17,7 @@ var _ storage.ActionUpdater = actionUpdater{}
 // actionUpdater implements the storage.actionUpdater interface.
 type actionUpdater struct {
 	mu *sync.Mutex
-	Client
+	client
 
 	reader reader
 	private.Storage
@@ -38,24 +38,19 @@ func (u actionUpdater) UpdateAction(ctx context.Context, action *workflow.Action
 	}
 	patch.AppendSet("/attempts", attempts)
 
-	itemOpt := u.ItemOptions()
-	if u.EnforceETag() {
-		var ifMatchEtag *azcore.ETag = nil
-		if action.State.ETag != "" {
-			ifMatchEtag = (*azcore.ETag)(&action.State.ETag)
-		}
-		itemOpt.IfMatchEtag = ifMatchEtag
+	itemOpt := u.itemOptions()
+	var ifMatchEtag *azcore.ETag = nil
+	if action.State.ETag != "" {
+		ifMatchEtag = (*azcore.ETag)(&action.State.ETag)
 	}
+	itemOpt.IfMatchEtag = ifMatchEtag
 
-	// save the item into Cosmos DB
-	resp, err := patchItemWithRetry(ctx, u.GetContainerClient(), u.GetPK(), action.ID.String(), patch, itemOpt)
+	resp, err := patchItemWithRetry(ctx, u.getContainerClient(), u.getPK(), action.ID.String(), patch, itemOpt)
 	if err != nil {
 		return err
 	}
 
-	if u.EnforceETag() {
-		action.State.ETag = string(resp.ETag)
-	}
+	action.State.ETag = string(resp.ETag)
 
 	return nil
 }

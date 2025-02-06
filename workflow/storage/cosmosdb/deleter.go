@@ -9,13 +9,13 @@ import (
 	"github.com/Azure/azure-sdk-for-go/sdk/data/azcosmos"
 	"github.com/element-of-surprise/coercion/workflow"
 
+	"github.com/Azure/retry/exponential"
 	"github.com/google/uuid"
-	"github.com/gostdlib/ops/retry/exponential"
 )
 
 type deleter struct {
 	mu *sync.Mutex
-	Client
+	client
 
 	reader reader
 }
@@ -32,7 +32,7 @@ func (d deleter) Delete(ctx context.Context, id uuid.UUID) error {
 
 	deletePlan := func(ctx context.Context, r exponential.Record) error {
 		if err := d.deletePlan(ctx, plan); err != nil {
-			if !isRetriableError(err) || r.Attempt >= maxRetryAttempts {
+			if !isRetriableError(err) {
 				return fmt.Errorf("%w: %w", err, exponential.ErrPermanent)
 			}
 			return err
@@ -47,7 +47,7 @@ func (d deleter) Delete(ctx context.Context, id uuid.UUID) error {
 }
 
 func (d deleter) deletePlan(ctx context.Context, plan *workflow.Plan) error {
-	batch := d.NewTransactionalBatch()
+	batch := d.newTransactionalBatch()
 
 	if err := d.deleteChecks(ctx, batch, plan.BypassChecks); err != nil {
 		return fmt.Errorf("couldn't delete plan bypasschecks: %w", err)
@@ -68,25 +68,24 @@ func (d deleter) deletePlan(ctx context.Context, plan *workflow.Plan) error {
 		return fmt.Errorf("couldn't delete blocks: %w", err)
 	}
 
-	itemOpt := &azcosmos.TransactionalBatchItemOptions{}
-	if d.EnforceETag() {
-		var ifMatchEtag *azcore.ETag = nil
-		if plan.State.ETag != "" {
-			ifMatchEtag = (*azcore.ETag)(&plan.State.ETag)
-		}
-		itemOpt.IfMatchETag = ifMatchEtag
+	var ifMatchEtag *azcore.ETag = nil
+	if plan.State.ETag != "" {
+		ifMatchEtag = (*azcore.ETag)(&plan.State.ETag)
+	}
+	itemOpt := &azcosmos.TransactionalBatchItemOptions{
+		IfMatchETag: ifMatchEtag,
 	}
 	batch.DeleteItem(plan.ID.String(), itemOpt)
-	d.SetBatch(batch) // for testing
+	d.setBatch(batch) // for testing
 
-	if _, err := d.ExecuteTransactionalBatch(ctx, batch, nil); err != nil {
+	if _, err := d.executeTransactionalBatch(ctx, batch, nil); err != nil {
 		return fmt.Errorf("failed to delete plan through Cosmos DB API: %w", err)
 	}
 
 	return nil
 }
 
-func (d deleter) deleteBlocks(ctx context.Context, batch TransactionalBatch, blocks []*workflow.Block) error {
+func (d deleter) deleteBlocks(ctx context.Context, batch transactionalBatch, blocks []*workflow.Block) error {
 	if len(blocks) == 0 {
 		return nil
 	}
@@ -113,13 +112,12 @@ func (d deleter) deleteBlocks(ctx context.Context, batch TransactionalBatch, blo
 	}
 
 	for _, block := range blocks {
-		itemOpt := &azcosmos.TransactionalBatchItemOptions{}
-		if d.EnforceETag() {
-			var ifMatchEtag *azcore.ETag = nil
-			if block.State.ETag != "" {
-				ifMatchEtag = (*azcore.ETag)(&block.State.ETag)
-			}
-			itemOpt.IfMatchETag = ifMatchEtag
+		var ifMatchEtag *azcore.ETag = nil
+		if block.State.ETag != "" {
+			ifMatchEtag = (*azcore.ETag)(&block.State.ETag)
+		}
+		itemOpt := &azcosmos.TransactionalBatchItemOptions{
+			IfMatchETag: ifMatchEtag,
 		}
 
 		batch.DeleteItem(block.ID.String(), itemOpt)
@@ -127,7 +125,7 @@ func (d deleter) deleteBlocks(ctx context.Context, batch TransactionalBatch, blo
 	return nil
 }
 
-func (d deleter) deleteChecks(ctx context.Context, batch TransactionalBatch, checks *workflow.Checks) error {
+func (d deleter) deleteChecks(ctx context.Context, batch transactionalBatch, checks *workflow.Checks) error {
 	if checks == nil {
 		return nil
 	}
@@ -136,13 +134,12 @@ func (d deleter) deleteChecks(ctx context.Context, batch TransactionalBatch, che
 		return fmt.Errorf("couldn't delete checks actions: %w", err)
 	}
 
-	itemOpt := &azcosmos.TransactionalBatchItemOptions{}
-	if d.EnforceETag() {
-		var ifMatchEtag *azcore.ETag = nil
-		if checks.State.ETag != "" {
-			ifMatchEtag = (*azcore.ETag)(&checks.State.ETag)
-		}
-		itemOpt.IfMatchETag = ifMatchEtag
+	var ifMatchEtag *azcore.ETag = nil
+	if checks.State.ETag != "" {
+		ifMatchEtag = (*azcore.ETag)(&checks.State.ETag)
+	}
+	itemOpt := &azcosmos.TransactionalBatchItemOptions{
+		IfMatchETag: ifMatchEtag,
 	}
 
 	batch.DeleteItem(checks.ID.String(), itemOpt)
@@ -150,7 +147,7 @@ func (d deleter) deleteChecks(ctx context.Context, batch TransactionalBatch, che
 	return nil
 }
 
-func (d deleter) deleteSeqs(ctx context.Context, batch TransactionalBatch, seqs []*workflow.Sequence) error {
+func (d deleter) deleteSeqs(ctx context.Context, batch transactionalBatch, seqs []*workflow.Sequence) error {
 	if len(seqs) == 0 {
 		return nil
 	}
@@ -162,13 +159,12 @@ func (d deleter) deleteSeqs(ctx context.Context, batch TransactionalBatch, seqs 
 	}
 
 	for _, seq := range seqs {
-		itemOpt := &azcosmos.TransactionalBatchItemOptions{}
-		if d.EnforceETag() {
-			var ifMatchEtag *azcore.ETag = nil
-			if seq.State.ETag != "" {
-				ifMatchEtag = (*azcore.ETag)(&seq.State.ETag)
-			}
-			itemOpt.IfMatchETag = ifMatchEtag
+		var ifMatchEtag *azcore.ETag = nil
+		if seq.State.ETag != "" {
+			ifMatchEtag = (*azcore.ETag)(&seq.State.ETag)
+		}
+		itemOpt := &azcosmos.TransactionalBatchItemOptions{
+			IfMatchETag: ifMatchEtag,
 		}
 
 		batch.DeleteItem(seq.ID.String(), itemOpt)
@@ -176,19 +172,18 @@ func (d deleter) deleteSeqs(ctx context.Context, batch TransactionalBatch, seqs 
 	return nil
 }
 
-func (d deleter) deleteActions(ctx context.Context, batch TransactionalBatch, actions []*workflow.Action) error {
+func (d deleter) deleteActions(ctx context.Context, batch transactionalBatch, actions []*workflow.Action) error {
 	if len(actions) == 0 {
 		return nil
 	}
 
 	for _, action := range actions {
-		itemOpt := &azcosmos.TransactionalBatchItemOptions{}
-		if d.EnforceETag() {
-			var ifMatchEtag *azcore.ETag = nil
-			if action.State.ETag != "" {
-				ifMatchEtag = (*azcore.ETag)(&action.State.ETag)
-			}
-			itemOpt.IfMatchETag = ifMatchEtag
+		var ifMatchEtag *azcore.ETag = nil
+		if action.State.ETag != "" {
+			ifMatchEtag = (*azcore.ETag)(&action.State.ETag)
+		}
+		itemOpt := &azcosmos.TransactionalBatchItemOptions{
+			IfMatchETag: ifMatchEtag,
 		}
 
 		batch.DeleteItem(action.ID.String(), itemOpt)
