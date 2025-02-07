@@ -16,7 +16,7 @@ var _ storage.ActionUpdater = actionUpdater{}
 
 // actionUpdater implements the storage.actionUpdater interface.
 type actionUpdater struct {
-	mu *sync.Mutex
+	mu *sync.RWMutex
 	client
 
 	reader reader

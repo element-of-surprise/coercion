@@ -14,7 +14,7 @@ import (
 )
 
 type deleter struct {
-	mu *sync.Mutex
+	mu *sync.RWMutex
 	client
 
 	reader reader

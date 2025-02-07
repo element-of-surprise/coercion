@@ -14,7 +14,7 @@ import (
 
 // creator implements the storage.creator interface.
 type creator struct {
-	mu *sync.Mutex
+	mu *sync.RWMutex
 	client
 	reader reader
 

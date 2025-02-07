@@ -15,7 +15,7 @@ var _ storage.PlanUpdater = planUpdater{}
 
 // planUpdater implements the storage.PlanUpdater interface.
 type planUpdater struct {
-	mu *sync.Mutex
+	mu *sync.RWMutex
 	client
 
 	private.Storage

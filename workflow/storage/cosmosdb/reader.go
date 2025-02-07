@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync"
 
 	"github.com/Azure/azure-sdk-for-go/sdk/data/azcosmos"
 	"github.com/Azure/retry/exponential"
@@ -25,6 +26,7 @@ const (
 
 // reader implements the storage.PlanReader interface.
 type reader struct {
+	mu        sync.RWMutex
 	container string
 	client
 	reg *registry.Register
@@ -43,6 +45,9 @@ func Sender[T any](ctx context.Context, ch chan T, v T) error {
 
 // Exists returns true if the Plan ID exists in the storage.
 func (r reader) Exists(ctx context.Context, id uuid.UUID) (bool, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
 	_, err := r.getReader().ReadItem(ctx, r.getPK(), id.String(), r.itemOptions())
 	if err != nil {
 		if IsNotFound(err) {
@@ -55,6 +60,9 @@ func (r reader) Exists(ctx context.Context, id uuid.UUID) (bool, error) {
 
 // Read returns a Plan from the storage.
 func (r reader) Read(ctx context.Context, id uuid.UUID) (*workflow.Plan, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
 	var plan *workflow.Plan
 	var err error
 	fetchPlan := func(ctx context.Context, rec exponential.Record) error {
@@ -80,6 +88,9 @@ func (r reader) Search(ctx context.Context, filters storage.Filters) (chan stora
 	}
 
 	q, parameters := r.buildSearchQuery(filters)
+
+	r.mu.RLock()
+	defer r.mu.RUnlock()
 
 	pager := r.getReader().NewQueryItemsPager(q, r.getPK(), &azcosmos.QueryOptions{QueryParameters: parameters})
 	// pageResults := make(chan storage.Stream[storage.ListResult], 1)
@@ -184,6 +195,9 @@ func (r reader) List(ctx context.Context, limit int) (chan storage.Stream[storag
 	if limit > 0 {
 		q += fmt.Sprintf(" OFFSET 0 LIMIT %d", limit)
 	}
+
+	r.mu.RLock()
+	defer r.mu.RUnlock()
 
 	pager := r.getReader().NewQueryItemsPager(q, r.getPK(), &azcosmos.QueryOptions{QueryParameters: []azcosmos.QueryParameter{}})
 	results := make(chan storage.Stream[storage.ListResult], 1)

@@ -279,7 +279,7 @@ func (c *fakeContainerClient) executeTransactionalBatch(ctx context.Context, b t
 
 // fakeContainerReader has the methods for read operations on single container items.
 type fakeContainerReader struct {
-	mu sync.Mutex
+	mu sync.RWMutex
 
 	documents map[string][]byte
 
@@ -289,7 +289,7 @@ type fakeContainerReader struct {
 
 // fakeContainerUpdater has the methods for update operations on single container items.
 type fakeContainerUpdater struct {
-	mu sync.Mutex
+	mu sync.RWMutex
 
 	documents map[string][]byte
 
@@ -435,7 +435,7 @@ func dbSetup() (*Vault, *fakeContainerClient) {
 	reg.MustRegister(&plugins.HelloPlugin{})
 
 	cc := newFakeCosmosDBClient()
-	mu := &sync.Mutex{}
+	mu := &sync.RWMutex{}
 	r := &Vault{
 		db:        "test-db",
 		container: container,

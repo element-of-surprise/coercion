@@ -15,7 +15,7 @@ var _ storage.SequenceUpdater = sequenceUpdater{}
 
 // sequenceUpdater implements the storage.sequenceUpdater interface.
 type sequenceUpdater struct {
-	mu *sync.Mutex
+	mu *sync.RWMutex
 	client
 
 	private.Storage

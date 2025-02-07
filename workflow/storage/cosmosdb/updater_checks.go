@@ -15,7 +15,7 @@ var _ storage.ChecksUpdater = checksUpdater{}
 
 // checksUpdater implements the storage.checksUpdater interface.
 type checksUpdater struct {
-	mu *sync.Mutex
+	mu *sync.RWMutex
 	client
 
 	private.Storage

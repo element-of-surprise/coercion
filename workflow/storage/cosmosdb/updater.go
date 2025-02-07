@@ -26,7 +26,7 @@ type updater struct {
 	private.Storage
 }
 
-func newUpdater(mu *sync.Mutex, client client, r reader) updater {
+func newUpdater(mu *sync.RWMutex, client client, r reader) updater {
 	return updater{
 		planUpdater:     planUpdater{mu: mu, client: client},
 		checksUpdater:   checksUpdater{mu: mu, client: client},

@@ -267,7 +267,7 @@ func New(ctx context.Context, db, container, pval string, cred azcore.TokenCrede
 		return nil, err
 	}
 
-	mu := &sync.Mutex{}
+	mu := &sync.RWMutex{}
 
 	r.reader = reader{container: container, client: cc, reg: reg}
 	r.creator = creator{mu: mu, client: cc, reader: r.reader}

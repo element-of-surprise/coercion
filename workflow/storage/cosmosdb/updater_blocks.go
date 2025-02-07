@@ -15,7 +15,7 @@ var _ storage.BlockUpdater = blockUpdater{}
 
 // blockUpdater implements the storage.blockUpdater interface.
 type blockUpdater struct {
-	mu *sync.Mutex
+	mu *sync.RWMutex
 	client
 
 	private.Storage
