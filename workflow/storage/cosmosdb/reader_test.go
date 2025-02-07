@@ -247,7 +247,7 @@ func TestExists(t *testing.T) {
 			t.Fatalf("TestExists(%s): %s", test.name, err)
 		}
 		if test.err != nil {
-			cc.client.readErr = test.err
+			cc.reader.readErr = test.err
 		}
 
 		result, err := r.Exists(ctx, test.planID)

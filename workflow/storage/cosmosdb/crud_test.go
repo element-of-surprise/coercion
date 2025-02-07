@@ -106,10 +106,10 @@ func TestStorageItemCRUD(t *testing.T) {
 	if err := r.UpdatePlan(ctx, plan); err != nil {
 		t.Fatalf("error updating plan: %v", err)
 	}
-	if v, ok := cc.client.patchCallCount[Plan]; !ok || v != 1 {
+	if v, ok := cc.updater.patchCallCount[Plan]; !ok || v != 1 {
 		t.Fatalf("expected 1 call to patch, got %d", v)
 	}
-	if v, ok := cc.client.patchCallCount[Block]; ok && v != 0 {
+	if v, ok := cc.updater.patchCallCount[Block]; ok && v != 0 {
 		t.Fatalf("expected 0 calls to patch block, got %d", v)
 	}
 
@@ -139,10 +139,10 @@ func TestStorageItemCRUD(t *testing.T) {
 	if err := r.UpdateBlock(ctx, block); err != nil {
 		t.Fatalf("error updating block: %v", err)
 	}
-	if v, ok := cc.client.patchCallCount[Plan]; !ok || v != 1 {
+	if v, ok := cc.updater.patchCallCount[Plan]; !ok || v != 1 {
 		t.Fatalf("expected 1 call to patch, got %d", v)
 	}
-	if v, ok := cc.client.patchCallCount[Block]; !ok || v != 1 {
+	if v, ok := cc.updater.patchCallCount[Block]; !ok || v != 1 {
 		t.Fatalf("expected 1 call to patch block, got %d", v)
 	}
 
@@ -150,10 +150,10 @@ func TestStorageItemCRUD(t *testing.T) {
 	if err := r.UpdateChecks(ctx, checks); err != nil {
 		t.Fatalf("error updating checks: %v", err)
 	}
-	if v, ok := cc.client.patchCallCount[Plan]; !ok || v != 1 {
+	if v, ok := cc.updater.patchCallCount[Plan]; !ok || v != 1 {
 		t.Fatalf("expected 1 call to patch, got %d", v)
 	}
-	if v, ok := cc.client.patchCallCount[Checks]; !ok || v != 1 {
+	if v, ok := cc.updater.patchCallCount[Checks]; !ok || v != 1 {
 		t.Fatalf("expected 1 call to patch check, got %d", v)
 	}
 
@@ -161,10 +161,10 @@ func TestStorageItemCRUD(t *testing.T) {
 	if err := r.UpdateSequence(ctx, sequence); err != nil {
 		t.Fatalf("error updating sequence: %v", err)
 	}
-	if v, ok := cc.client.patchCallCount[Plan]; !ok || v != 1 {
+	if v, ok := cc.updater.patchCallCount[Plan]; !ok || v != 1 {
 		t.Fatalf("expected 1 call to patch, got %d", v)
 	}
-	if v, ok := cc.client.patchCallCount[Sequence]; !ok || v != 1 {
+	if v, ok := cc.updater.patchCallCount[Sequence]; !ok || v != 1 {
 		t.Fatalf("expected 1 call to patch sequence, got %d", v)
 	}
 
@@ -172,10 +172,10 @@ func TestStorageItemCRUD(t *testing.T) {
 	if err := r.UpdateAction(ctx, action); err != nil {
 		t.Fatalf("error updating action: %v", err)
 	}
-	if v, ok := cc.client.patchCallCount[Plan]; !ok || v != 1 {
+	if v, ok := cc.updater.patchCallCount[Plan]; !ok || v != 1 {
 		t.Fatalf("expected 1 call to patch, got %d", v)
 	}
-	if v, ok := cc.client.patchCallCount[Action]; !ok || v != 1 {
+	if v, ok := cc.updater.patchCallCount[Action]; !ok || v != 1 {
 		t.Fatalf("expected 1 call to patch action, got %d", v)
 	}
 

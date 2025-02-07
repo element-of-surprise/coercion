@@ -22,7 +22,7 @@ func (p reader) idToCheck(ctx context.Context, id uuid.UUID) (*workflow.Checks, 
 
 // fetchChecksByID fetches a Checks object by its ID.
 func (p reader) fetchChecksByID(ctx context.Context, id uuid.UUID) (*workflow.Checks, error) {
-	res, err := p.getContainerClient().ReadItem(ctx, p.getPK(), id.String(), p.itemOptions())
+	res, err := p.getReader().ReadItem(ctx, p.getPK(), id.String(), p.itemOptions())
 	if err != nil {
 		return nil, fmt.Errorf("couldn't fetch checks by id: %w", err)
 	}

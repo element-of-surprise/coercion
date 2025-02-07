@@ -38,7 +38,7 @@ func (u sequenceUpdater) UpdateSequence(ctx context.Context, seq *workflow.Seque
 	}
 	itemOpt.IfMatchEtag = ifMatchEtag
 
-	resp, err := patchItemWithRetry(ctx, u.getContainerClient(), u.getPK(), seq.ID.String(), patch, itemOpt)
+	resp, err := patchItemWithRetry(ctx, u.getUpdater(), u.getPK(), seq.ID.String(), patch, itemOpt)
 	if err != nil {
 		return err
 	}

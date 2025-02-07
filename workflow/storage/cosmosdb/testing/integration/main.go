@@ -25,7 +25,7 @@ import (
 var (
 	db        = flag.String("db-name", os.Getenv("AZURE_COSMOSDB_DBNAME"), "the name of the cosmosdb database")
 	container = flag.String("container-name", os.Getenv("AZURE_COSMOSDB_CNAME"), "the name of the cosmosdb container")
-	pk        = flag.String("partition-key", os.Getenv("AZURE_COSMOSDB_PK"), "the name of the cosmosdb partition key")
+	pk        = flag.String("partition-key", os.Getenv("AZURE_COSMOSDB_PK"), "the name of the cosmosdb partition key value")
 	msi       = flag.String("msi", "", "the identity with vmss contributor role. If empty, az login is used")
 	teardown  = flag.Bool("teardown", false, "teardown the cosmosdb container")
 )

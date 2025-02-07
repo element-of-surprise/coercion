@@ -96,7 +96,7 @@ func TestDelete(t *testing.T) {
 		}
 
 		if test.readErr != nil {
-			cc.client.readErr = test.readErr
+			cc.reader.readErr = test.readErr
 		}
 		if test.deleteErr != nil {
 			cc.deleteErr = test.deleteErr

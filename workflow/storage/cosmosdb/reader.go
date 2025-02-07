@@ -32,9 +32,18 @@ type reader struct {
 	private.Storage
 }
 
+func Sender[T any](ctx context.Context, ch chan T, v T) error {
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case ch <- v:
+		return nil
+	}
+}
+
 // Exists returns true if the Plan ID exists in the storage.
 func (r reader) Exists(ctx context.Context, id uuid.UUID) (bool, error) {
-	_, err := r.getContainerClient().ReadItem(ctx, r.getPK(), id.String(), r.itemOptions())
+	_, err := r.getReader().ReadItem(ctx, r.getPK(), id.String(), r.itemOptions())
 	if err != nil {
 		if IsNotFound(err) {
 			return false, nil
@@ -72,7 +81,8 @@ func (r reader) Search(ctx context.Context, filters storage.Filters) (chan stora
 
 	q, parameters := r.buildSearchQuery(filters)
 
-	pager := r.getContainerClient().NewQueryItemsPager(q, r.getPK(), &azcosmos.QueryOptions{QueryParameters: parameters})
+	pager := r.getReader().NewQueryItemsPager(q, r.getPK(), &azcosmos.QueryOptions{QueryParameters: parameters})
+	// pageResults := make(chan storage.Stream[storage.ListResult], 1)
 	results := make(chan storage.Stream[storage.ListResult], 1)
 	go func() {
 		defer close(results)
@@ -92,13 +102,10 @@ func (r reader) Search(ctx context.Context, filters storage.Filters) (chan stora
 					}
 					return
 				}
-				select {
-				case <-ctx.Done():
+				if err := Sender[storage.Stream[storage.ListResult]](ctx, results, storage.Stream[storage.ListResult]{Result: result}); err != nil {
 					results <- storage.Stream[storage.ListResult]{
-						Err: ctx.Err(),
-					}
+						Err: err}
 					return
-				case results <- storage.Stream[storage.ListResult]{Result: result}:
 				}
 			}
 		}
@@ -178,7 +185,7 @@ func (r reader) List(ctx context.Context, limit int) (chan storage.Stream[storag
 		q += fmt.Sprintf(" OFFSET 0 LIMIT %d", limit)
 	}
 
-	pager := r.getContainerClient().NewQueryItemsPager(q, r.getPK(), &azcosmos.QueryOptions{QueryParameters: []azcosmos.QueryParameter{}})
+	pager := r.getReader().NewQueryItemsPager(q, r.getPK(), &azcosmos.QueryOptions{QueryParameters: []azcosmos.QueryParameter{}})
 	results := make(chan storage.Stream[storage.ListResult], 1)
 	go func() {
 		defer close(results)
@@ -198,13 +205,12 @@ func (r reader) List(ctx context.Context, limit int) (chan storage.Stream[storag
 					}
 					return
 				}
-				select {
-				case <-ctx.Done():
+
+				if err := Sender[storage.Stream[storage.ListResult]](ctx, results, storage.Stream[storage.ListResult]{Result: result}); err != nil {
 					results <- storage.Stream[storage.ListResult]{
-						Err: ctx.Err(),
+						Err: err,
 					}
 					return
-				case results <- storage.Stream[storage.ListResult]{Result: result}:
 				}
 			}
 		}

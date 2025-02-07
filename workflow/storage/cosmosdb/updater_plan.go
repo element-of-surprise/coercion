@@ -39,7 +39,7 @@ func (u planUpdater) UpdatePlan(ctx context.Context, p *workflow.Plan) error {
 	}
 	itemOpt.IfMatchEtag = ifMatchEtag
 
-	resp, err := patchItemWithRetry(ctx, u.getContainerClient(), u.getPK(), p.ID.String(), patch, itemOpt)
+	resp, err := patchItemWithRetry(ctx, u.getUpdater(), u.getPK(), p.ID.String(), patch, itemOpt)
 	if err != nil {
 		return err
 	}

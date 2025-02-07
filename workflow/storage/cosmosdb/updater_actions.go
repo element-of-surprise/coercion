@@ -45,7 +45,7 @@ func (u actionUpdater) UpdateAction(ctx context.Context, action *workflow.Action
 	}
 	itemOpt.IfMatchEtag = ifMatchEtag
 
-	resp, err := patchItemWithRetry(ctx, u.getContainerClient(), u.getPK(), action.ID.String(), patch, itemOpt)
+	resp, err := patchItemWithRetry(ctx, u.getUpdater(), u.getPK(), action.ID.String(), patch, itemOpt)
 	if err != nil {
 		return err
 	}

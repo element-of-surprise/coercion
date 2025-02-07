@@ -72,18 +72,18 @@ func planToEntry(pk string, p *workflow.Plan) (plansEntry, error) {
 	}
 
 	plan := plansEntry{
-		PartitionKey: pk,
-		Type:         Plan,
-		ID:           p.ID,
-		GroupID:      p.GroupID,
-		Name:         p.Name,
-		Descr:        p.Descr,
-		Meta:         p.Meta,
-		Blocks:       blocks,
-		StateStatus:  p.State.Status,
-		StateStart:   p.State.Start,
-		StateEnd:     p.State.End,
-		Reason:       p.Reason,
+		PK:          pk,
+		Type:        Plan,
+		ID:          p.ID,
+		GroupID:     p.GroupID,
+		Name:        p.Name,
+		Descr:       p.Descr,
+		Meta:        p.Meta,
+		Blocks:      blocks,
+		StateStatus: p.State.Status,
+		StateStart:  p.State.Start,
+		StateEnd:    p.State.End,
+		Reason:      p.Reason,
 	}
 
 	if p.BypassChecks != nil {
@@ -145,16 +145,16 @@ func checkToEntry(pk string, planID uuid.UUID, c *workflow.Checks) (checksEntry,
 		return checksEntry{}, fmt.Errorf("objsToIDs(checks.Actions): %w", err)
 	}
 	return checksEntry{
-		PartitionKey: pk,
-		Type:         Checks,
-		ID:           c.ID,
-		Key:          c.Key,
-		PlanID:       planID,
-		Actions:      actions,
-		Delay:        c.Delay,
-		StateStatus:  c.State.Status,
-		StateStart:   c.State.Start,
-		StateEnd:     c.State.End,
+		PK:          pk,
+		Type:        Checks,
+		ID:          c.ID,
+		Key:         c.Key,
+		PlanID:      planID,
+		Actions:     actions,
+		Delay:       c.Delay,
+		StateStatus: c.State.Status,
+		StateStart:  c.State.Start,
+		StateEnd:    c.State.End,
 	}, nil
 }
 
@@ -199,7 +199,7 @@ func blockToEntry(pk string, planID uuid.UUID, pos int, b *workflow.Block) (bloc
 	}
 
 	block := blocksEntry{
-		PartitionKey:      pk,
+		PK:                pk,
 		Type:              Block,
 		ID:                b.ID,
 		Key:               b.Key,
@@ -270,18 +270,18 @@ func sequenceToEntry(pk string, planID uuid.UUID, pos int, seq *workflow.Sequenc
 	}
 
 	return sequencesEntry{
-		PartitionKey: pk,
-		Type:         Sequence,
-		ID:           seq.ID,
-		Key:          seq.Key,
-		PlanID:       planID,
-		Name:         seq.Name,
-		Descr:        seq.Descr,
-		Pos:          pos,
-		Actions:      actions,
-		StateStatus:  seq.State.Status,
-		StateStart:   seq.State.Start,
-		StateEnd:     seq.State.End,
+		PK:          pk,
+		Type:        Sequence,
+		ID:          seq.ID,
+		Key:         seq.Key,
+		PlanID:      planID,
+		Name:        seq.Name,
+		Descr:       seq.Descr,
+		Pos:         pos,
+		Actions:     actions,
+		StateStatus: seq.State.Status,
+		StateStart:  seq.State.Start,
+		StateEnd:    seq.State.End,
 	}, nil
 }
 
@@ -318,22 +318,22 @@ func actionToEntry(pk string, planID uuid.UUID, pos int, a *workflow.Action) (ac
 		return actionsEntry{}, fmt.Errorf("can't encode action.Attempts: %w", err)
 	}
 	return actionsEntry{
-		PartitionKey: pk,
-		ID:           a.ID,
-		Type:         Action,
-		Key:          a.Key,
-		PlanID:       planID,
-		Name:         a.Name,
-		Descr:        a.Descr,
-		Pos:          pos,
-		Plugin:       a.Plugin,
-		Timeout:      a.Timeout,
-		Retries:      a.Retries,
-		Req:          req,
-		Attempts:     attempts,
-		StateStatus:  a.State.Status,
-		StateStart:   a.State.Start,
-		StateEnd:     a.State.End,
+		PK:          pk,
+		ID:          a.ID,
+		Type:        Action,
+		Key:         a.Key,
+		PlanID:      planID,
+		Name:        a.Name,
+		Descr:       a.Descr,
+		Pos:         pos,
+		Plugin:      a.Plugin,
+		Timeout:     a.Timeout,
+		Retries:     a.Retries,
+		Req:         req,
+		Attempts:    attempts,
+		StateStatus: a.State.Status,
+		StateStart:  a.State.Start,
+		StateEnd:    a.State.End,
 	}, nil
 }
 

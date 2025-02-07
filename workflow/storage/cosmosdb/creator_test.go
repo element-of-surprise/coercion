@@ -125,7 +125,7 @@ func TestCreate(t *testing.T) {
 			t.Fatalf("TestExists(%s): %s", test.name, err)
 		}
 		if test.readErr != nil {
-			cc.client.readErr = test.readErr
+			cc.reader.readErr = test.readErr
 		}
 		if test.createErr != nil {
 			cc.createErr = test.createErr

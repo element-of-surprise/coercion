@@ -38,7 +38,7 @@ func (u checksUpdater) UpdateChecks(ctx context.Context, check *workflow.Checks)
 	}
 	itemOpt.IfMatchEtag = ifMatchEtag
 
-	resp, err := patchItemWithRetry(ctx, u.getContainerClient(), u.getPK(), check.ID.String(), patch, itemOpt)
+	resp, err := patchItemWithRetry(ctx, u.getUpdater(), u.getPK(), check.ID.String(), patch, itemOpt)
 	if err != nil {
 		return err
 	}

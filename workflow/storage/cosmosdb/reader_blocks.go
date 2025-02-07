@@ -25,7 +25,7 @@ func (p reader) idsToBlocks(ctx context.Context, blockIDs []uuid.UUID) ([]*workf
 
 // fetchBlockByID fetches a block by its id.
 func (p reader) fetchBlockByID(ctx context.Context, id uuid.UUID) (*workflow.Block, error) {
-	res, err := p.getContainerClient().ReadItem(ctx, p.getPK(), id.String(), p.itemOptions())
+	res, err := p.getReader().ReadItem(ctx, p.getPK(), id.String(), p.itemOptions())
 	if err != nil {
 		return nil, fmt.Errorf("couldn't fetch block by id: %w", err)
 	}

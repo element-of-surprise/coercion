@@ -38,20 +38,26 @@ type Vault struct {
 	container string
 	// endpoint is the CosmosDB account endpoint
 	endpoint string
-	// partitionKey is the partition key for the storage.
+	// pkVal is the partition key value for the storage.
 	// This assumes the service will use a single partition.
-	partitionKey string
+	pkVal string
 
 	clientOpts *azcosmos.ClientOptions
 	props      azcosmos.ContainerProperties
-	throughput int32
-	itemOpts   azcosmos.ItemOptions
+	// maxRU is the maximum throughput in RU/s.
+	// https://learn.microsoft.com/en-us/azure/cosmos-db/request-units
+	maxRU    int32
+	itemOpts azcosmos.ItemOptions
 
 	reader
 	creator
 	updater
 	closer
 	deleter
+
+	containerReader  containerReader
+	containerUpdater containerUpdater
+	batcher          batcher
 
 	private.Storage
 }
@@ -82,10 +88,10 @@ func WithClientOptions(opts *azcosmos.ClientOptions) Option {
 	}
 }
 
-// WithThroughput sets container throughtput in RU/s in manual mode. Default is 400.
-func WithThroughput(throughput int32) Option {
+// WithMaxThroughput sets container throughtput in RU/s in manual mode. Default is 400.
+func WithMaxThroughput(maxRU int32) Option {
 	return func(r *Vault) error {
-		r.throughput = throughput
+		r.maxRU = maxRU
 		return nil
 	}
 }
@@ -109,88 +115,102 @@ func WithItemOptions(opts azcosmos.ItemOptions) Option {
 	}
 }
 
-// ContainerClient is the interface for the CosmosDB container client.
-// This allows for faking the azcosmos container client.
-type containerClient interface {
-	NewQueryItemsPager(string, azcosmos.PartitionKey, *azcosmos.QueryOptions) *runtime.Pager[azcosmos.QueryItemsResponse]
-	ReadItem(context.Context, azcosmos.PartitionKey, string, *azcosmos.ItemOptions) (azcosmos.ItemResponse, error)
-	PatchItem(context.Context, azcosmos.PartitionKey, string, azcosmos.PatchOperations, *azcosmos.ItemOptions) (azcosmos.ItemResponse, error)
-}
-
-// transactionalBatch is the interface for the CosmosDB transactional batch.
-type transactionalBatch interface {
-	CreateItem(item []byte, o *azcosmos.TransactionalBatchItemOptions)
-	DeleteItem(itemID string, o *azcosmos.TransactionalBatchItemOptions)
-}
-
-func partitionKey(val string) azcosmos.PartitionKey {
-	return azcosmos.NewPartitionKeyString(val)
-}
-
-// Client is the interface for the CosmosDB client.
-type client interface {
-	// getContainerClient returns the container client.
-	getContainerClient() containerClient
-	// getPK returns the partition key.
-	getPK() azcosmos.PartitionKey
-	// getPKString returns the partition key as a string.
-	getPKString() string
+type batcher interface {
 	// newTransactionalBatch returns a TransactionalBatch. This allows using a fake TransactionalBatch.
 	newTransactionalBatch() transactionalBatch
 	// executeTransactionalBatch executes a transactional batch.
 	executeTransactionalBatch(context.Context, transactionalBatch, *azcosmos.TransactionalBatchOptions) (azcosmos.TransactionalBatchResponse, error)
 	// setBatch allows for setting the fake batch in tests.
 	setBatch(transactionalBatch)
-	// itemOptions returns the item options.
-	itemOptions() *azcosmos.ItemOptions
 }
 
-var _ client = &cosmosDBClient{}
+// ContainerClient is the interface for the CosmosDB container client.
+// This allows for faking the azcosmos container client.
+type containerReader interface {
+	NewQueryItemsPager(string, azcosmos.PartitionKey, *azcosmos.QueryOptions) *runtime.Pager[azcosmos.QueryItemsResponse]
+	ReadItem(context.Context, azcosmos.PartitionKey, string, *azcosmos.ItemOptions) (azcosmos.ItemResponse, error)
+}
 
-// cosmosDBClient has the methods for all of Create/Update/Delete/Query operations
+// ContainerClient is the interface for the CosmosDB container client.
+// This allows for faking the azcosmos container client.
+type containerUpdater interface {
+	PatchItem(context.Context, azcosmos.PartitionKey, string, azcosmos.PatchOperations, *azcosmos.ItemOptions) (azcosmos.ItemResponse, error)
+}
+
+// transactionalBatch is the interface for the CosmosDB transactional batch.
+// This is used for creating and deleting plans.
+type transactionalBatch interface {
+	CreateItem(item []byte, o *azcosmos.TransactionalBatchItemOptions)
+	DeleteItem(itemID string, o *azcosmos.TransactionalBatchItemOptions)
+}
+
+func pk(val string) azcosmos.PartitionKey {
+	return azcosmos.NewPartitionKeyString(val)
+}
+
+// Client is the interface for the CosmosDB client.
+type client interface {
+	getReader() containerReader
+	getUpdater() containerUpdater
+	// getPK returns the partition key.
+	getPK() azcosmos.PartitionKey
+	// getPKString returns the partition key as a string.
+	getPKString() string
+	// itemOptions returns the item options.
+	itemOptions() *azcosmos.ItemOptions
+
+	batcher
+}
+
+var _ client = &containerClient{}
+
+// containerClient has the methods for all of Create/Update/Delete/Query operations
 // on the CosmosDB data.
-type cosmosDBClient struct {
-	partitionKey string
-
-	client *azcosmos.ContainerClient
-
+type containerClient struct {
+	pkVal    string
+	client   *azcosmos.ContainerClient
 	itemOpts azcosmos.ItemOptions
 }
 
-// getContainerClient returns the container client.
-func (c *cosmosDBClient) getContainerClient() containerClient {
+// getReader returns the container client.
+func (c *containerClient) getReader() containerReader {
+	return c.client
+}
+
+// getUpdater returns the container client.
+func (c *containerClient) getUpdater() containerUpdater {
 	return c.client
 }
 
 // getPK returns the partition key.
-func (c *cosmosDBClient) getPK() azcosmos.PartitionKey {
-	return partitionKey(c.partitionKey)
+func (c *containerClient) getPK() azcosmos.PartitionKey {
+	return pk(c.pkVal)
 }
 
 // getPKString returns the partition key as a string.
-func (c *cosmosDBClient) getPKString() string {
-	return c.partitionKey
+func (c *containerClient) getPKString() string {
+	return c.pkVal
 }
 
 // newTransactionalBatch returns a transactionalBatch. This allows using a fake TransactionalBatch.
-func (c *cosmosDBClient) newTransactionalBatch() transactionalBatch {
+func (c *containerClient) newTransactionalBatch() transactionalBatch {
 	batch := c.client.NewTransactionalBatch(c.getPK())
 	return &batch
 }
 
 // setBatch sets the batch for testing with the fake client, so nothing is
 // needed to be done for the real client.
-func (c *cosmosDBClient) setBatch(batch transactionalBatch) {
+func (c *containerClient) setBatch(batch transactionalBatch) {
 }
 
 // itemOptions returns the item options.
-func (c *cosmosDBClient) itemOptions() *azcosmos.ItemOptions {
+func (c *containerClient) itemOptions() *azcosmos.ItemOptions {
 	return &c.itemOpts
 }
 
 // ExecuteTransactionalBatch executes a transactional batch. This allows for faking by accepting the transactionalBatch
 // interface. This is only used internally, so asserting type here should be fine.
-func (c *cosmosDBClient) executeTransactionalBatch(ctx context.Context, b transactionalBatch, opts *azcosmos.TransactionalBatchOptions) (azcosmos.TransactionalBatchResponse, error) {
+func (c *containerClient) executeTransactionalBatch(ctx context.Context, b transactionalBatch, opts *azcosmos.TransactionalBatchOptions) (azcosmos.TransactionalBatchResponse, error) {
 	if b == nil {
 		return azcosmos.TransactionalBatchResponse{}, fmt.Errorf("nil transactional batch")
 	}
@@ -215,16 +235,18 @@ var indexPaths = []azcosmos.IncludedPath{
 	pathToScalar("pos"), // actions
 }
 
-// New is the constructor for *Vault. db, container, and pk are used to identify the storage container.
+// New is the constructor for *Vault. db, container, and pval are used to identify the storage container.
 // If the container does not exist, it will be created.
-func New(ctx context.Context, db, container, pk string, cred azcore.TokenCredential, reg *registry.Register, options ...Option) (*Vault, error) {
+// The partition key has a set key name, so users should decide what partition key value means to them depending on
+// their architecture.
+func New(ctx context.Context, db, container, pval string, cred azcore.TokenCredential, reg *registry.Register, options ...Option) (*Vault, error) {
 	ctx = context.WithoutCancel(ctx)
 
 	r := &Vault{
-		db:           db,
-		container:    container,
-		endpoint:     fmt.Sprintf("https://%s.documents.azure.com:443/", db),
-		partitionKey: pk,
+		db:        db,
+		container: container,
+		endpoint:  fmt.Sprintf("https://%s.documents.azure.com:443/", db),
+		pkVal:     pval,
 	}
 	for _, o := range options {
 		if err := o(r); err != nil {
@@ -255,17 +277,17 @@ func New(ctx context.Context, db, container, pk string, cred azcore.TokenCredent
 	return r, nil
 }
 
-// Use this function to create a new cosmosDBClient struct.
+// Use this function to create a new containerClient struct.
 func (v *Vault) createContainerClient(
 	ctx context.Context,
-	azCosmosClient *azcosmos.Client) (*cosmosDBClient, error) {
+	azCosmosClient *azcosmos.Client) (*containerClient, error) {
 	if azCosmosClient == nil {
 		return nil, fmt.Errorf("azCosmosClient cannot be nil")
 	}
 
-	client := &cosmosDBClient{
-		partitionKey: v.partitionKey,
-		itemOpts:     v.itemOpts,
+	client := &containerClient{
+		pkVal:    v.pkVal,
+		itemOpts: v.itemOpts,
 	}
 
 	dc, err := azCosmosClient.NewDatabase(v.db)
@@ -314,7 +336,7 @@ func (v *Vault) createContainerClient(
 func (v *Vault) createContainer(ctx context.Context, database *azcosmos.DatabaseClient, indexPaths []azcosmos.IncludedPath) (string, error) {
 	v.props.ID = v.container
 	v.props.PartitionKeyDefinition = azcosmos.PartitionKeyDefinition{
-		Paths: []string{"/partitionKey"},
+		Paths: []string{"/pk"},
 	}
 	v.props.IndexingPolicy = &azcosmos.IndexingPolicy{
 		IncludedPaths: indexPaths,
@@ -328,10 +350,10 @@ func (v *Vault) createContainer(ctx context.Context, database *azcosmos.Database
 		IndexingMode: azcosmos.IndexingModeConsistent,
 	}
 
-	if v.throughput == 0 {
-		v.throughput = 400
+	if v.maxRU == 0 {
+		v.maxRU = 400
 	}
-	throughput := azcosmos.NewManualThroughputProperties(v.throughput)
+	throughput := azcosmos.NewAutoscaleThroughputProperties(v.maxRU)
 	response, err := database.CreateContainer(ctx, v.props, &azcosmos.CreateContainerOptions{ThroughputProperties: &throughput})
 	if err != nil {
 		return "", err

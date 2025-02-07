@@ -36,7 +36,7 @@ func newUpdater(mu *sync.Mutex, client client, r reader) updater {
 	}
 }
 
-func patchItemWithRetry(ctx context.Context, cc containerClient, pk azcosmos.PartitionKey, id string, patch azcosmos.PatchOperations, itemOpt *azcosmos.ItemOptions) (azcosmos.ItemResponse, error) {
+func patchItemWithRetry(ctx context.Context, cc containerUpdater, pk azcosmos.PartitionKey, id string, patch azcosmos.PatchOperations, itemOpt *azcosmos.ItemOptions) (azcosmos.ItemResponse, error) {
 	var resp azcosmos.ItemResponse
 	var err error
 	patchItem := func(ctx context.Context, r exponential.Record) error {
