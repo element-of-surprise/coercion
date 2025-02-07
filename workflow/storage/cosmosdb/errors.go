@@ -9,8 +9,8 @@ import (
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
 )
 
-// IsNotFound checks if the error that Azure returned is 404.
-func IsNotFound(err error) bool {
+// isNotFound checks if the error that Azure returned is 404.
+func isNotFound(err error) bool {
 	if err == nil {
 		return false
 	}
@@ -19,7 +19,7 @@ func IsNotFound(err error) bool {
 }
 
 // IsConflict checks if the error indicates there is a resource conflict.
-func IsConflict(err error) bool {
+func isConflict(err error) bool {
 	if err == nil {
 		return false
 	}
@@ -28,7 +28,7 @@ func IsConflict(err error) bool {
 }
 
 // IsUnauthorized checks if the error that Azure returned is 401.
-func IsUnauthorized(err error) bool {
+func isUnauthorized(err error) bool {
 	var resErr *azcore.ResponseError
 	return errors.As(err, &resErr) && resErr.StatusCode == http.StatusUnauthorized
 }
@@ -41,7 +41,7 @@ func isDNSError(err error) bool {
 }
 
 func isRetriableError(err error) bool {
-	if IsUnauthorized(err) {
+	if isUnauthorized(err) {
 		return false
 	}
 

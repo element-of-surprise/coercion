@@ -249,7 +249,7 @@ func TestStorageItemCRUD(t *testing.T) {
 	if err == nil {
 		t.Fatalf("expected error when reading deleted plan %s", plan.ID.String())
 	}
-	if !IsNotFound(err) {
+	if !isNotFound(err) {
 		t.Fatalf("expected not found error when reading deleted plan %s, got %v", plan.ID.String(), err)
 	}
 	mustGetDeleteCallCount(t, cc.deleteCallCount, Plan, 1)

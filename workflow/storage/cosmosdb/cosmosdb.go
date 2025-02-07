@@ -156,7 +156,8 @@ type client interface {
 	getPKString() string
 	// itemOptions returns the item options.
 	itemOptions() *azcosmos.ItemOptions
-	// client must implement batcher
+	// The client must implement batcher. Some of the transactional batch methods
+	// are difficult to fake otherwise.
 	batcher
 }
 
@@ -206,7 +207,7 @@ func (c *containerClient) itemOptions() *azcosmos.ItemOptions {
 	return &c.itemOpts
 }
 
-// ExecuteTransactionalBatch executes a transactional batch. This allows for faking by accepting the transactionalBatch
+// executeTransactionalBatch executes a transactional batch. This allows for faking by accepting the transactionalBatch
 // interface. This is only used internally, so asserting type here should be fine.
 func (c *containerClient) executeTransactionalBatch(ctx context.Context, b transactionalBatch, opts *azcosmos.TransactionalBatchOptions) (azcosmos.TransactionalBatchResponse, error) {
 	if b == nil {
@@ -274,7 +275,7 @@ func New(ctx context.Context, db, container, pval string, cred azcore.TokenCrede
 	return r, nil
 }
 
-// Use this function to create a new containerClient struct.
+// createContainerClient creates a new CosmosDB container client.
 func (v *Vault) createContainerClient(
 	ctx context.Context,
 	azCosmosClient *azcosmos.Client) (*containerClient, error) {
@@ -300,7 +301,7 @@ func (v *Vault) createContainerClient(
 		activityID, err := v.createContainer(ctx, dc, indexPaths)
 		if err != nil {
 			switch {
-			case IsConflict(err):
+			case isConflict(err):
 				slog.Default().Warn(fmt.Sprintf("Container %s already exists: %s", v.container, err))
 			default:
 				return nil, fmt.Errorf("failed to create Cosmos DB container: container=%s. %w", v.container, err)
@@ -370,7 +371,7 @@ func (v *Vault) containerExists(ctx context.Context, client *azcosmos.Client) (b
 		)
 	}
 	if _, err = cc.Read(ctx, nil); err != nil {
-		if !IsNotFound(err) {
+		if !isNotFound(err) {
 			return false, fmt.Errorf(
 				"failed to connect to Cosmos DB container: endpoint=%q, container=%q. %w",
 				v.endpoint,

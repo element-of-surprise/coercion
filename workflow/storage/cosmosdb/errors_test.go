@@ -34,7 +34,7 @@ func TestIsNotFound(t *testing.T) {
 	}
 
 	for _, test := range tests {
-		notFound := IsNotFound(test.err)
+		notFound := isNotFound(test.err)
 		if test.want != notFound {
 			t.Errorf("TestNotFound(%s): got %t, want %t", test.name, notFound, test.want)
 			continue
@@ -67,7 +67,7 @@ func TestIsConflict(t *testing.T) {
 	}
 
 	for _, test := range tests {
-		notFound := IsConflict(test.err)
+		notFound := isConflict(test.err)
 		if test.want != notFound {
 			t.Errorf("TestConflict(%s): got %t, want %t", test.name, notFound, test.want)
 			continue

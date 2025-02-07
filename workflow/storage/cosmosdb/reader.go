@@ -50,7 +50,7 @@ func (r reader) Exists(ctx context.Context, id uuid.UUID) (bool, error) {
 
 	_, err := r.getReader().ReadItem(ctx, r.getPK(), id.String(), r.itemOptions())
 	if err != nil {
-		if IsNotFound(err) {
+		if isNotFound(err) {
 			return false, nil
 		}
 		return false, fmt.Errorf("couldn't fetch plan by id: %w", err)
