@@ -55,10 +55,6 @@ type Vault struct {
 	closer
 	deleter
 
-	containerReader  containerReader
-	containerUpdater containerUpdater
-	batcher          batcher
-
 	private.Storage
 }
 
@@ -150,7 +146,9 @@ func pk(val string) azcosmos.PartitionKey {
 
 // Client is the interface for the CosmosDB client.
 type client interface {
+	// getReader returns the container client.
 	getReader() containerReader
+	// getUpdater returns the container client.
 	getUpdater() containerUpdater
 	// getPK returns the partition key.
 	getPK() azcosmos.PartitionKey
@@ -158,7 +156,7 @@ type client interface {
 	getPKString() string
 	// itemOptions returns the item options.
 	itemOptions() *azcosmos.ItemOptions
-
+	// client must implement batcher
 	batcher
 }
 
@@ -231,8 +229,7 @@ var indexPaths = []azcosmos.IncludedPath{
 	pathToScalar("submitTime"), // plans
 	pathToScalar("key"),        // blocks, checks, sequences, actions
 	pathToScalar("planID"),     // blocks, checks, sequences, actions
-	// do I need a composite index? perhaps everything with planID
-	pathToScalar("pos"), // actions
+	pathToScalar("pos"),        // actions
 }
 
 // New is the constructor for *Vault. db, container, and pval are used to identify the storage container.

@@ -183,7 +183,6 @@ func newFakeCosmosDBClient() *fakeContainerClient {
 		documents: documents,
 	}
 	fakeContainerUpdater := fakeContainerUpdater{
-		// need to somehow share the documents map
 		documents: documents,
 
 		patchCallCount: map[Type]int{},
@@ -279,8 +278,6 @@ func (c *fakeContainerClient) executeTransactionalBatch(ctx context.Context, b t
 
 // fakeContainerReader has the methods for read operations on single container items.
 type fakeContainerReader struct {
-	mu sync.RWMutex
-
 	documents map[string][]byte
 
 	readErr error
@@ -289,8 +286,6 @@ type fakeContainerReader struct {
 
 // fakeContainerUpdater has the methods for update operations on single container items.
 type fakeContainerUpdater struct {
-	mu sync.RWMutex
-
 	documents map[string][]byte
 
 	patchCallCount map[Type]int
