@@ -2,7 +2,9 @@ package cosmosdb
 
 import (
 	"context"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/kylelemons/godebug/pretty"
@@ -81,10 +83,37 @@ func TestStorageItemCRUD(t *testing.T) {
 		t.Fatalf("expected 3 result, got %d", resultCount)
 	}
 
+	// list with cancel
+	cancelCtx, cancel := context.WithCancel(ctx)
+	results, err = r.List(cancelCtx, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resultCount = 0
+	for res := range results {
+		if resultCount == 2 {
+			if res.Err == nil || !strings.Contains(res.Err.Error(), "context canceled") {
+				t.Fatalf("expected context canceled error, got %v", res.Err)
+			}
+			resultCount++
+			break
+		}
+		if res.Err != nil {
+			t.Fatalf("error when listing results: %v", res.Err)
+		}
+		resultCount++
+		time.Sleep(10 * time.Millisecond)
+		cancel()
+	}
+	if resultCount != 3 {
+		t.Fatalf("expected 3 result, got %d", resultCount)
+	}
+
 	// The fake pager only implements querying by ID. It's a pain to fake too much.
 	filters := storage.Filters{
 		ByIDs: []uuid.UUID{
 			plan.ID,
+			plan1.ID,
 		},
 	}
 	results, err = r.Search(ctx, filters)
@@ -98,8 +127,41 @@ func TestStorageItemCRUD(t *testing.T) {
 		}
 		resultCount++
 	}
-	if resultCount != 1 {
-		t.Fatalf("expected 1 result, got %d", resultCount)
+	if resultCount != 2 {
+		t.Fatalf("expected 2 result, got %d", resultCount)
+	}
+
+	// search with cancel
+	filters = storage.Filters{
+		ByIDs: []uuid.UUID{
+			plan.ID,
+			plan1.ID,
+			plan2.ID,
+		},
+	}
+	cancelCtx, cancel = context.WithCancel(ctx)
+	results, err = r.Search(cancelCtx, filters)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resultCount = 0
+	for res := range results {
+		if resultCount == 2 {
+			if res.Err == nil || !strings.Contains(res.Err.Error(), "context canceled") {
+				t.Fatalf("expected context canceled error, got %v", res.Err)
+			}
+			resultCount++
+			break
+		}
+		if res.Err != nil {
+			t.Fatalf("error when listing results: %v", res.Err)
+		}
+		resultCount++
+		time.Sleep(10 * time.Millisecond)
+		cancel()
+	}
+	if resultCount != 3 {
+		t.Fatalf("expected 3 result, got %d", resultCount)
 	}
 
 	// test update, which is actually a patch and faking too much is a pain

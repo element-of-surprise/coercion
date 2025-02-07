@@ -93,29 +93,29 @@ func (r reader) Search(ctx context.Context, filters storage.Filters) (chan stora
 	defer r.mu.RUnlock()
 
 	pager := r.getReader().NewQueryItemsPager(q, r.getPK(), &azcosmos.QueryOptions{QueryParameters: parameters})
-	// pageResults := make(chan storage.Stream[storage.ListResult], 1)
 	results := make(chan storage.Stream[storage.ListResult], 1)
 	go func() {
 		defer close(results)
 		for pager.More() {
 			res, err := pager.NextPage(ctx)
 			if err != nil {
-				results <- storage.Stream[storage.ListResult]{
-					Err: fmt.Errorf("problem listing plans: %w", err),
+				sendErr := Sender[storage.Stream[storage.ListResult]](ctx, results, storage.Stream[storage.ListResult]{Err: fmt.Errorf("problem listing plans: %w", err)})
+				if sendErr != nil {
+					results <- storage.Stream[storage.ListResult]{Err: sendErr}
 				}
 				return
 			}
 			for _, item := range res.Items {
 				result, err := r.listResultsFunc(item)
 				if err != nil {
-					results <- storage.Stream[storage.ListResult]{
-						Err: fmt.Errorf("problem listing items in plans: %w", err),
+					sendErr := Sender[storage.Stream[storage.ListResult]](ctx, results, storage.Stream[storage.ListResult]{Err: fmt.Errorf("problem listing items in plans: %w", err)})
+					if sendErr != nil {
+						results <- storage.Stream[storage.ListResult]{Err: sendErr}
 					}
 					return
 				}
-				if err := Sender[storage.Stream[storage.ListResult]](ctx, results, storage.Stream[storage.ListResult]{Result: result}); err != nil {
-					results <- storage.Stream[storage.ListResult]{
-						Err: err}
+				if sendErr := Sender[storage.Stream[storage.ListResult]](ctx, results, storage.Stream[storage.ListResult]{Result: result}); sendErr != nil {
+					results <- storage.Stream[storage.ListResult]{Err: sendErr}
 					return
 				}
 			}
@@ -206,24 +206,23 @@ func (r reader) List(ctx context.Context, limit int) (chan storage.Stream[storag
 		for pager.More() {
 			res, err := pager.NextPage(ctx)
 			if err != nil {
-				results <- storage.Stream[storage.ListResult]{
-					Err: fmt.Errorf("problem listing plans: %w", err),
+				sendErr := Sender[storage.Stream[storage.ListResult]](ctx, results, storage.Stream[storage.ListResult]{Err: fmt.Errorf("problem listing plans: %w", err)})
+				if sendErr != nil {
+					results <- storage.Stream[storage.ListResult]{Err: sendErr}
 				}
 				return
 			}
 			for _, item := range res.Items {
 				result, err := r.listResultsFunc(item)
 				if err != nil {
-					results <- storage.Stream[storage.ListResult]{
-						Err: fmt.Errorf("problem listing items in plans: %w", err),
+					sendErr := Sender[storage.Stream[storage.ListResult]](ctx, results, storage.Stream[storage.ListResult]{Err: fmt.Errorf("problem listing items in plans: %w", err)})
+					if sendErr != nil {
+						results <- storage.Stream[storage.ListResult]{Err: sendErr}
 					}
 					return
 				}
-
-				if err := Sender[storage.Stream[storage.ListResult]](ctx, results, storage.Stream[storage.ListResult]{Result: result}); err != nil {
-					results <- storage.Stream[storage.ListResult]{
-						Err: err,
-					}
+				if sendErr := Sender[storage.Stream[storage.ListResult]](ctx, results, storage.Stream[storage.ListResult]{Result: result}); sendErr != nil {
+					results <- storage.Stream[storage.ListResult]{Err: sendErr}
 					return
 				}
 			}
