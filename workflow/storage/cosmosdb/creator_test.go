@@ -105,7 +105,7 @@ func TestCreate(t *testing.T) {
 		{
 			name:    "Success: nil blocks",
 			plan:    planWithNilBlocks,
-			wantErr: false,
+			wantErr: true,
 		},
 		{
 			name:    "Error: nil block ID",

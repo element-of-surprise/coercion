@@ -34,9 +34,6 @@ func TestDelete(t *testing.T) {
 	planWithNilChecks.BypassChecks = nil
 	planWithNilChecks.DeferredChecks = nil
 
-	planWithNilBlocks := NewTestPlan()
-	planWithNilBlocks.Blocks = nil
-
 	tests := []struct {
 		name      string
 		plan      *workflow.Plan
@@ -73,11 +70,6 @@ func TestDelete(t *testing.T) {
 		{
 			name:    "Success: not all checks defined",
 			plan:    planWithNilChecks,
-			wantErr: false,
-		},
-		{
-			name:    "Success: nil blocks",
-			plan:    planWithNilBlocks,
 			wantErr: false,
 		},
 	}

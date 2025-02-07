@@ -34,6 +34,9 @@ func (c creator) commitPlan(ctx context.Context, p *workflow.Plan) (err error) {
 		}
 	}
 
+	if p.Blocks == nil {
+		return fmt.Errorf("commitPlan: plan.Blocks cannot be nil")
+	}
 	for i, b := range p.Blocks {
 		if err := c.commitBlock(batch, p.ID, i, b); err != nil {
 			return fmt.Errorf("planToEntry(commitBlocks): %w", err)
@@ -121,6 +124,9 @@ func (c creator) commitChecks(batch transactionalBatch, planID uuid.UUID, ch *wo
 		return err
 	}
 
+	if ch.Actions == nil {
+		return fmt.Errorf("commitChecks: checks.Actions cannot be nil")
+	}
 	for i, a := range ch.Actions {
 		if err := c.commitAction(batch, planID, i, a); err != nil {
 			return fmt.Errorf("commitAction: %w", err)
@@ -174,6 +180,9 @@ func (c creator) commitBlock(batch transactionalBatch, planID uuid.UUID, pos int
 		}
 	}
 
+	if b.Sequences == nil {
+		return fmt.Errorf("commitBlock: block.Sequences cannot be nil")
+	}
 	for i, seq := range b.Sequences {
 		if err := c.commitSequence(batch, planID, i, seq); err != nil {
 			return fmt.Errorf("(commitSequence: %w", err)
@@ -245,6 +254,9 @@ func (c creator) commitSequence(batch transactionalBatch, planID uuid.UUID, pos 
 		return err
 	}
 
+	if seq.Actions == nil {
+		return fmt.Errorf("commitSequence: sequence.Actions cannot be nil")
+	}
 	for i, a := range seq.Actions {
 		if err := c.commitAction(batch, planID, i, a); err != nil {
 			return fmt.Errorf("planToEntry(commitAction): %w", err)

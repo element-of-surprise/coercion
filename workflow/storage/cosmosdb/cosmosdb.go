@@ -84,7 +84,7 @@ func WithClientOptions(opts *azcosmos.ClientOptions) Option {
 	}
 }
 
-// WithMaxThroughput sets container throughtput in RU/s in manual mode. Default is 400.
+// WithMaxThroughput sets container throughtput in RU/s in autoscale mode. Default is 400.
 func WithMaxThroughput(maxRU int32) Option {
 	return func(r *Vault) error {
 		r.maxRU = maxRU
