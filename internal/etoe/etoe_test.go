@@ -215,6 +215,9 @@ func TestEtoE(t *testing.T) {
 	if err != nil {
 		panic(err)
 	}
+
+	pConfig.Print("Workflow result: \n", result)
+
 	if result.State.Status != workflow.Completed {
 		t.Fatalf("TestEtoE: workflow did not complete successfully(%s)", result.State.Status)
 	}
@@ -276,8 +279,6 @@ func TestEtoE(t *testing.T) {
 			}
 		}
 	}
-
-	pConfig.Print("Workflow result: \n", result)
 }
 
 func testPlugResp(action *workflow.Action, want string) error {

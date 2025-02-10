@@ -607,7 +607,7 @@ func (s *States) runContChecks(ctx context.Context, checks *workflow.Checks, res
 		case <-ctx.Done():
 			return
 		case <-t.C:
-			err := s.runChecksOnce(ctx, checks)
+			err := s.runChecksOnce(context.WithoutCancel(ctx), checks)
 			resultCh <- err
 			if err != nil {
 				return

@@ -111,7 +111,7 @@ func WithItemOptions(opts azcosmos.ItemOptions) Option {
 	}
 }
 
-type batcher interface {
+type containerBatcher interface {
 	// newTransactionalBatch returns a TransactionalBatch. This allows using a fake TransactionalBatch.
 	newTransactionalBatch() transactionalBatch
 	// executeTransactionalBatch executes a transactional batch.
@@ -156,9 +156,9 @@ type client interface {
 	getPKString() string
 	// itemOptions returns the item options.
 	itemOptions() *azcosmos.ItemOptions
-	// The client must implement batcher. Some of the transactional batch methods
+	// The client must implement containerBatcher. Some of the transactional batch methods
 	// are difficult to fake otherwise.
-	batcher
+	containerBatcher
 }
 
 var _ client = &containerClient{}
