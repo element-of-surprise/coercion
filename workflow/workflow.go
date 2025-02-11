@@ -68,6 +68,8 @@ type State struct {
 	Start time.Time
 	// End is the time that the object was completed.
 	End time.Time
+	// Etag is a field that may be used internally by storage implementations for concurrency control.
+	ETag string
 }
 
 // Reset resets the running state of the object. Not for use by users.
@@ -75,6 +77,7 @@ func (s *State) Reset() {
 	s.Status = NotStarted
 	s.Start = time.Time{}
 	s.End = time.Time{}
+	s.ETag = ""
 }
 
 // Duration returns the time between Start and End for this object.

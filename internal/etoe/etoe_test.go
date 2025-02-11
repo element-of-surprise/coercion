@@ -2,15 +2,22 @@ package etoe
 
 import (
 	"context"
+	"flag"
 	"fmt"
+	"log"
+	"log/slog"
 	"os"
 	"testing"
 	"time"
 
+	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
+	"github.com/Azure/azure-sdk-for-go/sdk/azidentity"
 	workstream "github.com/element-of-surprise/coercion"
 	"github.com/element-of-surprise/coercion/plugins/registry"
 	"github.com/element-of-surprise/coercion/workflow"
 	"github.com/element-of-surprise/coercion/workflow/builder"
+	"github.com/element-of-surprise/coercion/workflow/storage"
+	"github.com/element-of-surprise/coercion/workflow/storage/cosmosdb"
 	"github.com/element-of-surprise/coercion/workflow/storage/sqlite"
 	"github.com/element-of-surprise/coercion/workflow/utils/clone"
 	"github.com/element-of-surprise/coercion/workflow/utils/walk"
@@ -29,8 +36,25 @@ var pConfig = pretty.Config{
 	SkipZeroFields:    true,
 }
 
+var (
+	vaultType = flag.String("vault", "sqlite", "The type of storage vault to use.")
+
+	// CosmosDB flags that are only used if vault is set to "cosmosdb".
+	db        = flag.String("db", os.Getenv("AZURE_COSMOSDB_DBNAME"), "The name of the cosmosdb database.")
+	container = flag.String("container", os.Getenv("AZURE_COSMOSDB_CNAME"), "The name of the cosmosdb container.")
+	pk        = flag.String("partition-key", os.Getenv("AZURE_COSMOSDB_PK"), "The name of the cosmosdb partition key.")
+	msi       = flag.String("msi", "", "The identity with vmss contributor role. If empty, az login is used.")
+	teardown  = flag.Bool("teardown", false, "Teardown the cosmosdb container.")
+)
+
 func TestEtoE(t *testing.T) {
+	flag.Parse()
+	if err := validateFlags(); err != nil {
+		t.Fatalf("TestEtoE: failed to validate flags: %v", err)
+	}
+
 	ctx := context.Background()
+	logger := slog.Default()
 
 	plugCheck := &testplugin.Plugin{
 		AlwaysRespond: true,
@@ -113,6 +137,7 @@ func TestEtoE(t *testing.T) {
 			Concurrency:   2,
 		},
 	)
+	build.AddChecks(builder.BypassChecks, clone.Checks(ctx, bypassChecks, cloneOpts...)).Up()
 	build.AddChecks(builder.PreChecks, clone.Checks(ctx, checks, cloneOpts...)).Up()
 	build.AddChecks(builder.PostChecks, clone.Checks(ctx, checks, cloneOpts...)).Up()
 	build.AddChecks(builder.ContChecks, clone.Checks(ctx, checks, cloneOpts...)).Up()
@@ -139,7 +164,35 @@ func TestEtoE(t *testing.T) {
 		}
 	}
 
-	vault, err := sqlite.New(ctx, "", reg, sqlite.WithInMemory())
+	var cred azcore.TokenCredential
+	if *vaultType == "cosmosdb" {
+		cred, err = msiCred(*msi)
+		if err != nil {
+			panic(err)
+		}
+	}
+
+	if *teardown == true {
+		defer func() {
+			if *vaultType == "cosmosdb" {
+				// Teardown the cosmosdb container
+				if err := cosmosdb.Teardown(ctx, *db, *container, cred, nil); err != nil {
+					panic(err)
+				}
+			}
+		}()
+	}
+
+	var vault storage.Vault
+	switch *vaultType {
+	case "sqlite":
+		vault, err = sqlite.New(ctx, "", reg, sqlite.WithInMemory())
+	case "cosmosdb":
+		logger.Info(fmt.Sprintf("TestEtoE: Using cosmosdb: %s, %s, %s", *db, *container, *pk))
+		vault, err = cosmosdb.New(ctx, *db, *container, *pk, cred, reg)
+	default:
+		panic(fmt.Errorf("TestEtoE: unknown storage vault type: %s", *vaultType))
+	}
 	if err != nil {
 		panic(err)
 	}
@@ -162,6 +215,9 @@ func TestEtoE(t *testing.T) {
 	if err != nil {
 		panic(err)
 	}
+
+	pConfig.Print("Workflow result: \n", result)
+
 	if result.State.Status != workflow.Completed {
 		t.Fatalf("TestEtoE: workflow did not complete successfully(%s)", result.State.Status)
 	}
@@ -223,8 +279,6 @@ func TestEtoE(t *testing.T) {
 			}
 		}
 	}
-
-	pConfig.Print("Workflow result: \n", result)
 }
 
 func testPlugResp(action *workflow.Action, want string) error {
@@ -241,6 +295,7 @@ func testPlugResp(action *workflow.Action, want string) error {
 
 func TestBypassPlan(t *testing.T) {
 	ctx := context.Background()
+	logger := slog.Default()
 
 	plugCheck := &testplugin.Plugin{
 		AlwaysRespond: true,
@@ -325,7 +380,35 @@ func TestBypassPlan(t *testing.T) {
 		panic(err)
 	}
 
-	vault, err := sqlite.New(ctx, "", reg, sqlite.WithInMemory())
+	var cred azcore.TokenCredential
+	if *vaultType == "cosmosdb" {
+		cred, err = msiCred(*msi)
+		if err != nil {
+			panic(err)
+		}
+	}
+
+	if *teardown == true {
+		defer func() {
+			if *vaultType == "cosmosdb" {
+				// Teardown the cosmosdb container
+				if err := cosmosdb.Teardown(ctx, *db, *container, cred, nil); err != nil {
+					panic(err)
+				}
+			}
+		}()
+	}
+
+	var vault storage.Vault
+	switch *vaultType {
+	case "sqlite":
+		vault, err = sqlite.New(ctx, "", reg, sqlite.WithInMemory())
+	case "cosmosdb":
+		logger.Info(fmt.Sprintf("TestBypassPlan: Using cosmosdb: %s, %s, %s", *db, *container, *pk))
+		vault, err = cosmosdb.New(ctx, *db, *container, *pk, cred, reg)
+	default:
+		panic(fmt.Errorf("TestBypassPlan: unknown storage vault type: %s", *vaultType))
+	}
 	if err != nil {
 		panic(err)
 	}
@@ -371,6 +454,7 @@ func TestBypassPlan(t *testing.T) {
 
 func TestBypassBlock(t *testing.T) {
 	ctx := context.Background()
+	logger := slog.Default()
 
 	plugCheck := &testplugin.Plugin{
 		AlwaysRespond: true,
@@ -479,7 +563,35 @@ func TestBypassBlock(t *testing.T) {
 		panic(err)
 	}
 
-	vault, err := sqlite.New(ctx, "", reg, sqlite.WithInMemory())
+	var cred azcore.TokenCredential
+	if *vaultType == "cosmosdb" {
+		cred, err = msiCred(*msi)
+		if err != nil {
+			panic(err)
+		}
+	}
+
+	if *teardown == true {
+		defer func() {
+			if *vaultType == "cosmosdb" {
+				// Teardown the cosmosdb container
+				if err := cosmosdb.Teardown(ctx, *db, *container, cred, nil); err != nil {
+					panic(err)
+				}
+			}
+		}()
+	}
+
+	var vault storage.Vault
+	switch *vaultType {
+	case "sqlite":
+		vault, err = sqlite.New(ctx, "", reg, sqlite.WithInMemory())
+	case "cosmosdb":
+		logger.Info(fmt.Sprintf("TestBypassBlock: Using cosmosdb: %s, %s, %s", *db, *container, *pk))
+		vault, err = cosmosdb.New(ctx, *db, *container, *pk, cred, reg)
+	default:
+		panic(fmt.Errorf("TestBypassBlock: unknown storage vault type: %s", *vaultType))
+	}
 	if err != nil {
 		panic(err)
 	}
@@ -550,4 +662,44 @@ func TestBypassBlock(t *testing.T) {
 			t.Fatalf("TestBypassPlan: expected block 1 Sequence in Completed")
 		}
 	}
+}
+
+func validateFlags() error {
+	if *vaultType == "cosmosdb" {
+		if *db == "" {
+			return fmt.Errorf("missing db name")
+		}
+		if *container == "" {
+			return fmt.Errorf("missing container name")
+		}
+		if *pk == "" {
+			return fmt.Errorf("missing partition key")
+		}
+	}
+	return nil
+}
+
+// msiCred returns a managed identity credential.
+func msiCred(msi string) (azcore.TokenCredential, error) {
+	if msi != "" {
+		msiResc := azidentity.ResourceID(msi)
+		msiOpts := azidentity.ManagedIdentityCredentialOptions{ID: msiResc}
+		cred, err := azidentity.NewManagedIdentityCredential(&msiOpts)
+		if err != nil {
+			return nil, err
+		}
+		log.Println("Authentication is using identity token.")
+		return cred, nil
+	}
+	// Otherwise, allow authentication via az login
+	// Need following roles comosdb sql roles:
+	// https://learn.microsoft.com/en-us/azure/cosmos-db/nosql/security/how-to-grant-data-plane-role-based-access?tabs=built-in-definition%2Ccsharp&pivots=azure-interface-cli
+	azOptions := &azidentity.AzureCLICredentialOptions{}
+	azCred, err := azidentity.NewAzureCLICredential(azOptions)
+	if err != nil {
+		return nil, fmt.Errorf("creating az cli credential: %s", err)
+	}
+
+	log.Println("Authentication is using az cli token.")
+	return azCred, nil
 }

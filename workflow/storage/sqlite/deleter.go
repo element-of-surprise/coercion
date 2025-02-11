@@ -43,6 +43,9 @@ func (d deleter) Delete(ctx context.Context, id uuid.UUID) error {
 }
 
 func (d deleter) deletePlan(ctx context.Context, conn *sqlite.Conn, plan *workflow.Plan) error {
+	if err := d.deleteChecks(ctx, conn, plan.BypassChecks); err != nil {
+		return fmt.Errorf("couldn't delete plan bypasschecks: %w", err)
+	}
 	if err := d.deleteChecks(ctx, conn, plan.PreChecks); err != nil {
 		return fmt.Errorf("couldn't delete plan prechecks: %w", err)
 	}
@@ -51,6 +54,9 @@ func (d deleter) deletePlan(ctx context.Context, conn *sqlite.Conn, plan *workfl
 	}
 	if err := d.deleteChecks(ctx, conn, plan.ContChecks); err != nil {
 		return fmt.Errorf("couldn't delete plan contchecks: %w", err)
+	}
+	if err := d.deleteChecks(ctx, conn, plan.DeferredChecks); err != nil {
+		return fmt.Errorf("couldn't delete plan deferredchecks: %w", err)
 	}
 	if err := d.deleteBlocks(ctx, conn, plan.Blocks); err != nil {
 		return fmt.Errorf("couldn't delete blocks: %w", err)
@@ -75,6 +81,9 @@ func (d deleter) deleteBlocks(ctx context.Context, conn *sqlite.Conn, blocks []*
 	}
 
 	for _, block := range blocks {
+		if err := d.deleteChecks(ctx, conn, block.BypassChecks); err != nil {
+			return fmt.Errorf("couldn't delete block bypasschecks: %w", err)
+		}
 		if err := d.deleteChecks(ctx, conn, block.PreChecks); err != nil {
 			return fmt.Errorf("couldn't delete block prechecks: %w", err)
 		}
@@ -83,6 +92,9 @@ func (d deleter) deleteBlocks(ctx context.Context, conn *sqlite.Conn, blocks []*
 		}
 		if err := d.deleteChecks(ctx, conn, block.ContChecks); err != nil {
 			return fmt.Errorf("couldn't delete block contchecks: %w", err)
+		}
+		if err := d.deleteChecks(ctx, conn, block.DeferredChecks); err != nil {
+			return fmt.Errorf("couldn't delete block deferredchecks: %w", err)
 		}
 		if err := d.deletesSeqs(ctx, conn, block.Sequences); err != nil {
 			return fmt.Errorf("couldn't delete block sequences: %w", err)

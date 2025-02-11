@@ -12,7 +12,7 @@ import (
 	"github.com/element-of-surprise/coercion/workflow"
 	"github.com/element-of-surprise/coercion/workflow/storage"
 
-	"github.com/gostdlib/ops/retry/exponential"
+	"github.com/Azure/retry/exponential"
 	"github.com/gostdlib/ops/statemachine"
 )
 

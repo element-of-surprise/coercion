@@ -28,8 +28,8 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/Azure/retry/exponential"
 	"github.com/element-of-surprise/coercion/plugins"
-	"github.com/gostdlib/ops/retry/exponential"
 )
 
 // Register provides a Register for plugins. This should not be used directly by the user,
