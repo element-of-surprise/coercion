@@ -45,7 +45,7 @@ type Data struct {
 	err error
 }
 
-// contChecks will check if any of the continuous checkes on the Plan or the current block have failed.
+// contChecks will check if any of the continuous checks on the Plan or the current block have failed.
 // If a check has failed, the type of the object that failed is returned (OTPlan or OTBlock).
 func (d Data) contChecksPassing() (workflow.ObjectType, error) {
 	if len(d.blocks) == 0 {
@@ -468,8 +468,7 @@ func (s *States) PlanPostChecks(req statemachine.Request[Data]) statemachine.Req
 	// No matter what the outcome here is, we go to the end state.
 	req.Next = s.PlanDeferredChecks
 
-	// We always checks this to avoid programmer mistakes that lead to a goroutine lea
-	// 	// We always checks this to avoid programmer mistakes that lead to a goroutine leak.
+	// We always checks this to avoid programmer mistakes that lead to a goroutine leak.
 	if req.Data.contCancel != nil {
 		req.Data.contCancel()
 	}
@@ -608,7 +607,7 @@ func (s *States) runContChecks(ctx context.Context, checks *workflow.Checks, res
 		case <-ctx.Done():
 			return
 		case <-t.C:
-			err := s.runChecksOnce(ctx, checks)
+			err := s.runChecksOnce(context.WithoutCancel(ctx), checks)
 			resultCh <- err
 			if err != nil {
 				return
@@ -617,7 +616,7 @@ func (s *States) runContChecks(ctx context.Context, checks *workflow.Checks, res
 	}
 }
 
-// runContChecksOnce runs Checks once and writes the result to the store.
+// runChecksOnce runs Checks once and writes the result to the store.
 func (s *States) runChecksOnce(ctx context.Context, checks *workflow.Checks) error {
 	if s.checksRunner != nil {
 		return s.checksRunner(ctx, checks)
@@ -628,11 +627,11 @@ func (s *States) runChecksOnce(ctx context.Context, checks *workflow.Checks) err
 	checks.State.Start = s.now()
 
 	if err := s.store.UpdateChecks(ctx, checks); err != nil {
-		log.Fatalf("failed to write ContChecks: %v", err)
+		log.Fatalf("failed to write Checks: %v", err)
 	}
 	defer func() {
 		if err := s.store.UpdateChecks(ctx, checks); err != nil {
-			log.Fatalf("failed to write ContChecks: %v", err)
+			log.Fatalf("failed to write Checks: %v", err)
 		}
 	}()
 	defer func() {
