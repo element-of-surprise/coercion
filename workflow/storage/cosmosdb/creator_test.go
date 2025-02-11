@@ -103,7 +103,7 @@ func TestCreate(t *testing.T) {
 			wantErr: true,
 		},
 		{
-			name:    "Success: nil blocks",
+			name:    "Error: nil blocks",
 			plan:    planWithNilBlocks,
 			wantErr: true,
 		},

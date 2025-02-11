@@ -226,7 +226,7 @@ func (c *fakeContainerClient) newTransactionalBatch() transactionalBatch {
 	}
 }
 
-// SetBatch sets the batch.
+// setBatch sets the batch.
 func (b *fakeContainerClient) setBatch(batch transactionalBatch) {
 	b.batch = batch.(*fakeTransactionalBatch)
 }
@@ -236,7 +236,7 @@ func (b *fakeContainerClient) itemOptions() *azcosmos.ItemOptions {
 	return &azcosmos.ItemOptions{}
 }
 
-// ExecuteTransactionalBatch executes the fake transactional batch by adding to or deleting from the documents map.
+// executeTransactionalBatch executes the fake transactional batch by adding to or deleting from the documents map.
 func (c *fakeContainerClient) executeTransactionalBatch(ctx context.Context, b transactionalBatch, o *azcosmos.TransactionalBatchOptions) (azcosmos.TransactionalBatchResponse, error) {
 	if c.createErr != nil {
 		return azcosmos.TransactionalBatchResponse{}, c.createErr

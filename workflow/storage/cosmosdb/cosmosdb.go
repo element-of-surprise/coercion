@@ -44,7 +44,7 @@ type Vault struct {
 
 	clientOpts *azcosmos.ClientOptions
 	props      azcosmos.ContainerProperties
-	// maxRU is the maximum throughput in RU/s.
+	// maxRU is the maximum throughput in RU/s that a container can be autoscaled to.
 	// https://learn.microsoft.com/en-us/azure/cosmos-db/request-units
 	maxRU    int32
 	itemOpts azcosmos.ItemOptions
@@ -84,7 +84,7 @@ func WithClientOptions(opts *azcosmos.ClientOptions) Option {
 	}
 }
 
-// WithMaxThroughput sets container throughtput in RU/s in autoscale mode. Default is 400.
+// WithMaxThroughput sets container throughput in RU/s in autoscale mode. Default is 400.
 func WithMaxThroughput(maxRU int32) Option {
 	return func(r *Vault) error {
 		r.maxRU = maxRU
