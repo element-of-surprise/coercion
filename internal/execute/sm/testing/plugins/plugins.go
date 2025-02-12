@@ -9,7 +9,7 @@ import (
 	"github.com/element-of-surprise/coercion/plugins"
 	"github.com/element-of-surprise/coercion/workflow/context"
 
-	"github.com/Azure/retry/exponential"
+	"github.com/gostdlib/base/retry/exponential"
 )
 
 // Name is the name of the testing plugin.

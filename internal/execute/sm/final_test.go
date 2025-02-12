@@ -5,7 +5,7 @@ import (
 	"testing"
 
 	"github.com/element-of-surprise/coercion/workflow"
-	"github.com/gostdlib/ops/statemachine"
+	"github.com/gostdlib/base/statemachine"
 )
 
 func TestPlanChecks(t *testing.T) {

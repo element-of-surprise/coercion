@@ -5,9 +5,9 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/Azure/retry/exponential"
 	"github.com/element-of-surprise/coercion/plugins"
 	"github.com/element-of-surprise/coercion/plugins/registry"
+	"github.com/gostdlib/base/retry/exponential"
 
 	"github.com/kylelemons/godebug/pretty"
 )

@@ -8,8 +8,8 @@ import (
 	"github.com/element-of-surprise/coercion/internal/private"
 	"github.com/element-of-surprise/coercion/workflow"
 
-	"github.com/Azure/retry/exponential"
 	"github.com/google/uuid"
+	"github.com/gostdlib/base/retry/exponential"
 )
 
 // creator implements the storage.creator interface.
