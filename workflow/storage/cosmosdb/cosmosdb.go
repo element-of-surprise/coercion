@@ -22,7 +22,7 @@ import (
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore/runtime"
 	"github.com/Azure/azure-sdk-for-go/sdk/data/azcosmos"
-	"github.com/Azure/retry/exponential"
+	"github.com/gostdlib/base/retry/exponential"
 
 	_ "embed"
 )

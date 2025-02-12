@@ -4,8 +4,8 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/Azure/retry/exponential"
 	"github.com/element-of-surprise/coercion/plugins"
+	"github.com/gostdlib/base/retry/exponential"
 )
 
 const HelloPluginName = "github.com/element-of-surprise/coercion/workflow/storage/sqlite/testing/plugins.HelloPlugin"

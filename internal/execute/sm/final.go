@@ -2,10 +2,11 @@ package sm
 
 import (
 	"fmt"
-	"log"
 
 	"github.com/element-of-surprise/coercion/workflow"
-	"github.com/gostdlib/ops/statemachine"
+
+	"github.com/gostdlib/base/statemachine"
+	"github.com/gostdlib/base/telemetry/log"
 )
 
 // finalStates is used to set the finalStates states on the Plan by examining the Plan's object states.
