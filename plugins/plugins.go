@@ -2,10 +2,11 @@
 package plugins
 
 import (
-	"context"
 	"time"
 
-	"github.com/Azure/retry/exponential"
+	"github.com/element-of-surprise/coercion/workflow/context"
+
+	"github.com/gostdlib/base/retry/exponential"
 )
 
 // ErrCode is the type for error codes that are returned by plugins. Unlike most typed error codes,

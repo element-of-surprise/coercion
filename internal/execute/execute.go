@@ -3,21 +3,20 @@
 package execute
 
 import (
-	"context"
 	"errors"
 	"fmt"
-	"sync"
 	"time"
 
 	"github.com/element-of-surprise/coercion/internal/execute/sm"
 	"github.com/element-of-surprise/coercion/plugins/registry"
 	"github.com/element-of-surprise/coercion/workflow"
+	"github.com/element-of-surprise/coercion/workflow/context"
 	"github.com/element-of-surprise/coercion/workflow/storage"
 	"github.com/element-of-surprise/coercion/workflow/utils/walk"
 	"github.com/google/uuid"
 
-	"github.com/gostdlib/concurrency/prim/wait"
-	"github.com/gostdlib/ops/statemachine"
+	"github.com/gostdlib/base/concurrency/sync"
+	"github.com/gostdlib/base/statemachine"
 )
 
 var (
@@ -90,7 +89,7 @@ func (e *Plans) addValidators() {
 // initPlugins initializes all plugins in the registry to make sure they
 // meet the preconditions for execution.
 func (e *Plans) initPlugins(ctx context.Context) error {
-	g := wait.Group{}
+	g := context.Pool(ctx).Group()
 	for plugin := range e.registry.Plugins() {
 		plugin := plugin
 		g.Go(ctx, func(ctx context.Context) error {

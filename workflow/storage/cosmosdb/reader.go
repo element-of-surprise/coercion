@@ -7,9 +7,9 @@ import (
 	"sync"
 
 	"github.com/Azure/azure-sdk-for-go/sdk/data/azcosmos"
-	"github.com/Azure/retry/exponential"
 	"github.com/go-json-experiment/json"
 	"github.com/google/uuid"
+	"github.com/gostdlib/base/retry/exponential"
 
 	"github.com/element-of-surprise/coercion/internal/private"
 	"github.com/element-of-surprise/coercion/plugins/registry"

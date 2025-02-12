@@ -1,7 +1,6 @@
 package actions
 
 import (
-	"context"
 	"errors"
 	"reflect"
 	"runtime"
@@ -14,10 +13,11 @@ import (
 	"github.com/element-of-surprise/coercion/plugins"
 	"github.com/element-of-surprise/coercion/plugins/registry"
 	"github.com/element-of-surprise/coercion/workflow"
+	"github.com/element-of-surprise/coercion/workflow/context"
 	"github.com/element-of-surprise/coercion/workflow/storage/sqlite"
 
-	"github.com/Azure/retry/exponential"
-	"github.com/gostdlib/ops/statemachine"
+	"github.com/gostdlib/base/retry/exponential"
+	"github.com/gostdlib/base/statemachine"
 	"github.com/kylelemons/godebug/pretty"
 )
 

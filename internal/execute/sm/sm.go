@@ -4,7 +4,6 @@ package sm
 import (
 	"errors"
 	"fmt"
-	"log"
 	"reflect"
 	"sync/atomic"
 	"time"
@@ -15,9 +14,7 @@ import (
 	"github.com/element-of-surprise/coercion/workflow/context"
 	"github.com/element-of-surprise/coercion/workflow/storage"
 
-	"github.com/gostdlib/concurrency/goroutines/pooled"
-	"github.com/gostdlib/concurrency/prim/wait"
-	"github.com/gostdlib/ops/statemachine"
+	"github.com/gostdlib/base/statemachine"
 )
 
 var ErrInternalFailure = errors.New("internal failure")
@@ -124,7 +121,7 @@ func (s *States) Start(req statemachine.Request[Data]) statemachine.Request[Data
 	plan.State.Start = s.now()
 
 	if err := s.store.UpdatePlan(req.Ctx, plan); err != nil {
-		log.Fatalf("failed to write Plan: %v", err)
+		context.Log(req.Ctx).Fatalf("failed to write Plan: %v", err)
 	}
 
 	req.Next = s.PlanBypassChecks
@@ -136,7 +133,7 @@ func (s *States) Start(req statemachine.Request[Data]) statemachine.Request[Data
 func (s *States) PlanBypassChecks(req statemachine.Request[Data]) statemachine.Request[Data] {
 	defer func() {
 		if err := s.store.UpdatePlan(req.Ctx, req.Data.Plan); err != nil {
-			log.Fatalf("failed to write Plan: %v", err)
+			context.Log(req.Ctx).Fatalf("failed to write Plan: %v", err)
 		}
 	}()
 
@@ -156,7 +153,7 @@ func (s *States) PlanBypassChecks(req statemachine.Request[Data]) statemachine.R
 func (s *States) PlanPreChecks(req statemachine.Request[Data]) statemachine.Request[Data] {
 	defer func() {
 		if err := s.store.UpdatePlan(req.Ctx, req.Data.Plan); err != nil {
-			log.Fatalf("failed to write Plan: %v", err)
+			context.Log(req.Ctx).Fatalf("failed to write Plan: %v", err)
 		}
 	}()
 
@@ -201,7 +198,7 @@ func (s *States) ExecuteBlock(req statemachine.Request[Data]) statemachine.Reque
 
 	defer func() {
 		if err := s.store.UpdateBlock(req.Ctx, h.block); err != nil {
-			log.Fatalf("failed to write Block: %v", err)
+			context.Log(req.Ctx).Fatalf("failed to write Block: %v", err)
 		}
 	}()
 
@@ -304,16 +301,12 @@ func (s *States) ExecuteSequences(req statemachine.Request[Data]) statemachine.R
 	// still end up running the one we just queued up. So we use the limiter to block the g.Go() from even being called.
 	limiter := make(chan struct{}, h.block.Concurrency)
 
-	pool, err := pooled.New("", h.block.Concurrency)
+	pool, err := context.Pool(req.Ctx).Limited(h.block.Concurrency)
 	if err != nil {
 		panic("bug: failed to create pool: " + err.Error())
 	}
-	defer pool.Close()
 
-	g := wait.Group{
-		Pool: pool,
-		Name: "ExecuteSequences",
-	}
+	g := pool.Group()
 
 	for i := 0; i < len(h.block.Sequences); i++ {
 		seq := h.block.Sequences[i]
@@ -410,7 +403,7 @@ func (s *States) BlockEnd(req statemachine.Request[Data]) statemachine.Request[D
 	defer func() {
 		h.block.State.End = s.now()
 		if err := s.store.UpdateBlock(req.Ctx, h.block); err != nil {
-			log.Fatalf("failed to write Block: %v", err)
+			context.Log(req.Ctx).Fatalf("failed to write Block: %v", err)
 		}
 	}()
 
@@ -513,7 +506,7 @@ func (s *States) End(req statemachine.Request[Data]) statemachine.Request[Data] 
 	defer func() {
 		plan.State.End = s.now()
 		if err := s.store.UpdatePlan(req.Ctx, plan); err != nil {
-			log.Fatalf("failed to write Plan: %v", err)
+			context.Log(req.Ctx).Fatalf("failed to write Plan: %v", err)
 		}
 	}()
 
@@ -530,7 +523,7 @@ func (s *States) End(req statemachine.Request[Data]) statemachine.Request[Data] 
 	req, err = statemachine.Run("finalStates", req)
 	if err != nil {
 		if errors.Is(err, ErrInternalFailure) {
-			log.Println("Plan object did not come out in expected state: %w", err)
+			context.Log(req.Ctx).Printf("Plan object did not come out in expected state: %s", err)
 		}
 	}
 	req.Next = nil
@@ -550,7 +543,7 @@ func (s *States) runBypasses(ctx context.Context, bypasses *workflow.Checks) (sk
 		return false
 	}
 
-	g := wait.Group{}
+	g := context.Pool(ctx).Group()
 
 	g.Go(ctx, func(cts context.Context) error {
 		return s.runChecksOnce(cts, bypasses)
@@ -568,7 +561,7 @@ func (s *States) runPreChecks(ctx context.Context, preChecks *workflow.Checks, c
 		return nil
 	}
 
-	g := wait.Group{}
+	g := context.Pool(ctx).Group()
 
 	if preChecks != nil {
 		g.Go(ctx, func(ctx context.Context) error {
@@ -627,11 +620,11 @@ func (s *States) runChecksOnce(ctx context.Context, checks *workflow.Checks) err
 	checks.State.Start = s.now()
 
 	if err := s.store.UpdateChecks(ctx, checks); err != nil {
-		log.Fatalf("failed to write Checks: %v", err)
+		context.Log(ctx).Fatalf("failed to write Checks: %v", err)
 	}
 	defer func() {
 		if err := s.store.UpdateChecks(ctx, checks); err != nil {
-			log.Fatalf("failed to write Checks: %v", err)
+			context.Log(ctx).Fatalf("failed to write Checks: %v", err)
 		}
 	}()
 	defer func() {
@@ -656,11 +649,11 @@ func (s *States) runActionsParallel(ctx context.Context, actions []*workflow.Act
 		action.State.Status = workflow.Running
 		action.State.Start = s.now()
 		if err := s.store.UpdateAction(ctx, action); err != nil {
-			log.Fatalf("failed to write Action: %v", err)
+			context.Log(ctx).Fatalf("failed to write Action: %v", err)
 		}
 	}
 
-	g := wait.Group{}
+	g := context.Pool(ctx).Group()
 
 	// Run the actions in parallel.
 	for _, action := range actions {
@@ -679,12 +672,12 @@ func (s *States) execSeq(ctx context.Context, seq *workflow.Sequence) error {
 	seq.State.Status = workflow.Running
 	seq.State.Start = s.now()
 	if err := s.store.UpdateSequence(ctx, seq); err != nil {
-		log.Fatalf("failed to write Sequence: %v", err)
+		context.Log(ctx).Fatalf("failed to write Sequence: %v", err)
 	}
 	defer func() {
 		seq.State.End = s.now()
 		if err := s.store.UpdateSequence(ctx, seq); err != nil {
-			log.Fatalf("failed to write Sequence: %v", err)
+			context.Log(ctx).Fatalf("failed to write Sequence: %v", err)
 		}
 	}()
 

@@ -14,7 +14,7 @@ import (
 	"github.com/element-of-surprise/coercion/workflow"
 	"github.com/element-of-surprise/coercion/workflow/builder"
 	"github.com/element-of-surprise/coercion/workflow/utils/clone"
-	"github.com/gostdlib/ops/statemachine"
+	"github.com/gostdlib/base/statemachine"
 )
 
 func TestPlanStart(t *testing.T) {
