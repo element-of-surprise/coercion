@@ -9,7 +9,7 @@ import (
 	"github.com/element-of-surprise/coercion/workflow/storage"
 
 	"github.com/Azure/azure-sdk-for-go/sdk/data/azcosmos"
-	"github.com/Azure/retry/exponential"
+	"github.com/gostdlib/base/retry/exponential"
 )
 
 var _ storage.Updater = updater{}

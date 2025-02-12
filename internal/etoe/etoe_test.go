@@ -1,7 +1,6 @@
 package etoe
 
 import (
-	"context"
 	"flag"
 	"fmt"
 	"log"
@@ -16,6 +15,7 @@ import (
 	"github.com/element-of-surprise/coercion/plugins/registry"
 	"github.com/element-of-surprise/coercion/workflow"
 	"github.com/element-of-surprise/coercion/workflow/builder"
+	"github.com/element-of-surprise/coercion/workflow/context"
 	"github.com/element-of-surprise/coercion/workflow/storage"
 	"github.com/element-of-surprise/coercion/workflow/storage/cosmosdb"
 	"github.com/element-of-surprise/coercion/workflow/storage/sqlite"

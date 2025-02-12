@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Azure/retry/exponential"
+	"github.com/gostdlib/base/retry/exponential"
 	"github.com/kylelemons/godebug/pretty"
 )
 

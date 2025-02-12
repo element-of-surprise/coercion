@@ -9,8 +9,8 @@ import (
 	"github.com/Azure/azure-sdk-for-go/sdk/data/azcosmos"
 	"github.com/element-of-surprise/coercion/workflow"
 
-	"github.com/Azure/retry/exponential"
 	"github.com/google/uuid"
+	"github.com/gostdlib/base/retry/exponential"
 )
 
 type deleter struct {
