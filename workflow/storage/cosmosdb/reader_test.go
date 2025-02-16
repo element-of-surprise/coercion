@@ -3,14 +3,15 @@ package cosmosdb
 import (
 	"context"
 	"fmt"
+	"sync"
 	"testing"
+
+	"github.com/element-of-surprise/coercion/workflow"
+	"github.com/element-of-surprise/coercion/workflow/storage"
 
 	"github.com/Azure/azure-sdk-for-go/sdk/data/azcosmos"
 	"github.com/google/uuid"
 	"github.com/kylelemons/godebug/pretty"
-
-	"github.com/element-of-surprise/coercion/workflow"
-	"github.com/element-of-surprise/coercion/workflow/storage"
 )
 
 func TestBuildSearchQuery(t *testing.T) {
@@ -203,36 +204,36 @@ func TestBuildSearchQuery(t *testing.T) {
 func TestExists(t *testing.T) {
 	t.Parallel()
 
-	plan0 := NewTestPlan()
-	id0 := plan0.ID
-	id1, err := uuid.NewV7()
-	if err != nil {
-		t.Fatal(err)
+	store := newFakeStorage(nil)
+
+	tp := NewTestPlan()
+	if err := store.WritePlan(context.Background(), "somekey", tp); err != nil {
+		panic(err)
 	}
 
 	tests := []struct {
 		name    string
-		planID  uuid.UUID
+		id      uuid.UUID
 		err     error
 		want    bool
 		wantErr bool
 	}{
 		{
 			name:    "Error: container client error",
-			planID:  id1,
+			id:      mustUUID(),
 			err:     fmt.Errorf("test error"),
 			want:    false,
 			wantErr: true,
 		},
 		{
 			name:    "Success: plan doesn't exist",
-			planID:  id1,
+			id:      mustUUID(),
 			want:    false,
 			wantErr: false,
 		},
 		{
 			name:    "Success: exists",
-			planID:  id0,
+			id:      tp.GetID(),
 			want:    true,
 			wantErr: false,
 		},
@@ -240,17 +241,13 @@ func TestExists(t *testing.T) {
 
 	for _, test := range tests {
 		ctx := context.Background()
-
-		r, cc := dbSetup()
-
-		if err := r.Create(ctx, plan0); err != nil {
-			t.Fatalf("TestExists(%s): %s", test.name, err)
-		}
-		if test.err != nil {
-			cc.reader.readErr = test.err
+		store.readItemErr = test.err
+		r := reader{
+			mu:     &sync.RWMutex{},
+			client: store,
 		}
 
-		result, err := r.Exists(ctx, test.planID)
+		result, err := r.Exists(ctx, test.id)
 		switch {
 		case test.wantErr && err == nil:
 			t.Errorf("TestExists(%s): got err == nil, want err != nil", test.name)
@@ -271,42 +268,37 @@ func TestExists(t *testing.T) {
 func TestRead(t *testing.T) {
 	t.Parallel()
 
-	plan0 := NewTestPlan()
-	id0 := plan0.ID
-	id1, err := uuid.NewV7()
-	if err != nil {
-		t.Fatal(err)
+	store := newFakeStorage(testReg)
+
+	tp := NewTestPlan()
+	if err := store.WritePlan(context.Background(), "somekey", tp); err != nil {
+		panic(err)
 	}
 
 	tests := []struct {
-		name     string
-		planID   uuid.UUID
-		wantPlan *workflow.Plan
-		wantErr  bool
+		name    string
+		planID  uuid.UUID
+		wantErr bool
 	}{
 		{
-			name:     "Error: plan doesn't exist",
-			planID:   id1,
-			wantPlan: nil,
-			wantErr:  true,
+			name:    "Error: plan doesn't exist",
+			planID:  mustUUID(),
+			wantErr: true,
 		},
 		{
-			name:     "Success",
-			planID:   id0,
-			wantPlan: plan0,
-			wantErr:  false,
+			name:   "Success",
+			planID: tp.GetID(),
 		},
 	}
 
 	for _, test := range tests {
 		ctx := context.Background()
 
-		r, _ := dbSetup()
-
-		if err := r.Create(ctx, plan0); err != nil {
-			t.Fatalf("TestRead(%s): %s", test.name, err)
+		r := reader{
+			mu:     &sync.RWMutex{},
+			client: store,
+			reg:    testReg,
 		}
-
 		result, err := r.Read(ctx, test.planID)
 		switch {
 		case test.wantErr && err == nil:
@@ -318,7 +310,7 @@ func TestRead(t *testing.T) {
 		case err != nil:
 			continue
 		}
-		if diff := pretty.Compare(test.wantPlan, result); diff != "" {
+		if diff := pretty.Compare(tp, result); diff != "" {
 			t.Errorf("TestRead(%s): returned params: -want/+got:\n%s", test.name, diff)
 			continue
 		}

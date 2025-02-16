@@ -5,27 +5,26 @@ import (
 
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
 	"github.com/element-of-surprise/coercion/workflow"
+	"github.com/element-of-surprise/coercion/workflow/storage/cosmosdb/internal/types"
 	"github.com/google/uuid"
 )
 
-//go:generate stringer -type=Type -linecomment
-
 // Type is the type of cosmosdb document.
-type Type uint8
+type Type = types.Type
 
 const (
 	// Unknown indicates that a type was not provided. This is a bug.
-	Unknown Type = 0
+	Unknown = types.Unknown
 	// Plan indicates that the document stores a plan.
-	Plan Type = 1
+	Plan = types.Plan
 	// Block indicates that the document stores a block.
-	Block Type = 2
+	Block = types.Block
 	// Checks indicates that the document stores checks.
-	Checks Type = 3
+	Checks = types.Checks
 	// Sequence indicates that the document stores a sequence.
-	Sequence Type = 4
+	Sequence = types.Sequence
 	// Action indicates that the document stores an action.
-	Action Type = 5
+	Action = types.Action
 )
 
 type plansEntry struct {

@@ -6,6 +6,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/Azure/azure-sdk-for-go/sdk/azcore/runtime"
 	"github.com/Azure/azure-sdk-for-go/sdk/data/azcosmos"
 	"github.com/go-json-experiment/json"
 	"github.com/google/uuid"
@@ -24,20 +25,30 @@ const (
 	listPlans = `SELECT p.id, p.groupID, p.name, p.descr, p.submitTime, p.stateStatus, p.stateStart, p.stateEnd FROM %s p WHERE p.type=1 ORDER BY p.submitTime DESC`
 )
 
+// readerClient provides abstraction for testing reader. This is implmented by *azcosmos.ContainerClient.
+type readerClient interface {
+	ReadItem(ctx context.Context, partitionKey azcosmos.PartitionKey, itemId string, o *azcosmos.ItemOptions) (azcosmos.ItemResponse, error)
+	NewQueryItemsPager(query string, partitionKey azcosmos.PartitionKey, o *azcosmos.QueryOptions) *runtime.Pager[azcosmos.QueryItemsResponse]
+}
+
 // reader implements the storage.PlanReader interface.
 type reader struct {
-	mu        sync.RWMutex
+	mu        *sync.RWMutex
 	container string
-	client
+	client    readerClient // *azcosmos.ContainerClient
+	pk        azcosmos.PartitionKey
+	defaultIO *azcosmos.ItemOptions
+
 	reg *registry.Register
 
 	private.Storage
 }
 
-func Sender[T any](ctx context.Context, ch chan T, v T) error {
+// sender is a helper that sends value v on channel ch or returns an error because ctx.Done() fires.
+func sender[T any](ctx context.Context, ch chan T, v T) error {
 	select {
 	case <-ctx.Done():
-		return ctx.Err()
+		return context.Cause(ctx)
 	case ch <- v:
 		return nil
 	}
@@ -48,7 +59,7 @@ func (r reader) Exists(ctx context.Context, id uuid.UUID) (bool, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	_, err := r.getReader().ReadItem(ctx, r.getPK(), id.String(), r.itemOptions())
+	_, err := r.client.ReadItem(ctx, r.pk, id.String(), r.defaultIO)
 	if err != nil {
 		if isNotFound(err) {
 			return false, nil
@@ -92,14 +103,14 @@ func (r reader) Search(ctx context.Context, filters storage.Filters) (chan stora
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	pager := r.getReader().NewQueryItemsPager(q, r.getPK(), &azcosmos.QueryOptions{QueryParameters: parameters})
+	pager := r.client.NewQueryItemsPager(q, r.pk, &azcosmos.QueryOptions{QueryParameters: parameters})
 	results := make(chan storage.Stream[storage.ListResult], 1)
 	go func() {
 		defer close(results)
 		for pager.More() {
 			res, err := pager.NextPage(ctx)
 			if err != nil {
-				sendErr := Sender[storage.Stream[storage.ListResult]](ctx, results, storage.Stream[storage.ListResult]{Err: fmt.Errorf("problem listing plans: %w", err)})
+				sendErr := sender[storage.Stream[storage.ListResult]](ctx, results, storage.Stream[storage.ListResult]{Err: fmt.Errorf("problem listing plans: %w", err)})
 				if sendErr != nil {
 					results <- storage.Stream[storage.ListResult]{Err: sendErr}
 				}
@@ -108,13 +119,13 @@ func (r reader) Search(ctx context.Context, filters storage.Filters) (chan stora
 			for _, item := range res.Items {
 				result, err := r.listResultsFunc(item)
 				if err != nil {
-					sendErr := Sender[storage.Stream[storage.ListResult]](ctx, results, storage.Stream[storage.ListResult]{Err: fmt.Errorf("problem listing items in plans: %w", err)})
+					sendErr := sender[storage.Stream[storage.ListResult]](ctx, results, storage.Stream[storage.ListResult]{Err: fmt.Errorf("problem listing items in plans: %w", err)})
 					if sendErr != nil {
 						results <- storage.Stream[storage.ListResult]{Err: sendErr}
 					}
 					return
 				}
-				if sendErr := Sender[storage.Stream[storage.ListResult]](ctx, results, storage.Stream[storage.ListResult]{Result: result}); sendErr != nil {
+				if sendErr := sender[storage.Stream[storage.ListResult]](ctx, results, storage.Stream[storage.ListResult]{Result: result}); sendErr != nil {
 					results <- storage.Stream[storage.ListResult]{Err: sendErr}
 					return
 				}
@@ -188,8 +199,8 @@ func (r reader) buildSearchQuery(filters storage.Filters) (string, []azcosmos.Qu
 }
 
 // List returns a list of Plan IDs in the storage in order from newest to oldest. This should
-// return with most recent submiited first. Limit sets the maximum number of
-// entries to return
+// return with most recent submitted first. limit sets the maximum number of entries to return. If
+// limit == 0, there is no limit.
 func (r reader) List(ctx context.Context, limit int) (chan storage.Stream[storage.ListResult], error) {
 	q := fmt.Sprintf(listPlans, r.container)
 	if limit > 0 {
@@ -199,14 +210,14 @@ func (r reader) List(ctx context.Context, limit int) (chan storage.Stream[storag
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	pager := r.getReader().NewQueryItemsPager(q, r.getPK(), &azcosmos.QueryOptions{QueryParameters: []azcosmos.QueryParameter{}})
+	pager := r.client.NewQueryItemsPager(q, r.pk, &azcosmos.QueryOptions{QueryParameters: []azcosmos.QueryParameter{}})
 	results := make(chan storage.Stream[storage.ListResult], 1)
 	go func() {
 		defer close(results)
 		for pager.More() {
 			res, err := pager.NextPage(ctx)
 			if err != nil {
-				sendErr := Sender[storage.Stream[storage.ListResult]](ctx, results, storage.Stream[storage.ListResult]{Err: fmt.Errorf("problem listing plans: %w", err)})
+				sendErr := sender[storage.Stream[storage.ListResult]](ctx, results, storage.Stream[storage.ListResult]{Err: fmt.Errorf("problem listing plans: %w", err)})
 				if sendErr != nil {
 					results <- storage.Stream[storage.ListResult]{Err: sendErr}
 				}
@@ -215,13 +226,13 @@ func (r reader) List(ctx context.Context, limit int) (chan storage.Stream[storag
 			for _, item := range res.Items {
 				result, err := r.listResultsFunc(item)
 				if err != nil {
-					sendErr := Sender[storage.Stream[storage.ListResult]](ctx, results, storage.Stream[storage.ListResult]{Err: fmt.Errorf("problem listing items in plans: %w", err)})
+					sendErr := sender[storage.Stream[storage.ListResult]](ctx, results, storage.Stream[storage.ListResult]{Err: fmt.Errorf("problem listing items in plans: %w", err)})
 					if sendErr != nil {
 						results <- storage.Stream[storage.ListResult]{Err: sendErr}
 					}
 					return
 				}
-				if sendErr := Sender[storage.Stream[storage.ListResult]](ctx, results, storage.Stream[storage.ListResult]{Result: result}); sendErr != nil {
+				if sendErr := sender[storage.Stream[storage.ListResult]](ctx, results, storage.Stream[storage.ListResult]{Result: result}); sendErr != nil {
 					results <- storage.Stream[storage.ListResult]{Err: sendErr}
 					return
 				}

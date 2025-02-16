@@ -54,7 +54,7 @@ func (r reader) fetchActionsByIDs(ctx context.Context, ids []uuid.UUID) ([]*work
 		},
 	}
 
-	pager := r.getReader().NewQueryItemsPager(fetchActionsByID, r.getPK(), &azcosmos.QueryOptions{QueryParameters: parameters})
+	pager := r.client.NewQueryItemsPager(fetchActionsByID, r.pk, &azcosmos.QueryOptions{QueryParameters: parameters})
 	for pager.More() {
 		res, err := pager.NextPage(ctx)
 		if err != nil {

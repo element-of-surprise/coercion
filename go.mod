@@ -16,7 +16,6 @@ require (
 	github.com/google/goexpect v0.0.0-20210430020637-ab937bf7fd6f
 	github.com/google/uuid v1.6.0
 	github.com/gostdlib/base v0.0.0-20250212054550-d6c7d84cbae2
-	github.com/gostdlib/ops v0.0.0-20240403194558-b078d352f3fc
 	github.com/inancgumus/screen v0.0.0-20190314163918-06e984b86ed3
 	github.com/kylelemons/godebug v1.1.0
 	github.com/rodaine/table v1.3.0
@@ -64,7 +63,6 @@ require (
 	github.com/google/go-querystring v1.1.0 // indirect
 	github.com/google/gofuzz v1.2.0 // indirect
 	github.com/google/goterm v0.0.0-20200907032337-555d40f16ae2 // indirect
-	github.com/gostdlib/internals v0.0.0-20240319155855-57c259c0554f // indirect
 	github.com/grpc-ecosystem/grpc-gateway/v2 v2.26.1 // indirect
 	github.com/hashicorp/hcl v1.0.0 // indirect
 	github.com/jbenet/go-context v0.0.0-20150711004518-d14ea06fba99 // indirect
@@ -155,8 +153,10 @@ require (
 	modernc.org/libc v1.61.13 // indirect
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.8.2 // indirect
-	modernc.org/sqlite v1.34.5 // indirect
+	modernc.org/sqlite v1.35.0 // indirect
 	sigs.k8s.io/json v0.0.0-20241014173422-cfa47c3a1cc8 // indirect
 	sigs.k8s.io/structured-merge-diff/v4 v4.5.0 // indirect
 	sigs.k8s.io/yaml v1.4.0 // indirect
 )
+
+tool golang.org/x/tools/cmd/stringer

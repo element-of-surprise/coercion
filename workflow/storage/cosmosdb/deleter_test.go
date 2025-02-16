@@ -2,11 +2,13 @@ package cosmosdb
 
 import (
 	"context"
-	"fmt"
+	"errors"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
+	"github.com/Azure/azure-sdk-for-go/sdk/data/azcosmos"
 
 	"github.com/element-of-surprise/coercion/workflow"
 	"github.com/element-of-surprise/coercion/workflow/utils/walk"
@@ -15,6 +17,8 @@ import (
 func TestDelete(t *testing.T) {
 	t.Parallel()
 
+	pkStr := "test-partition"
+	pk := azcosmos.NewPartitionKeyString(pkStr)
 	goodPlan := NewTestPlan()
 
 	planWithETag := NewTestPlan()
@@ -38,19 +42,19 @@ func TestDelete(t *testing.T) {
 		name      string
 		plan      *workflow.Plan
 		readErr   error
-		deleteErr error
+		deleteErr bool
 		wantErr   bool
 	}{
 		{
 			name:    "Error: container client read error",
 			plan:    goodPlan,
-			readErr: fmt.Errorf("test error"),
+			readErr: errors.New("error"),
 			wantErr: true,
 		},
 		{
 			name:      "Error: container client delete error",
 			plan:      goodPlan,
-			deleteErr: fmt.Errorf("test error"),
+			deleteErr: true,
 			wantErr:   true,
 		},
 		{
@@ -77,24 +81,38 @@ func TestDelete(t *testing.T) {
 	for _, test := range tests {
 		ctx := context.Background()
 
-		r, cc := dbSetup()
+		store := newFakeStorage(testReg)
+		if test.plan != nil {
+			if err := store.WritePlan(ctx, pkStr, test.plan); err != nil {
+				panic(err)
+			}
+		}
+		store.deleteItemErr = test.deleteErr
+		store.readItemErr = test.readErr
+
+		mu := &sync.RWMutex{}
+		v := &Vault{
+			deleter: deleter{
+				mu:     mu,
+				pk:     pk,
+				client: store,
+				reader: reader{
+					mu:        mu,
+					container: "container",
+					client:    store,
+					pk:        pk,
+					defaultIO: &azcosmos.ItemOptions{},
+					reg:       testReg,
+				},
+			},
+		}
 
 		testPlanID := mustUUID()
 		if test.plan != nil {
-			if err := r.Create(ctx, test.plan); err != nil {
-				t.Fatalf("TestDelete(%s): %s", test.name, err)
-			}
-			testPlanID = test.plan.ID
+			testPlanID = test.plan.GetID()
 		}
 
-		if test.readErr != nil {
-			cc.reader.readErr = test.readErr
-		}
-		if test.deleteErr != nil {
-			cc.deleteErr = test.deleteErr
-		}
-
-		err := r.Delete(ctx, testPlanID)
+		err := v.Delete(ctx, testPlanID)
 		switch {
 		case test.wantErr && err == nil:
 			t.Errorf("TestDelete(%s): got err == nil, want err != nil", test.name)

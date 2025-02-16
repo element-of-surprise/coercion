@@ -2,10 +2,10 @@ package cosmosdb
 
 import (
 	"context"
-	"strings"
+	"sync"
 	"testing"
-	"time"
 
+	"github.com/Azure/azure-sdk-for-go/sdk/data/azcosmos"
 	"github.com/google/uuid"
 	"github.com/kylelemons/godebug/pretty"
 
@@ -17,58 +17,118 @@ import (
 func TestStorageItemCRUD(t *testing.T) {
 	ctx := context.Background()
 
-	r, cc := dbSetup()
+	plan0 := NewTestPlan()
+	plan1 := NewTestPlan()
+	plan2 := NewTestPlan()
+	plans := []*workflow.Plan{plan0, plan1, plan2}
 
-	// use test plan
-	if err := r.Create(ctx, plan); err != nil {
-		t.Fatal(err)
+	store := newFakeStorage(testReg)
+
+	mu := &sync.RWMutex{}
+	container := "container"
+	pk := azcosmos.NewPartitionKeyString("who cares")
+	defaultIO := &azcosmos.ItemOptions{}
+	reader := reader{
+		mu:        mu,
+		container: container,
+		client:    store,
+		defaultIO: defaultIO,
+		reg:       testReg,
+	}
+	v := &Vault{
+		reader: reader,
+		creator: creator{
+			mu:     mu,
+			client: store,
+			pkStr:  "test-partition",
+			pk:     azcosmos.NewPartitionKeyString("test-partition"),
+			reader: reader,
+		},
+		updater: updater{
+			planUpdater: planUpdater{
+				mu:        mu,
+				client:    store,
+				pk:        pk,
+				defaultIO: defaultIO,
+			},
+			checksUpdater: checksUpdater{
+				mu:        mu,
+				client:    store,
+				pk:        pk,
+				defaultIO: defaultIO,
+			},
+			blockUpdater: blockUpdater{
+				mu:        mu,
+				client:    store,
+				pk:        pk,
+				defaultIO: defaultIO,
+			},
+			sequenceUpdater: sequenceUpdater{
+				mu:        mu,
+				client:    store,
+				pk:        pk,
+				defaultIO: defaultIO,
+			},
+			actionUpdater: actionUpdater{
+				mu:        mu,
+				client:    store,
+				pk:        pk,
+				defaultIO: defaultIO,
+			},
+			reader: reader,
+		},
+		deleter: deleter{
+			mu:     mu,
+			client: store,
+			pk:     pk,
+			reader: reader,
+		},
 	}
 
-	mustGetCreateCallCount(t, cc.createCallCount, Plan, 1)
-	mustGetCreateCallCount(t, cc.createCallCount, Checks, 10)
-	mustGetCreateCallCount(t, cc.createCallCount, Block, 1)
-	mustGetCreateCallCount(t, cc.createCallCount, Sequence, 1)
-	mustGetCreateCallCount(t, cc.createCallCount, Action, 11)
-
-	// Create other plans in same storage vault.
-	if err := r.Create(ctx, plan1); err != nil {
-		t.Fatal(err)
-	}
-	if err := r.Create(ctx, plan2); err != nil {
-		t.Fatal(err)
+	for _, p := range plans {
+		if err := v.Create(ctx, p); err != nil {
+			t.Fatal(err)
+		}
 	}
 
-	mustGetCreateCallCount(t, cc.createCallCount, Plan, 3)
-	mustGetCreateCallCount(t, cc.createCallCount, Checks, 30)
-	mustGetCreateCallCount(t, cc.createCallCount, Block, 3)
-	mustGetCreateCallCount(t, cc.createCallCount, Sequence, 3)
-	mustGetCreateCallCount(t, cc.createCallCount, Action, 33)
-
-	exists, err := r.reader.Exists(ctx, plan.ID)
-	if err != nil {
-		t.Fatalf("error checking if plan %s exists: %v", plan.ID, err)
-	}
-	if !exists {
-		t.Fatalf("expected plan %s to exist", plan.ID)
+	for i, p := range plans {
+		gotPlan, err := v.fetchPlan(ctx, p.GetID())
+		if err != nil {
+			panic(err)
+		}
+		if diff := pretty.Compare(p, gotPlan); diff != "" {
+			t.Fatalf("TestStorageItemCRUD(Create(%d): -want/+got:\n%s", i, diff)
+		}
 	}
 
-	result, err := r.Read(ctx, plan.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if plan.Name != result.Name {
-		t.Fatalf("expected %s, got %s", plan.Name, result.Name)
-	}
-	if plan.State.Status != result.State.Status {
-		t.Fatalf("expected %s, got %s", plan.State.Status, result.State.Status)
-	}
-	// creator will set to zero time
-	plan.SubmitTime = zeroTime
-	if diff := pretty.Compare(plan, result); diff != "" {
-		t.Errorf("TestStorageItemCRUD(%s): returned plan: -want/+got:\n%s", plan.ID, diff)
+	for i, p := range plans {
+		exists, err := v.reader.Exists(ctx, p.ID)
+		if err != nil {
+			t.Fatalf("TestStorageItemCRUD(Exists(%d)): error checking if plan exists: %v", i, err)
+		}
+		if !exists {
+			t.Fatalf("TestStorageItemCRUD(Exists(%d)): expected plan to exist", i)
+		}
 	}
 
-	results, err := r.List(ctx, 0)
+	for _, p := range plans {
+		result, err := v.Read(ctx, p.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if p.Name != result.Name {
+			t.Fatalf("expected %s, got %s", p.Name, result.Name)
+		}
+		if p.State.Status != result.State.Status {
+			t.Fatalf("expected %s, got %s", p.State.Status, result.State.Status)
+		}
+
+		if diff := pretty.Compare(p, result); diff != "" {
+			t.Errorf("TestStorageItemCRUD(%s): returned plan: -want/+got:\n%s", p.ID, diff)
+		}
+	}
+
+	results, err := v.List(ctx, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -83,40 +143,14 @@ func TestStorageItemCRUD(t *testing.T) {
 		t.Fatalf("expected 3 result, got %d", resultCount)
 	}
 
-	// list with cancel
-	cancelCtx, cancel := context.WithCancel(ctx)
-	results, err = r.List(cancelCtx, 0)
-	if err != nil {
-		t.Fatal(err)
-	}
-	resultCount = 0
-	for res := range results {
-		if resultCount == 2 {
-			if res.Err == nil || !strings.Contains(res.Err.Error(), "context canceled") {
-				t.Fatalf("expected context canceled error, got %v", res.Err)
-			}
-			resultCount++
-			break
-		}
-		if res.Err != nil {
-			t.Fatalf("error when listing results: %v", res.Err)
-		}
-		resultCount++
-		time.Sleep(10 * time.Millisecond)
-		cancel()
-	}
-	if resultCount != 3 {
-		t.Fatalf("expected 3 result, got %d", resultCount)
-	}
-
 	// The fake pager only implements querying by ID. It's a pain to fake too much.
 	filters := storage.Filters{
 		ByIDs: []uuid.UUID{
-			plan.ID,
+			plan0.ID,
 			plan1.ID,
 		},
 	}
-	results, err = r.Search(ctx, filters)
+	results, err = v.Search(ctx, filters)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -131,142 +165,36 @@ func TestStorageItemCRUD(t *testing.T) {
 		t.Fatalf("expected 2 result, got %d", resultCount)
 	}
 
-	// search with cancel
-	filters = storage.Filters{
-		ByIDs: []uuid.UUID{
-			plan.ID,
-			plan1.ID,
-			plan2.ID,
-		},
-	}
-	cancelCtx, cancel = context.WithCancel(ctx)
-	results, err = r.Search(cancelCtx, filters)
-	if err != nil {
-		t.Fatal(err)
-	}
-	resultCount = 0
-	for res := range results {
-		if resultCount == 2 {
-			if res.Err == nil || !strings.Contains(res.Err.Error(), "context canceled") {
-				t.Fatalf("expected context canceled error, got %v", res.Err)
+	// Walk every item and change the state.Status to Stopped.
+	// We can then update all the objects and then test that the updates occurred.
+	for item := range walk.Plan(context.Background(), plan0) {
+		if so, ok := item.Value.(stateObject); ok {
+			state := so.GetState()
+			state.Status = workflow.Stopped
+			so.SetState(state)
+			if err := v.UpdateObject(ctx, item.Value); err != nil {
+				panic(err)
 			}
-			resultCount++
-			break
-		}
-		if res.Err != nil {
-			t.Fatalf("error when listing results: %v", res.Err)
-		}
-		resultCount++
-		time.Sleep(10 * time.Millisecond)
-		cancel()
-	}
-	if resultCount != 3 {
-		t.Fatalf("expected 3 result, got %d", resultCount)
-	}
-
-	// test update, which is actually a patch and faking too much is a pain
-	if err := r.UpdatePlan(ctx, plan); err != nil {
-		t.Fatalf("error updating plan: %v", err)
-	}
-	if v, ok := cc.updater.patchCallCount[Plan]; !ok || v != 1 {
-		t.Fatalf("expected 1 call to patch, got %d", v)
-	}
-	if v, ok := cc.updater.patchCallCount[Block]; ok && v != 0 {
-		t.Fatalf("expected 0 calls to patch block, got %d", v)
-	}
-
-	// Walk, to get some sample IDs for each type.
-	var block *workflow.Block
-	var checks *workflow.Checks
-	var action *workflow.Action
-	var sequence *workflow.Sequence
-	for item := range walk.Plan(ctx, result) {
-		switch item.Value.Type() {
-		case workflow.OTPlan:
-			continue
-		case workflow.OTBlock:
-			block = item.Block()
-		case workflow.OTCheck:
-			checks = item.Checks()
-		case workflow.OTAction:
-			action = item.Action()
-		case workflow.OTSequence:
-			sequence = item.Sequence()
-		default:
-			t.Fatalf("unexpected type: %s", item.Value.Type())
 		}
 	}
 
-	// update block
-	if err := r.UpdateBlock(ctx, block); err != nil {
-		t.Fatalf("error updating block: %v", err)
+	got, err := v.Read(ctx, plan0.GetID())
+	if err != nil {
+		t.Fatalf("TestStorageItemCRUD(read back changed object): error reading plan back")
 	}
-	if v, ok := cc.updater.patchCallCount[Plan]; !ok || v != 1 {
-		t.Fatalf("expected 1 call to patch, got %d", v)
-	}
-	if v, ok := cc.updater.patchCallCount[Block]; !ok || v != 1 {
-		t.Fatalf("expected 1 call to patch block, got %d", v)
-	}
-
-	// update checks
-	if err := r.UpdateChecks(ctx, checks); err != nil {
-		t.Fatalf("error updating checks: %v", err)
-	}
-	if v, ok := cc.updater.patchCallCount[Plan]; !ok || v != 1 {
-		t.Fatalf("expected 1 call to patch, got %d", v)
-	}
-	if v, ok := cc.updater.patchCallCount[Checks]; !ok || v != 1 {
-		t.Fatalf("expected 1 call to patch check, got %d", v)
-	}
-
-	// update sequence
-	if err := r.UpdateSequence(ctx, sequence); err != nil {
-		t.Fatalf("error updating sequence: %v", err)
-	}
-	if v, ok := cc.updater.patchCallCount[Plan]; !ok || v != 1 {
-		t.Fatalf("expected 1 call to patch, got %d", v)
-	}
-	if v, ok := cc.updater.patchCallCount[Sequence]; !ok || v != 1 {
-		t.Fatalf("expected 1 call to patch sequence, got %d", v)
-	}
-
-	// update action
-	if err := r.UpdateAction(ctx, action); err != nil {
-		t.Fatalf("error updating action: %v", err)
-	}
-	if v, ok := cc.updater.patchCallCount[Plan]; !ok || v != 1 {
-		t.Fatalf("expected 1 call to patch, got %d", v)
-	}
-	if v, ok := cc.updater.patchCallCount[Action]; !ok || v != 1 {
-		t.Fatalf("expected 1 call to patch action, got %d", v)
+	if diff := pretty.Compare(plan0, got); diff != "" {
+		t.Fatalf("TestStorageItemCRUD(read back changed object): -want/+got:\n%s", diff)
 	}
 
 	// test delete
-	if err := r.Delete(ctx, plan.ID); err != nil {
+	if err := v.Delete(ctx, plan0.ID); err != nil {
 		t.Fatal(err)
 	}
-	result, err = r.Read(ctx, plan.ID)
-	if err == nil {
-		t.Fatalf("expected error when reading deleted plan %s", plan.ID.String())
-	}
-	if !isNotFound(err) {
-		t.Fatalf("expected not found error when reading deleted plan %s, got %v", plan.ID.String(), err)
-	}
-	mustGetDeleteCallCount(t, cc.deleteCallCount, Plan, 1)
-	mustGetDeleteCallCount(t, cc.deleteCallCount, Checks, 10)
-	mustGetDeleteCallCount(t, cc.deleteCallCount, Block, 1)
-	mustGetDeleteCallCount(t, cc.deleteCallCount, Sequence, 1)
-	mustGetDeleteCallCount(t, cc.deleteCallCount, Action, 11)
-}
 
-func mustGetCreateCallCount(t *testing.T, m map[Type]int, dt Type, val int) {
-	if v, ok := m[dt]; !ok || v != val {
-		t.Fatalf("expected %d calls to create %s, got %d", val, dt.String(), v)
-	}
-}
-
-func mustGetDeleteCallCount(t *testing.T, m map[Type]int, dt Type, val int) {
-	if v, ok := m[dt]; !ok || v != val {
-		t.Fatalf("expected %d calls to delete %s, got %d", val, dt.String(), v)
+	for item := range walk.Plan(context.Background(), plan0) {
+		id := item.Value.(getIDer).GetID()
+		if _, err := v.Read(ctx, id); err == nil {
+			t.Errorf("TestStorageItemCRUD(delete): %s value in deleted plan still in storage", item.Value.Type())
+		}
 	}
 }
