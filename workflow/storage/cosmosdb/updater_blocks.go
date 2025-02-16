@@ -15,8 +15,11 @@ var _ storage.BlockUpdater = blockUpdater{}
 
 // blockUpdater implements the storage.blockUpdater interface.
 type blockUpdater struct {
-	mu *sync.RWMutex
-	client
+	mu     *sync.RWMutex
+	client patchItemer
+
+	pk        azcosmos.PartitionKey
+	defaultIO *azcosmos.ItemOptions
 
 	private.Storage
 }
@@ -31,14 +34,14 @@ func (u blockUpdater) UpdateBlock(ctx context.Context, block *workflow.Block) er
 	patch.AppendReplace("/stateStart", block.State.Start)
 	patch.AppendReplace("/stateEnd", block.State.End)
 
-	itemOpt := u.itemOptions()
+	itemOpt := itemOptions(u.defaultIO)
 	var ifMatchEtag *azcore.ETag = nil
 	if block.State.ETag != "" {
 		ifMatchEtag = (*azcore.ETag)(&block.State.ETag)
 	}
 	itemOpt.IfMatchEtag = ifMatchEtag
 
-	resp, err := patchItemWithRetry(ctx, u.getUpdater(), u.getPK(), block.ID.String(), patch, itemOpt)
+	resp, err := patchItemWithRetry(ctx, u.client, u.pk, block.ID.String(), patch, itemOpt)
 	if err != nil {
 		return err
 	}

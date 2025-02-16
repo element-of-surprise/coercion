@@ -15,8 +15,11 @@ var _ storage.SequenceUpdater = sequenceUpdater{}
 
 // sequenceUpdater implements the storage.sequenceUpdater interface.
 type sequenceUpdater struct {
-	mu *sync.RWMutex
-	client
+	mu     *sync.RWMutex
+	client patchItemer
+
+	pk        azcosmos.PartitionKey
+	defaultIO *azcosmos.ItemOptions
 
 	private.Storage
 }
@@ -31,14 +34,14 @@ func (u sequenceUpdater) UpdateSequence(ctx context.Context, seq *workflow.Seque
 	patch.AppendReplace("/stateStart", seq.State.Start)
 	patch.AppendReplace("/stateEnd", seq.State.End)
 
-	itemOpt := u.itemOptions()
+	itemOpt := itemOptions(u.defaultIO)
 	var ifMatchEtag *azcore.ETag = nil
 	if seq.State.ETag != "" {
 		ifMatchEtag = (*azcore.ETag)(&seq.State.ETag)
 	}
 	itemOpt.IfMatchEtag = ifMatchEtag
 
-	resp, err := patchItemWithRetry(ctx, u.getUpdater(), u.getPK(), seq.ID.String(), patch, itemOpt)
+	resp, err := patchItemWithRetry(ctx, u.client, u.pk, seq.ID.String(), patch, itemOpt)
 	if err != nil {
 		return err
 	}

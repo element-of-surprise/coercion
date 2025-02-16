@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"sync"
 
+	"github.com/Azure/azure-sdk-for-go/sdk/data/azcosmos"
 	"github.com/element-of-surprise/coercion/internal/private"
 	"github.com/element-of-surprise/coercion/workflow"
 
@@ -12,17 +13,32 @@ import (
 	"github.com/gostdlib/base/retry/exponential"
 )
 
+// executeTransactionalBatcher provides a method to execute a batch of transactions.
+// Implemented by *azcosmos.ContainerClient.
+type executeTransactionalBatcher interface {
+	// ExecuteTransactionalBatch executes a transactional batch in the Azure Cosmos DB service.
+	ExecuteTransactionalBatch(ctx context.Context, b azcosmos.TransactionalBatch, o *azcosmos.TransactionalBatchOptions) (azcosmos.TransactionalBatchResponse, error)
+}
+
+type creatorReader interface {
+	Exists(ctx context.Context, id uuid.UUID) (bool, error)
+	fetchPlan(ctx context.Context, id uuid.UUID) (*workflow.Plan, error)
+}
+
 // creator implements the storage.creator interface.
 type creator struct {
-	mu *sync.RWMutex
-	client
-	reader reader
+	mu     *sync.RWMutex
+	client executeTransactionalBatcher
+	pkStr  string
+	pk     azcosmos.PartitionKey
+
+	reader creatorReader
 
 	private.Storage
 }
 
 // Create writes Plan data to storage, and all underlying data.
-func (u creator) Create(ctx context.Context, plan *workflow.Plan) error {
+func (c creator) Create(ctx context.Context, plan *workflow.Plan) error {
 	if plan == nil {
 		return fmt.Errorf("plan cannot be nil")
 	}
@@ -31,20 +47,20 @@ func (u creator) Create(ctx context.Context, plan *workflow.Plan) error {
 		return fmt.Errorf("plan ID cannot be nil")
 	}
 
-	u.mu.Lock()
-	defer u.mu.Unlock()
-
-	exist, err := u.reader.Exists(ctx, plan.ID)
+	exist, err := c.reader.Exists(ctx, plan.ID)
 	if err != nil {
 		return err
 	}
+
+	c.mu.Lock()
+	defer c.mu.Unlock()
 
 	if exist {
 		return fmt.Errorf("plan with ID(%s) already exists", plan.ID)
 	}
 
 	commitPlan := func(ctx context.Context, r exponential.Record) error {
-		if err = u.commitPlan(ctx, plan); err != nil {
+		if err = c.commitPlan(ctx, plan); err != nil {
 			if !isRetriableError(err) {
 				return fmt.Errorf("%w: %w", err, exponential.ErrPermanent)
 			}
