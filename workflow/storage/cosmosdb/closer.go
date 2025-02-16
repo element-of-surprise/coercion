@@ -8,8 +8,6 @@ import (
 
 // This is required to implement the storage.Vault interface.
 type closer struct {
-	client
-
 	private.Storage
 }
 
