@@ -118,7 +118,7 @@ func WithItemOptions(opts azcosmos.ItemOptions) Option {
 // If the container does not exist, it will be created.
 // The partition key has a set key name, so users should decide what partition key value means to them depending on
 // their architecture.
-func New(ctx context.Context, db, container, pval, instance string, cred azcore.TokenCredential, reg *registry.Register, options ...Option) (*Vault, error) {
+func New(ctx context.Context, db, container, pval string, cred azcore.TokenCredential, reg *registry.Register, options ...Option) (*Vault, error) {
 	ctx = context.WithoutCancel(ctx)
 
 	r := &Vault{
