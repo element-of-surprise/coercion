@@ -17,7 +17,6 @@ import (
 	"github.com/Azure/azure-sdk-for-go/sdk/data/azcosmos"
 	"github.com/element-of-surprise/coercion/plugins/registry"
 	"github.com/element-of-surprise/coercion/workflow"
-	"github.com/element-of-surprise/coercion/workflow/storage/cosmosdb/internal/types"
 	"github.com/element-of-surprise/coercion/workflow/utils/walk"
 	"github.com/google/uuid"
 	"zombiezen.com/go/sqlite"
@@ -27,7 +26,7 @@ import (
 // fakeStorage fakes the storage methods needed to communicate with azcosmos used in this package.
 // We have to use some unsafe methods to avoid writing unneccesary wrappers to get at data used for mocks.
 // This is sad and cost us a lot of time.
-// This is not 100% a fake, in that we are realying on error here to know if something worked. But Cosmos,
+// This is not 100% a fake, in that we are relying on error here to know if something worked. But Cosmos,
 // unfortunately, can screw us returning errors in azcosmos.TransactionalBatchResponse{} and we aren't simulating that.
 // I'm not even sure if that happens.
 type fakeStorage struct {
@@ -197,7 +196,7 @@ func (f *fakeStorage) ExecuteTransactionalBatch(ctx context.Context, b azcosmos.
 
 			var planID = fields.ID
 
-			if fields.Type != Plan {
+			if fields.Type != workflow.OTPlan {
 				planID = fields.PlanID
 			}
 
@@ -304,12 +303,12 @@ func (f *fakeStorage) NewQueryItemsPager(query string, pk azcosmos.PartitionKey,
 		})
 	}
 
-	var queryType types.Type
+	var queryType workflow.ObjectType
 	switch {
-	case strings.Contains(query, "a.type=5"):
-		queryType = Action
+	case strings.Contains(query, "a.type=7"):
+		queryType = workflow.OTAction
 	case strings.Contains(query, "p.type=1"):
-		queryType = Plan
+		queryType = workflow.OTPlan
 	default:
 		panic(fmt.Sprintf("NewQueryItemsPager: called on query(%s) we don't support)", query))
 	}
@@ -445,11 +444,11 @@ func (f *fakeStorage) patchObject(op pathOps, o stateObject) {
 		case "/attempts":
 			action := o.(*workflow.Action)
 			plug := f.reg.Plugin(action.Plugin)
-			attemps, err := decodeAttempts(op.Value.([]byte), plug)
+			attempts, err := decodeAttempts(op.Value.([]byte), plug)
 			if err != nil {
 				panic(err)
 			}
-			action.Attempts = attemps
+			action.Attempts = attempts
 		default:
 			panic(fmt.Sprintf("unsupported op Path(%s) on set op", op.Path))
 		}
@@ -542,9 +541,6 @@ type batchOp struct {
 // Rant: come on, they have an internal mock implementation they don't expose, make it difficult to locally test with
 // mock outs and love using pointers all over when they aren't necessary so my garbage collector can be full all the time.
 // Blah.........
-// unsafeBatchOps extracts operations from azcosmos.TransactionalBatch
-// unsafeBatchOps extracts operations from azcosmos.TransactionalBatch
-// unsafeBatchOps extracts operations from azcosmos.TransactionalBatch
 func unsafeBatchOps(t *azcosmos.TransactionalBatch) []batchOp {
 	poType := reflect.TypeOf(*t)
 

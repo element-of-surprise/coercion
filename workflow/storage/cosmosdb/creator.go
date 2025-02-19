@@ -31,7 +31,6 @@ type creator struct {
 	client executeTransactionalBatcher
 	pkStr  string
 	pk     azcosmos.PartitionKey
-
 	reader creatorReader
 
 	private.Storage

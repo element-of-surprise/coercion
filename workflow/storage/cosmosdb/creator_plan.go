@@ -46,11 +46,10 @@ func (c creator) commitPlan(ctx context.Context, p *workflow.Plan) (err error) {
 }
 
 type itemsContext struct {
-	pkStr   string
-	planID  uuid.UUID
-	m       map[string][]byte
-	actions [][]byte
-	items   [][]byte
+	pkStr  string
+	planID uuid.UUID
+	m      map[string][]byte
+	items  [][]byte
 }
 
 func planToItems(pkStr string, p *workflow.Plan) (*itemsContext, error) {
@@ -103,7 +102,7 @@ func planToEntry(pk string, p *workflow.Plan) (plansEntry, error) {
 
 	plan := plansEntry{
 		PK:          pk,
-		Type:        Plan,
+		Type:        workflow.OTPlan,
 		ID:          p.ID,
 		GroupID:     p.GroupID,
 		Name:        p.Name,
@@ -174,7 +173,7 @@ func checkToEntry(pk string, planID uuid.UUID, c *workflow.Checks) (checksEntry,
 	}
 	return checksEntry{
 		PK:          pk,
-		Type:        Checks,
+		Type:        workflow.OTCheck,
 		ID:          c.ID,
 		Key:         c.Key,
 		PlanID:      planID,
@@ -232,7 +231,7 @@ func blockToEntry(pk string, planID uuid.UUID, pos int, b *workflow.Block) (bloc
 
 	block := blocksEntry{
 		PK:                pk,
-		Type:              Block,
+		Type:              workflow.OTBlock,
 		ID:                b.ID,
 		Key:               b.Key,
 		PlanID:            planID,
@@ -306,7 +305,7 @@ func sequenceToEntry(pk string, planID uuid.UUID, pos int, seq *workflow.Sequenc
 
 	return sequencesEntry{
 		PK:          pk,
-		Type:        Sequence,
+		Type:        workflow.OTSequence,
 		ID:          seq.ID,
 		Key:         seq.Key,
 		PlanID:      planID,
@@ -336,7 +335,6 @@ func actionToItems(itemsContext *itemsContext, pos int, a *workflow.Action) erro
 	}
 	itemsContext.items = append(itemsContext.items, item)
 	itemsContext.m[a.ID.String()] = item
-	itemsContext.actions = append(itemsContext.actions, item)
 
 	return nil
 }
@@ -357,7 +355,7 @@ func actionToEntry(pk string, planID uuid.UUID, pos int, a *workflow.Action) (ac
 	return actionsEntry{
 		PK:          pk,
 		ID:          a.ID,
-		Type:        Action,
+		Type:        workflow.OTAction,
 		Key:         a.Key,
 		PlanID:      planID,
 		Name:        a.Name,

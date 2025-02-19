@@ -35,48 +35,18 @@ func TestStorageItemCRUD(t *testing.T) {
 		defaultIOpts: defaultIOpts,
 		reg:          testReg,
 	}
+
+	newUpdater(mu, store, pk, defaultIOpts)
 	v := &Vault{
 		reader: reader,
 		creator: creator{
 			mu:     mu,
 			client: store,
 			pkStr:  "test-partition",
-			pk:     azcosmos.NewPartitionKeyString("test-partition"),
+			pk:     pk,
 			reader: reader,
 		},
-		updater: updater{
-			planUpdater: planUpdater{
-				mu:           mu,
-				client:       store,
-				pk:           pk,
-				defaultIOpts: defaultIOpts,
-			},
-			checksUpdater: checksUpdater{
-				mu:           mu,
-				client:       store,
-				pk:           pk,
-				defaultIOpts: defaultIOpts,
-			},
-			blockUpdater: blockUpdater{
-				mu:           mu,
-				client:       store,
-				pk:           pk,
-				defaultIOpts: defaultIOpts,
-			},
-			sequenceUpdater: sequenceUpdater{
-				mu:           mu,
-				client:       store,
-				pk:           pk,
-				defaultIOpts: defaultIOpts,
-			},
-			actionUpdater: actionUpdater{
-				mu:           mu,
-				client:       store,
-				pk:           pk,
-				defaultIOpts: defaultIOpts,
-			},
-			reader: reader,
-		},
+		updater: newUpdater(mu, store, pk, defaultIOpts),
 		deleter: deleter{
 			mu:     mu,
 			client: store,
