@@ -12,7 +12,6 @@ import (
 	"github.com/element-of-surprise/coercion/plugins/registry"
 	"github.com/element-of-surprise/coercion/workflow"
 	"github.com/element-of-surprise/coercion/workflow/builder"
-	"github.com/element-of-surprise/coercion/workflow/storage/cosmosdb/internal/types"
 	"github.com/element-of-surprise/coercion/workflow/storage/sqlite/testing/plugins"
 	"github.com/element-of-surprise/coercion/workflow/utils/clone"
 	"github.com/element-of-surprise/coercion/workflow/utils/walk"
@@ -164,12 +163,12 @@ func getIDsFromQueryParameters(params []azcosmos.QueryParameter) map[uuid.UUID]s
 }
 
 type commonFields struct {
-	ID          uuid.UUID       `json:"id"`
-	PlanID      uuid.UUID       `json:"planID"` // not set on a Type plan
-	Type        types.Type      `json:"type"`
-	StateStatus workflow.Status `json:"stateStatus"`
-	StateStart  time.Time       `json:"stateStart"`
-	StateEnd    time.Time       `json:"stateEnd"`
+	ID          uuid.UUID           `json:"id"`
+	PlanID      uuid.UUID           `json:"planID"` // not set on a Type plan
+	Type        workflow.ObjectType `json:"type"`
+	StateStatus workflow.Status     `json:"stateStatus"`
+	StateStart  time.Time           `json:"stateStart"`
+	StateEnd    time.Time           `json:"stateEnd"`
 }
 
 // getCommonFields gets fields that are common to all Coercion workflow "entry"objects.

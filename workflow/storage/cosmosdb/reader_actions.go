@@ -28,7 +28,7 @@ SELECT
 	a.stateEnd,
 	a._etag
 FROM actions a
-WHERE a.type=5 AND ARRAY_CONTAINS(@ids, a.id)
+WHERE a.type=7 AND ARRAY_CONTAINS(@ids, a.id)
 ORDER BY a.pos ASC`
 
 // idsToActions converts the "actions" field in a cosmosdb document to a list of *workflow.Actions.
