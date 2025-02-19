@@ -172,7 +172,7 @@ type commonFields struct {
 	StateEnd    time.Time       `json:"stateEnd"`
 }
 
-// getCommonFields gets fields thata arte common to all Coercion workflow "entry"objects.
+// getCommonFields gets fields that are common to all Coercion workflow "entry"objects.
 // entry objects are what we store this in within cosmosDB (planEntry, checksEntry, ...).
 func getCommonFields(data []byte) (commonFields, error) {
 	var c commonFields

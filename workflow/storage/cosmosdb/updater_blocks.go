@@ -18,8 +18,8 @@ type blockUpdater struct {
 	mu     *sync.RWMutex
 	client patchItemer
 
-	pk        azcosmos.PartitionKey
-	defaultIO *azcosmos.ItemOptions
+	pk           azcosmos.PartitionKey
+	defaultIOpts *azcosmos.ItemOptions
 
 	private.Storage
 }
@@ -34,7 +34,7 @@ func (u blockUpdater) UpdateBlock(ctx context.Context, block *workflow.Block) er
 	patch.AppendReplace("/stateStart", block.State.Start)
 	patch.AppendReplace("/stateEnd", block.State.End)
 
-	itemOpt := itemOptions(u.defaultIO)
+	itemOpt := itemOptions(u.defaultIOpts)
 	var ifMatchEtag *azcore.ETag = nil
 	if block.State.ETag != "" {
 		ifMatchEtag = (*azcore.ETag)(&block.State.ETag)

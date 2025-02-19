@@ -97,12 +97,12 @@ func TestDelete(t *testing.T) {
 				pk:     pk,
 				client: store,
 				reader: reader{
-					mu:        mu,
-					container: "container",
-					client:    store,
-					pk:        pk,
-					defaultIO: &azcosmos.ItemOptions{},
-					reg:       testReg,
+					mu:           mu,
+					container:    "container",
+					client:       store,
+					pk:           pk,
+					defaultIOpts: &azcosmos.ItemOptions{},
+					reg:          testReg,
 				},
 			},
 		}

@@ -147,12 +147,12 @@ func New(ctx context.Context, db, container, pval string, cred azcore.TokenCrede
 
 	pk := azcosmos.NewPartitionKeyString(pval)
 	r.reader = reader{
-		mu:        mu,
-		container: container,
-		client:    r.contClient,
-		pk:        pk,
-		defaultIO: &r.itemOpts,
-		reg:       reg,
+		mu:           mu,
+		container:    container,
+		client:       r.contClient,
+		pk:           pk,
+		defaultIOpts: &r.itemOpts,
+		reg:          reg,
 	}
 	r.creator = creator{
 		mu:     mu,
