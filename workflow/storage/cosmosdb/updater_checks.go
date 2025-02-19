@@ -18,8 +18,8 @@ type checksUpdater struct {
 	mu     *sync.RWMutex
 	client patchItemer
 
-	pk        azcosmos.PartitionKey
-	defaultIO *azcosmos.ItemOptions
+	pk           azcosmos.PartitionKey
+	defaultIOpts *azcosmos.ItemOptions
 
 	private.Storage
 }
@@ -34,7 +34,7 @@ func (u checksUpdater) UpdateChecks(ctx context.Context, check *workflow.Checks)
 	patch.AppendReplace("/stateStart", check.State.Start)
 	patch.AppendReplace("/stateEnd", check.State.End)
 
-	itemOpt := itemOptions(u.defaultIO)
+	itemOpt := itemOptions(u.defaultIOpts)
 	var ifMatchEtag *azcore.ETag = nil
 	if check.State.ETag != "" {
 		ifMatchEtag = (*azcore.ETag)(&check.State.ETag)

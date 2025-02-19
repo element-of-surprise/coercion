@@ -27,13 +27,13 @@ func TestStorageItemCRUD(t *testing.T) {
 	mu := &sync.RWMutex{}
 	container := "container"
 	pk := azcosmos.NewPartitionKeyString("who cares")
-	defaultIO := &azcosmos.ItemOptions{}
+	defaultIOpts := &azcosmos.ItemOptions{}
 	reader := reader{
-		mu:        mu,
-		container: container,
-		client:    store,
-		defaultIO: defaultIO,
-		reg:       testReg,
+		mu:           mu,
+		container:    container,
+		client:       store,
+		defaultIOpts: defaultIOpts,
+		reg:          testReg,
 	}
 	v := &Vault{
 		reader: reader,
@@ -46,34 +46,34 @@ func TestStorageItemCRUD(t *testing.T) {
 		},
 		updater: updater{
 			planUpdater: planUpdater{
-				mu:        mu,
-				client:    store,
-				pk:        pk,
-				defaultIO: defaultIO,
+				mu:           mu,
+				client:       store,
+				pk:           pk,
+				defaultIOpts: defaultIOpts,
 			},
 			checksUpdater: checksUpdater{
-				mu:        mu,
-				client:    store,
-				pk:        pk,
-				defaultIO: defaultIO,
+				mu:           mu,
+				client:       store,
+				pk:           pk,
+				defaultIOpts: defaultIOpts,
 			},
 			blockUpdater: blockUpdater{
-				mu:        mu,
-				client:    store,
-				pk:        pk,
-				defaultIO: defaultIO,
+				mu:           mu,
+				client:       store,
+				pk:           pk,
+				defaultIOpts: defaultIOpts,
 			},
 			sequenceUpdater: sequenceUpdater{
-				mu:        mu,
-				client:    store,
-				pk:        pk,
-				defaultIO: defaultIO,
+				mu:           mu,
+				client:       store,
+				pk:           pk,
+				defaultIOpts: defaultIOpts,
 			},
 			actionUpdater: actionUpdater{
-				mu:        mu,
-				client:    store,
-				pk:        pk,
-				defaultIO: defaultIO,
+				mu:           mu,
+				client:       store,
+				pk:           pk,
+				defaultIOpts: defaultIOpts,
 			},
 			reader: reader,
 		},

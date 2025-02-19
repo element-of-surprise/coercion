@@ -20,8 +20,8 @@ type actionUpdater struct {
 
 	client patchItemer
 
-	pk        azcosmos.PartitionKey
-	defaultIO *azcosmos.ItemOptions
+	pk           azcosmos.PartitionKey
+	defaultIOpts *azcosmos.ItemOptions
 
 	private.Storage
 }
@@ -41,7 +41,7 @@ func (u actionUpdater) UpdateAction(ctx context.Context, action *workflow.Action
 	}
 	patch.AppendSet("/attempts", attempts)
 
-	itemOpt := itemOptions(u.defaultIO)
+	itemOpt := itemOptions(u.defaultIOpts)
 	var ifMatchEtag *azcore.ETag = nil
 	if action.State.ETag != "" {
 		ifMatchEtag = (*azcore.ETag)(&action.State.ETag)

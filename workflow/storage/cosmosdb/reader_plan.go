@@ -12,7 +12,7 @@ import (
 
 // fetchPlan fetches a plan by its id.
 func (p reader) fetchPlan(ctx context.Context, id uuid.UUID) (*workflow.Plan, error) {
-	res, err := p.client.ReadItem(ctx, p.pk, id.String(), p.defaultIO)
+	res, err := p.client.ReadItem(ctx, p.pk, id.String(), p.defaultIOpts)
 	if err != nil {
 		return nil, fmt.Errorf("couldn't fetch plan: %w", err)
 	}

@@ -18,8 +18,8 @@ type sequenceUpdater struct {
 	mu     *sync.RWMutex
 	client patchItemer
 
-	pk        azcosmos.PartitionKey
-	defaultIO *azcosmos.ItemOptions
+	pk           azcosmos.PartitionKey
+	defaultIOpts *azcosmos.ItemOptions
 
 	private.Storage
 }
@@ -34,7 +34,7 @@ func (u sequenceUpdater) UpdateSequence(ctx context.Context, seq *workflow.Seque
 	patch.AppendReplace("/stateStart", seq.State.Start)
 	patch.AppendReplace("/stateEnd", seq.State.End)
 
-	itemOpt := itemOptions(u.defaultIO)
+	itemOpt := itemOptions(u.defaultIOpts)
 	var ifMatchEtag *azcore.ETag = nil
 	if seq.State.ETag != "" {
 		ifMatchEtag = (*azcore.ETag)(&seq.State.ETag)

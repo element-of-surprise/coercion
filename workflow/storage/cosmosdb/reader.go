@@ -33,11 +33,11 @@ type readerClient interface {
 
 // reader implements the storage.PlanReader interface.
 type reader struct {
-	mu        *sync.RWMutex
-	container string
-	client    readerClient // *azcosmos.ContainerClient
-	pk        azcosmos.PartitionKey
-	defaultIO *azcosmos.ItemOptions
+	mu           *sync.RWMutex
+	container    string
+	client       readerClient // *azcosmos.ContainerClient
+	pk           azcosmos.PartitionKey
+	defaultIOpts *azcosmos.ItemOptions
 
 	reg *registry.Register
 
@@ -59,7 +59,7 @@ func (r reader) Exists(ctx context.Context, id uuid.UUID) (bool, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	_, err := r.client.ReadItem(ctx, r.pk, id.String(), r.defaultIO)
+	_, err := r.client.ReadItem(ctx, r.pk, id.String(), r.defaultIOpts)
 	if err != nil {
 		if isNotFound(err) {
 			return false, nil
