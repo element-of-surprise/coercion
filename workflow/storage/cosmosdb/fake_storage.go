@@ -176,6 +176,11 @@ func (f *fakeStorage) allIDs() ([]data, error) {
 	return d, nil
 }
 
+// ExecuteTransactionalBatch creates a transactional batch.
+func (f *fakeStorage) NewTransactionalBatch(partitionKey azcosmos.PartitionKey) azcosmos.TransactionalBatch {
+	return azcosmos.TransactionalBatch{}
+}
+
 // ExecuteTransactionalBatch implements the ExecuteBatcher interface.
 func (f *fakeStorage) ExecuteTransactionalBatch(ctx context.Context, b azcosmos.TransactionalBatch, opts *azcosmos.TransactionalBatchOptions) (azcosmos.TransactionalBatchResponse, error) {
 	if reflect.ValueOf(b).IsZero() {
@@ -374,7 +379,6 @@ func (f *fakeStorage) PatchItem(ctx context.Context, pk azcosmos.PartitionKey, i
 		case "replace", "set":
 			_, planID, err := f.readItem(ctx, itemID)
 			if err != nil {
-				log.Println("here is the error: ", err)
 				return azcosmos.ItemResponse{}, err
 			}
 

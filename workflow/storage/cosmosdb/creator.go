@@ -13,10 +13,10 @@ import (
 	"github.com/gostdlib/base/retry/exponential"
 )
 
-// executeTransactionalBatcher provides a method to execute a batch of transactions.
+// creatorClient provides a method to execute a batch of transactions.
 // Implemented by *azcosmos.ContainerClient.
-type executeTransactionalBatcher interface {
-	// ExecuteTransactionalBatch executes a transactional batch in the Azure Cosmos DB service.
+type creatorClient interface {
+	NewTransactionalBatch(partitionKey azcosmos.PartitionKey) azcosmos.TransactionalBatch
 	ExecuteTransactionalBatch(ctx context.Context, b azcosmos.TransactionalBatch, o *azcosmos.TransactionalBatchOptions) (azcosmos.TransactionalBatchResponse, error)
 }
 
@@ -28,7 +28,7 @@ type creatorReader interface {
 // creator implements the storage.creator interface.
 type creator struct {
 	mu     *sync.RWMutex
-	client executeTransactionalBatcher
+	client creatorClient
 	pkStr  string
 	pk     azcosmos.PartitionKey
 	reader creatorReader
