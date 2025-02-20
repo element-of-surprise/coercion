@@ -20,7 +20,6 @@ import (
 	"github.com/element-of-surprise/coercion/workflow/storage"
 
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
-	"github.com/Azure/azure-sdk-for-go/sdk/azcore/runtime"
 	"github.com/Azure/azure-sdk-for-go/sdk/data/azcosmos"
 	"github.com/gostdlib/base/retry/exponential"
 
@@ -41,6 +40,9 @@ type Vault struct {
 	// pkVal is the partition key value for the storage.
 	// This assumes the service will use a single partition.
 	pkVal string
+
+	client     *azcosmos.Client
+	contClient *azcosmos.ContainerClient
 
 	clientOpts *azcosmos.ClientOptions
 	props      azcosmos.ContainerProperties
@@ -84,7 +86,7 @@ func WithClientOptions(opts *azcosmos.ClientOptions) Option {
 	}
 }
 
-// WithMaxThroughput sets container throughput in RU/s in autoscale mode. Default is 400.
+// WithMaxThroughput sets container throughput in RU/s in autoscale mode. Default is 10000.
 func WithMaxThroughput(maxRU int32) Option {
 	return func(r *Vault) error {
 		r.maxRU = maxRU
@@ -109,128 +111,6 @@ func WithItemOptions(opts azcosmos.ItemOptions) Option {
 		r.itemOpts = opts
 		return nil
 	}
-}
-
-type containerBatcher interface {
-	// newTransactionalBatch returns a TransactionalBatch. This allows using a fake TransactionalBatch.
-	newTransactionalBatch() transactionalBatch
-	// executeTransactionalBatch executes a transactional batch.
-	executeTransactionalBatch(context.Context, transactionalBatch, *azcosmos.TransactionalBatchOptions) (azcosmos.TransactionalBatchResponse, error)
-	// setBatch allows for setting the fake batch in tests.
-	setBatch(transactionalBatch)
-}
-
-// ContainerClient is the interface for the CosmosDB container client.
-// This allows for faking the azcosmos container client.
-type containerReader interface {
-	NewQueryItemsPager(string, azcosmos.PartitionKey, *azcosmos.QueryOptions) *runtime.Pager[azcosmos.QueryItemsResponse]
-	ReadItem(context.Context, azcosmos.PartitionKey, string, *azcosmos.ItemOptions) (azcosmos.ItemResponse, error)
-}
-
-// ContainerClient is the interface for the CosmosDB container client.
-// This allows for faking the azcosmos container client.
-type containerUpdater interface {
-	PatchItem(context.Context, azcosmos.PartitionKey, string, azcosmos.PatchOperations, *azcosmos.ItemOptions) (azcosmos.ItemResponse, error)
-}
-
-// transactionalBatch is the interface for the CosmosDB transactional batch.
-// This is used for creating and deleting plans.
-type transactionalBatch interface {
-	CreateItem(item []byte, o *azcosmos.TransactionalBatchItemOptions)
-	DeleteItem(itemID string, o *azcosmos.TransactionalBatchItemOptions)
-}
-
-func pk(val string) azcosmos.PartitionKey {
-	return azcosmos.NewPartitionKeyString(val)
-}
-
-// Client is the interface for the CosmosDB client.
-type client interface {
-	// getReader returns the container client.
-	getReader() containerReader
-	// getUpdater returns the container client.
-	getUpdater() containerUpdater
-	// getPK returns the partition key.
-	getPK() azcosmos.PartitionKey
-	// getPKString returns the partition key as a string.
-	getPKString() string
-	// itemOptions returns the item options.
-	itemOptions() *azcosmos.ItemOptions
-	// The client must implement containerBatcher. Some of the transactional batch methods
-	// are difficult to fake otherwise.
-	containerBatcher
-}
-
-var _ client = &containerClient{}
-
-// containerClient has the methods for all of Create/Update/Delete/Query operations
-// on the CosmosDB data.
-type containerClient struct {
-	pkVal    string
-	client   *azcosmos.ContainerClient
-	itemOpts azcosmos.ItemOptions
-}
-
-// getReader returns the container client.
-func (c *containerClient) getReader() containerReader {
-	return c.client
-}
-
-// getUpdater returns the container client.
-func (c *containerClient) getUpdater() containerUpdater {
-	return c.client
-}
-
-// getPK returns the partition key.
-func (c *containerClient) getPK() azcosmos.PartitionKey {
-	return pk(c.pkVal)
-}
-
-// getPKString returns the partition key as a string.
-func (c *containerClient) getPKString() string {
-	return c.pkVal
-}
-
-// newTransactionalBatch returns a transactionalBatch. This allows using a fake TransactionalBatch.
-func (c *containerClient) newTransactionalBatch() transactionalBatch {
-	batch := c.client.NewTransactionalBatch(c.getPK())
-	return &batch
-}
-
-// setBatch sets the batch for testing with the fake client, so nothing is
-// needed to be done for the real client.
-func (c *containerClient) setBatch(batch transactionalBatch) {
-}
-
-// itemOptions returns the item options.
-func (c *containerClient) itemOptions() *azcosmos.ItemOptions {
-	return &c.itemOpts
-}
-
-// executeTransactionalBatch executes a transactional batch. This allows for faking by accepting the transactionalBatch
-// interface. This is only used internally, so asserting type here should be fine.
-func (c *containerClient) executeTransactionalBatch(ctx context.Context, b transactionalBatch, opts *azcosmos.TransactionalBatchOptions) (azcosmos.TransactionalBatchResponse, error) {
-	if b == nil {
-		return azcosmos.TransactionalBatchResponse{}, fmt.Errorf("nil transactional batch")
-	}
-	batch := b.(*azcosmos.TransactionalBatch)
-	return c.client.ExecuteTransactionalBatch(ctx, *batch, nil)
-}
-
-func pathToScalar(path string) azcosmos.IncludedPath {
-	return azcosmos.IncludedPath{
-		Path: fmt.Sprintf("/%s/?", path),
-	}
-}
-
-// indexPaths are the included paths for the container.
-var indexPaths = []azcosmos.IncludedPath{
-	pathToScalar("type"),       // plans, checks, sequences, actions
-	pathToScalar("groupID"),    // plans
-	pathToScalar("submitTime"), // plans
-	pathToScalar("key"),        // blocks, checks, sequences, actions
-	pathToScalar("planID"),     // blocks, checks, sequences, actions
-	pathToScalar("pos"),        // actions
 }
 
 // New is the constructor for *Vault. db, container, and pval are used to identify the storage container.
@@ -259,41 +139,49 @@ func New(ctx context.Context, db, container, pval string, cred azcore.TokenCrede
 	if err != nil {
 		return nil, err
 	}
-
-	cc, err := r.createContainerClient(ctx, client)
+	r.client = client
+	r.contClient, err = r.createContainerClient(ctx)
 	if err != nil {
 		return nil, err
 	}
 
 	mu := &sync.RWMutex{}
 
-	r.reader = reader{container: container, client: cc, reg: reg}
-	r.creator = creator{mu: mu, client: cc, reader: r.reader}
-	r.updater = newUpdater(mu, cc, r.reader)
-	r.closer = closer{client: cc}
-	r.deleter = deleter{mu: mu, client: cc, reader: r.reader}
+	pk := azcosmos.NewPartitionKeyString(pval)
+	r.reader = reader{
+		mu:           mu,
+		container:    container,
+		client:       r.contClient,
+		pk:           pk,
+		defaultIOpts: &r.itemOpts,
+		reg:          reg,
+	}
+	r.creator = creator{
+		mu:     mu,
+		client: r.contClient,
+		pkStr:  pval,
+		pk:     pk,
+		reader: r.reader,
+	}
+	r.updater = newUpdater(mu, r.contClient, pk, &r.itemOpts)
+	r.deleter = deleter{
+		mu:     mu,
+		client: r.contClient,
+		pk:     pk,
+		reader: r.reader,
+	}
+	r.closer = closer{}
 	return r, nil
 }
 
 // createContainerClient creates a new CosmosDB container client.
-func (v *Vault) createContainerClient(
-	ctx context.Context,
-	azCosmosClient *azcosmos.Client) (*containerClient, error) {
-	if azCosmosClient == nil {
-		return nil, fmt.Errorf("azCosmosClient cannot be nil")
-	}
-
-	client := &containerClient{
-		pkVal:    v.pkVal,
-		itemOpts: v.itemOpts,
-	}
-
-	dc, err := azCosmosClient.NewDatabase(v.db)
+func (v *Vault) createContainerClient(ctx context.Context) (*azcosmos.ContainerClient, error) {
+	dc, err := v.client.NewDatabase(v.db)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create Cosmos DB database client: %w", err)
 	}
 
-	exists, err := v.containerExists(ctx, azCosmosClient)
+	exists, err := v.containerExists(ctx, v.client)
 	if err != nil {
 		return nil, err
 	}
@@ -302,32 +190,26 @@ func (v *Vault) createContainerClient(
 		if err != nil {
 			switch {
 			case isConflict(err):
-				slog.Default().Warn(fmt.Sprintf("Container %s already exists: %s", v.container, err))
+				slog.Default().Warn(fmt.Sprintf("the container(%s) did not exist, but when we tried to create it, it said it exists: %s", v.container, err))
 			default:
-				return nil, fmt.Errorf("failed to create Cosmos DB container: container=%s. %w", v.container, err)
+				return nil, fmt.Errorf("failed to create Cosmos DB container(%s): %w", v.container, err)
 			}
 		} else {
 			slog.Default().Info(activityID)
 		}
 	}
 
-	cc, err := azCosmosClient.NewContainer(v.db, v.container)
+	cc, err := v.client.NewContainer(v.db, v.container)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create Cosmos DB container client: container=%s. %w", v.container, err)
 	}
-
-	client.client = cc
+	v.contClient = cc
 
 	if _, err = cc.Read(ctx, nil); err != nil {
-		return nil, fmt.Errorf(
-			"failed to connect to Cosmos DB container: endpoint=%q, container=%q. %w",
-			v.endpoint,
-			v.container,
-			err,
-		)
+		return nil, fmt.Errorf("failed to connect to Cosmos DB container(%s) at endpoint(%s): %w", v.endpoint, v.container, err)
 	}
 
-	return client, nil
+	return cc, nil
 }
 
 // createContainer creates a container. Check for existence first.
@@ -349,7 +231,7 @@ func (v *Vault) createContainer(ctx context.Context, database *azcosmos.Database
 	}
 
 	if v.maxRU == 0 {
-		v.maxRU = 400
+		v.maxRU = 10000
 	}
 	throughput := azcosmos.NewAutoscaleThroughputProperties(v.maxRU)
 	response, err := database.CreateContainer(ctx, v.props, &azcosmos.CreateContainerOptions{ThroughputProperties: &throughput})
@@ -357,6 +239,68 @@ func (v *Vault) createContainer(ctx context.Context, database *azcosmos.Database
 		return "", err
 	}
 	return response.ActivityID, nil
+}
+
+// Teardown deletes a container from a given CosmosDB database. This is for testing only.
+func Teardown(ctx context.Context, db, container string, cred azcore.TokenCredential, clientOpts *azcosmos.ClientOptions) error {
+	endpoint := fmt.Sprintf("https://%s.documents.azure.com:443/", db)
+
+	client, err := azcosmos.NewClient(endpoint, cred, clientOpts)
+	if err != nil {
+		return err
+	}
+
+	cc, err := client.NewContainer(db, container)
+	if err != nil {
+		return fmt.Errorf(
+			"failed to connect to Cosmos DB container: endpoint=%q, container=%q. %w",
+			endpoint,
+			container,
+			err,
+		)
+	}
+
+	if _, err := deleteContainer(ctx, cc); err != nil {
+		return fmt.Errorf("failed to delete Cosmos DB container: container=%s. %w", container, err)
+	}
+	return nil
+}
+
+// itemOptions returns a copy of the item options.
+func itemOptions(defaults *azcosmos.ItemOptions) *azcosmos.ItemOptions {
+	if defaults == nil {
+		return &azcosmos.ItemOptions{}
+	}
+
+	n := &azcosmos.ItemOptions{
+		PreTriggers:                    make([]string, len(defaults.PreTriggers)),
+		PostTriggers:                   make([]string, len(defaults.PostTriggers)),
+		SessionToken:                   defaults.SessionToken,
+		ConsistencyLevel:               defaults.ConsistencyLevel,
+		IndexingDirective:              defaults.IndexingDirective,
+		EnableContentResponseOnWrite:   defaults.EnableContentResponseOnWrite,
+		IfMatchEtag:                    defaults.IfMatchEtag,
+		DedicatedGatewayRequestOptions: defaults.DedicatedGatewayRequestOptions,
+	}
+	copy(n.PreTriggers, defaults.PreTriggers)
+	copy(n.PostTriggers, defaults.PostTriggers)
+	return n
+}
+
+func pathToScalar(path string) azcosmos.IncludedPath {
+	return azcosmos.IncludedPath{
+		Path: fmt.Sprintf("/%s/?", path),
+	}
+}
+
+// indexPaths are the included paths for the container.
+var indexPaths = []azcosmos.IncludedPath{
+	pathToScalar("type"),       // plans, checks, sequences, actions
+	pathToScalar("groupID"),    // plans
+	pathToScalar("submitTime"), // plans
+	pathToScalar("key"),        // blocks, checks, sequences, actions
+	pathToScalar("planID"),     // blocks, checks, sequences, actions
+	pathToScalar("pos"),        // actions
 }
 
 // containerExists checks if the container exists.
@@ -391,31 +335,6 @@ func deleteContainer(ctx context.Context, cc *azcosmos.ContainerClient) (string,
 		return "", err
 	}
 	return response.ActivityID, nil
-}
-
-// Teardown deletes a container from a given CosmosDB database. This is for testing only.
-func Teardown(ctx context.Context, db, container string, cred azcore.TokenCredential, clientOpts *azcosmos.ClientOptions) error {
-	endpoint := fmt.Sprintf("https://%s.documents.azure.com:443/", db)
-
-	client, err := azcosmos.NewClient(endpoint, cred, clientOpts)
-	if err != nil {
-		return err
-	}
-
-	cc, err := client.NewContainer(db, container)
-	if err != nil {
-		return fmt.Errorf(
-			"failed to connect to Cosmos DB container: endpoint=%q, container=%q. %w",
-			endpoint,
-			container,
-			err,
-		)
-	}
-
-	if _, err := deleteContainer(ctx, cc); err != nil {
-		return fmt.Errorf("failed to delete Cosmos DB container: container=%s. %w", container, err)
-	}
-	return nil
 }
 
 func fatalErr(logger *slog.Logger, msg string, args ...any) {

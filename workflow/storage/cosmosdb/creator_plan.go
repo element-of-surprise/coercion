@@ -13,7 +13,8 @@ import (
 	"github.com/google/uuid"
 )
 
-var zeroTime = time.Unix(0, 0)
+var zeroTime = time.Time{}
+var emptyItemOptions = &azcosmos.TransactionalBatchItemOptions{}
 
 // commitPlan commits a plan to the database. This commits the entire plan and all sub-objects.
 func (c creator) commitPlan(ctx context.Context, p *workflow.Plan) (err error) {
@@ -21,40 +22,22 @@ func (c creator) commitPlan(ctx context.Context, p *workflow.Plan) (err error) {
 		return fmt.Errorf("commitPlan: plan cannot be nil")
 	}
 
-	batch := c.newTransactionalBatch()
-
-	plan, err := planToEntry(c.getPKString(), p)
+	itemContext, err := planToItems(c.pkStr, p)
 	if err != nil {
 		return err
 	}
 
-	for _, check := range [5]*workflow.Checks{p.BypassChecks, p.PreChecks, p.PostChecks, p.ContChecks, p.DeferredChecks} {
-		if err := c.commitChecks(batch, p.ID, check); err != nil {
-			return fmt.Errorf("planToEntry(commitChecks): %w", err)
-		}
+	batch := c.client.NewTransactionalBatch(c.pk)
+	for _, item := range itemContext.items {
+		batch.CreateItem(item, emptyItemOptions)
 	}
 
-	if p.Blocks == nil {
-		return fmt.Errorf("commitPlan: plan.Blocks cannot be nil")
-	}
-	for i, b := range p.Blocks {
-		if err := c.commitBlock(batch, p.ID, i, b); err != nil {
-			return fmt.Errorf("planToEntry(commitBlocks): %w", err)
-		}
-	}
-
-	itemJson, err := json.Marshal(plan)
+	_, err = c.client.ExecuteTransactionalBatch(ctx, batch, &azcosmos.TransactionalBatchOptions{EnableContentResponseOnWrite: true})
 	if err != nil {
-		return fmt.Errorf("failed to marshal item: %w", err)
-	}
-	batch.CreateItem(itemJson, &azcosmos.TransactionalBatchItemOptions{})
-	c.setBatch(batch)
-
-	if _, err = c.executeTransactionalBatch(ctx, batch, &azcosmos.TransactionalBatchOptions{}); err != nil {
 		return fmt.Errorf("failed to create plan through Cosmos DB API: %w", err)
 	}
 
-	// need to reread plan, because batch response does not contain ETag for each item
+	// need to re-read plan, because batch response does not contain ETag for each item.
 	result, err := c.reader.fetchPlan(ctx, p.ID)
 	if err != nil {
 		return fmt.Errorf("failed to fetch plan: %w", err)
@@ -62,6 +45,51 @@ func (c creator) commitPlan(ctx context.Context, p *workflow.Plan) (err error) {
 	*p = *result
 
 	return nil
+}
+
+type itemsContext struct {
+	pkStr  string
+	planID uuid.UUID
+	m      map[string][]byte
+	items  [][]byte
+}
+
+func planToItems(pkStr string, p *workflow.Plan) (*itemsContext, error) {
+	itemsContext := &itemsContext{
+		pkStr:  pkStr,
+		planID: p.GetID(),
+		m:      map[string][]byte{},
+	}
+
+	plan, err := planToEntry(itemsContext.pkStr, p)
+	if err != nil {
+		return nil, err
+	}
+
+	for _, check := range [5]*workflow.Checks{p.BypassChecks, p.PreChecks, p.PostChecks, p.ContChecks, p.DeferredChecks} {
+		err = checksToItems(itemsContext, check)
+		if err != nil {
+			return nil, fmt.Errorf("planToEntry(commitChecks): %w", err)
+		}
+	}
+
+	if p.Blocks == nil {
+		return nil, fmt.Errorf("commitPlan: plan.Blocks cannot be nil")
+	}
+	for i, b := range p.Blocks {
+		err = blockToItem(itemsContext, i, b)
+		if err != nil {
+			return nil, fmt.Errorf("planToEntry(commitBlocks): %w", err)
+		}
+	}
+
+	item, err := json.Marshal(plan)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal item: %w", err)
+	}
+	itemsContext.m[plan.ID.String()] = item
+	itemsContext.items = append(itemsContext.items, item)
+	return itemsContext, nil
 }
 
 func planToEntry(pk string, p *workflow.Plan) (plansEntry, error) {
@@ -76,7 +104,7 @@ func planToEntry(pk string, p *workflow.Plan) (plansEntry, error) {
 
 	plan := plansEntry{
 		PK:          pk,
-		Type:        Plan,
+		Type:        workflow.OTPlan,
 		ID:          p.ID,
 		GroupID:     p.GroupID,
 		Name:        p.Name,
@@ -104,22 +132,17 @@ func planToEntry(pk string, p *workflow.Plan) (plansEntry, error) {
 	if p.DeferredChecks != nil {
 		plan.DeferredChecks = p.DeferredChecks.ID
 	}
-
-	if p.SubmitTime.Before(zeroTime) {
-		plan.SubmitTime = zeroTime
-	} else {
-		plan.SubmitTime = p.SubmitTime
-	}
+	plan.SubmitTime = p.SubmitTime
 
 	return plan, nil
 }
 
-func (c creator) commitChecks(batch transactionalBatch, planID uuid.UUID, ch *workflow.Checks) error {
+func checksToItems(itemsContext *itemsContext, ch *workflow.Checks) error {
 	if ch == nil {
 		return nil
 	}
 
-	checks, err := checkToEntry(c.getPKString(), planID, ch)
+	checks, err := checkToEntry(itemsContext.pkStr, itemsContext.planID, ch)
 	if err != nil {
 		return err
 	}
@@ -128,16 +151,16 @@ func (c creator) commitChecks(batch transactionalBatch, planID uuid.UUID, ch *wo
 		return fmt.Errorf("commitChecks: checks.Actions cannot be nil")
 	}
 	for i, a := range ch.Actions {
-		if err := c.commitAction(batch, planID, i, a); err != nil {
+		if err := actionToItems(itemsContext, i, a); err != nil {
 			return fmt.Errorf("commitAction: %w", err)
 		}
 	}
-	itemJson, err := json.Marshal(checks)
+	item, err := json.Marshal(checks)
 	if err != nil {
 		return fmt.Errorf("failed to marshal item: %w", err)
 	}
-	batch.CreateItem(itemJson, &azcosmos.TransactionalBatchItemOptions{})
-
+	itemsContext.items = append(itemsContext.items, item)
+	itemsContext.m[ch.ID.String()] = item
 	return nil
 }
 
@@ -152,7 +175,7 @@ func checkToEntry(pk string, planID uuid.UUID, c *workflow.Checks) (checksEntry,
 	}
 	return checksEntry{
 		PK:          pk,
-		Type:        Checks,
+		Type:        workflow.OTCheck,
 		ID:          c.ID,
 		Key:         c.Key,
 		PlanID:      planID,
@@ -164,18 +187,18 @@ func checkToEntry(pk string, planID uuid.UUID, c *workflow.Checks) (checksEntry,
 	}, nil
 }
 
-func (c creator) commitBlock(batch transactionalBatch, planID uuid.UUID, pos int, b *workflow.Block) error {
+func blockToItem(itemsContext *itemsContext, pos int, b *workflow.Block) error {
 	if b == nil {
 		return fmt.Errorf("commitBlock: block cannot be nil")
 	}
 
-	block, err := blockToEntry(c.getPKString(), planID, pos, b)
+	block, err := blockToEntry(itemsContext.pkStr, itemsContext.planID, pos, b)
 	if err != nil {
 		return err
 	}
 
 	for _, check := range [5]*workflow.Checks{b.BypassChecks, b.PreChecks, b.PostChecks, b.ContChecks, b.DeferredChecks} {
-		if err := c.commitChecks(batch, planID, check); err != nil {
+		if err = checksToItems(itemsContext, check); err != nil {
 			return fmt.Errorf("commitBlock(commitChecks): %w", err)
 		}
 	}
@@ -184,15 +207,16 @@ func (c creator) commitBlock(batch transactionalBatch, planID uuid.UUID, pos int
 		return fmt.Errorf("commitBlock: block.Sequences cannot be nil")
 	}
 	for i, seq := range b.Sequences {
-		if err := c.commitSequence(batch, planID, i, seq); err != nil {
+		if err := seqToItems(itemsContext, i, seq); err != nil {
 			return fmt.Errorf("(commitSequence: %w", err)
 		}
 	}
-	itemJson, err := json.Marshal(block)
+	item, err := json.Marshal(block)
 	if err != nil {
 		return fmt.Errorf("failed to marshal item: %w", err)
 	}
-	batch.CreateItem(itemJson, &azcosmos.TransactionalBatchItemOptions{})
+	itemsContext.items = append(itemsContext.items, item)
+	itemsContext.m[b.ID.String()] = item
 
 	return nil
 }
@@ -209,7 +233,7 @@ func blockToEntry(pk string, planID uuid.UUID, pos int, b *workflow.Block) (bloc
 
 	block := blocksEntry{
 		PK:                pk,
-		Type:              Block,
+		Type:              workflow.OTBlock,
 		ID:                b.ID,
 		Key:               b.Key,
 		PlanID:            planID,
@@ -244,12 +268,12 @@ func blockToEntry(pk string, planID uuid.UUID, pos int, b *workflow.Block) (bloc
 	return block, nil
 }
 
-func (c creator) commitSequence(batch transactionalBatch, planID uuid.UUID, pos int, seq *workflow.Sequence) error {
+func seqToItems(itemsContext *itemsContext, pos int, seq *workflow.Sequence) error {
 	if seq == nil {
 		return fmt.Errorf("commitSequence: sequence cannot be nil")
 	}
 
-	sequence, err := sequenceToEntry(c.getPKString(), planID, pos, seq)
+	sequence, err := sequenceToEntry(itemsContext.pkStr, itemsContext.planID, pos, seq)
 	if err != nil {
 		return err
 	}
@@ -258,16 +282,16 @@ func (c creator) commitSequence(batch transactionalBatch, planID uuid.UUID, pos 
 		return fmt.Errorf("commitSequence: sequence.Actions cannot be nil")
 	}
 	for i, a := range seq.Actions {
-		if err := c.commitAction(batch, planID, i, a); err != nil {
+		if err := actionToItems(itemsContext, i, a); err != nil {
 			return fmt.Errorf("planToEntry(commitAction): %w", err)
 		}
 	}
-	itemJson, err := json.Marshal(sequence)
+	item, err := json.Marshal(sequence)
 	if err != nil {
 		return fmt.Errorf("failed to marshal item: %w", err)
 	}
-	batch.CreateItem(itemJson, &azcosmos.TransactionalBatchItemOptions{})
-
+	itemsContext.items = append(itemsContext.items, item)
+	itemsContext.m[seq.ID.String()] = item
 	return nil
 }
 
@@ -283,7 +307,7 @@ func sequenceToEntry(pk string, planID uuid.UUID, pos int, seq *workflow.Sequenc
 
 	return sequencesEntry{
 		PK:          pk,
-		Type:        Sequence,
+		Type:        workflow.OTSequence,
 		ID:          seq.ID,
 		Key:         seq.Key,
 		PlanID:      planID,
@@ -297,21 +321,22 @@ func sequenceToEntry(pk string, planID uuid.UUID, pos int, seq *workflow.Sequenc
 	}, nil
 }
 
-func (c creator) commitAction(batch transactionalBatch, planID uuid.UUID, pos int, a *workflow.Action) error {
+func actionToItems(itemsContext *itemsContext, pos int, a *workflow.Action) error {
 	if a == nil {
 		return fmt.Errorf("commitAction: action cannot be nil")
 	}
 
-	action, err := actionToEntry(c.getPKString(), planID, pos, a)
+	action, err := actionToEntry(itemsContext.pkStr, itemsContext.planID, pos, a)
 	if err != nil {
 		return err
 	}
 
-	itemJson, err := json.Marshal(action)
+	item, err := json.Marshal(action)
 	if err != nil {
 		return fmt.Errorf("failed to marshal item: %w", err)
 	}
-	batch.CreateItem(itemJson, &azcosmos.TransactionalBatchItemOptions{})
+	itemsContext.items = append(itemsContext.items, item)
+	itemsContext.m[a.ID.String()] = item
 
 	return nil
 }
@@ -332,7 +357,7 @@ func actionToEntry(pk string, planID uuid.UUID, pos int, a *workflow.Action) (ac
 	return actionsEntry{
 		PK:          pk,
 		ID:          a.ID,
-		Type:        Action,
+		Type:        workflow.OTAction,
 		Key:         a.Key,
 		PlanID:      planID,
 		Name:        a.Name,
@@ -370,6 +395,9 @@ func encodeAttempts(attempts []*workflow.Attempt) ([]byte, error) {
 
 // decodeAttempts decodes a JSON array of JSON encoded attempts as byte slices into a slice of attempts.
 func decodeAttempts(rawAttempts []byte, plug plugins.Plugin) ([]*workflow.Attempt, error) {
+	if rawAttempts == nil {
+		return []*workflow.Attempt{}, nil
+	}
 	rawList := make([][]byte, 0)
 	if err := json.Unmarshal(rawAttempts, &rawList); err != nil {
 		return nil, fmt.Errorf("json.Unmarshal(rawAttempts): %w", err)

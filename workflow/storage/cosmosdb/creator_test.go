@@ -2,11 +2,13 @@ package cosmosdb
 
 import (
 	"context"
-	"fmt"
+	"errors"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
+	"github.com/Azure/azure-sdk-for-go/sdk/data/azcosmos"
 	"github.com/google/uuid"
 
 	"github.com/element-of-surprise/coercion/workflow"
@@ -16,6 +18,7 @@ import (
 func TestCreate(t *testing.T) {
 	t.Parallel()
 
+	pkStr := "test-partition"
 	existingPlan := NewTestPlan()
 	goodPlan := NewTestPlan()
 
@@ -52,8 +55,11 @@ func TestCreate(t *testing.T) {
 		name      string
 		plan      *workflow.Plan
 		readErr   error
-		createErr error
-		wantErr   bool
+		exists    bool
+		fetchErr  bool
+		createErr bool
+
+		wantErr bool
 	}{
 		{
 			name:    "Error: plan is nil",
@@ -66,20 +72,21 @@ func TestCreate(t *testing.T) {
 			wantErr: true,
 		},
 		{
-			name:    "Error: container client read error",
+			name:    "Error: cosmosdb read error on Exists()",
 			plan:    goodPlan,
-			readErr: fmt.Errorf("test error"),
+			readErr: errors.New("error"),
 			wantErr: true,
 		},
 		{
 			name:      "Error: container client create error",
 			plan:      goodPlan,
-			createErr: fmt.Errorf("test error"),
+			createErr: true,
 			wantErr:   true,
 		},
 		{
 			name:    "Error: plan exists",
 			plan:    existingPlan,
+			exists:  true,
 			wantErr: true,
 		},
 		{
@@ -119,19 +126,31 @@ func TestCreate(t *testing.T) {
 	for _, test := range tests {
 		ctx := context.Background()
 
-		r, cc := dbSetup()
+		store := newFakeStorage(testReg)
+		store.WritePlan(ctx, pkStr, existingPlan)
+		store.readItemErr = test.readErr
+		store.createItemErr = test.createErr
+		mu := &sync.RWMutex{}
+		pk := azcosmos.NewPartitionKeyString(pkStr)
 
-		if err := r.Create(ctx, existingPlan); err != nil {
-			t.Fatalf("TestExists(%s): %s", test.name, err)
-		}
-		if test.readErr != nil {
-			cc.reader.readErr = test.readErr
-		}
-		if test.createErr != nil {
-			cc.createErr = test.createErr
+		v := &Vault{
+			creator: creator{
+				mu:    mu,
+				pkStr: pkStr,
+				pk:    pk,
+				reader: reader{
+					mu:           mu,
+					container:    "container",
+					client:       store,
+					pk:           pk,
+					defaultIOpts: &azcosmos.ItemOptions{},
+					reg:          testReg,
+				},
+				client: store,
+			},
 		}
 
-		err := r.Create(ctx, test.plan)
+		err := v.Create(ctx, test.plan)
 		switch {
 		case test.wantErr && err == nil:
 			t.Errorf("TestCreate(%s): got err == nil, want err != nil", test.name)

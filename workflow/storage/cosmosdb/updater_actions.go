@@ -17,9 +17,12 @@ var _ storage.ActionUpdater = actionUpdater{}
 // actionUpdater implements the storage.actionUpdater interface.
 type actionUpdater struct {
 	mu *sync.RWMutex
-	client
 
-	reader reader
+	client patchItemer
+
+	pk           azcosmos.PartitionKey
+	defaultIOpts *azcosmos.ItemOptions
+
 	private.Storage
 }
 
@@ -38,14 +41,14 @@ func (u actionUpdater) UpdateAction(ctx context.Context, action *workflow.Action
 	}
 	patch.AppendSet("/attempts", attempts)
 
-	itemOpt := u.itemOptions()
+	itemOpt := itemOptions(u.defaultIOpts)
 	var ifMatchEtag *azcore.ETag = nil
 	if action.State.ETag != "" {
 		ifMatchEtag = (*azcore.ETag)(&action.State.ETag)
 	}
 	itemOpt.IfMatchEtag = ifMatchEtag
 
-	resp, err := patchItemWithRetry(ctx, u.getUpdater(), u.getPK(), action.ID.String(), patch, itemOpt)
+	resp, err := patchItemWithRetry(ctx, u.client, u.pk, action.ID.String(), patch, itemOpt)
 	if err != nil {
 		return err
 	}

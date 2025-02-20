@@ -28,7 +28,7 @@ SELECT
 	a.stateEnd,
 	a._etag
 FROM actions a
-WHERE a.type=5 AND ARRAY_CONTAINS(@ids, a.id)
+WHERE a.type=7 AND ARRAY_CONTAINS(@ids, a.id)
 ORDER BY a.pos ASC`
 
 // idsToActions converts the "actions" field in a cosmosdb document to a list of *workflow.Actions.
@@ -54,7 +54,7 @@ func (r reader) fetchActionsByIDs(ctx context.Context, ids []uuid.UUID) ([]*work
 		},
 	}
 
-	pager := r.getReader().NewQueryItemsPager(fetchActionsByID, r.getPK(), &azcosmos.QueryOptions{QueryParameters: parameters})
+	pager := r.client.NewQueryItemsPager(fetchActionsByID, r.pk, &azcosmos.QueryOptions{QueryParameters: parameters})
 	for pager.More() {
 		res, err := pager.NextPage(ctx)
 		if err != nil {
