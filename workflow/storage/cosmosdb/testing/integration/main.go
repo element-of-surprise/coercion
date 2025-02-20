@@ -62,15 +62,6 @@ func main() {
 		fatalErr(logger, "Failed to create credential: %v", err)
 	}
 
-	if *teardown == true {
-		defer func() {
-			// Teardown the cosmosdb container
-			if err := cosmosdb.Teardown(ctx, *db, *container, cred, nil); err != nil {
-				fatalErr(logger, "Failed to teardown: %v", err)
-			}
-		}()
-	}
-
 	vault, err := cosmosdb.New(ctx, *db, *container, *pk, cred, reg)
 	if err != nil {
 		fatalErr(logger, "Failed to create vault: %v", err)
@@ -78,6 +69,15 @@ func main() {
 
 	if err := vault.Create(ctx, plan); err != nil {
 		fatalErr(logger, "Failed to create plan entry: %v", err)
+	}
+
+	if *teardown == true {
+		defer func() {
+			// Teardown the cosmosdb container
+			if err := cosmosdb.Teardown(ctx, *db, *container, cred, nil); err != nil {
+				fatalErr(logger, "Failed to teardown: %v", err)
+			}
+		}()
 	}
 
 	results, err := vault.List(context.Background(), 0)
@@ -119,7 +119,6 @@ func main() {
 	}
 
 	// creator will set to zero time
-	plan.SubmitTime = zeroTime
 	if diff := pretty.Compare(plan, result); diff != "" {
 		fatalErr(logger, "mismatch in submitted and returned plan with ID %s: returned plan: -want/+got:\n%s", plan.ID, diff)
 	}
@@ -149,7 +148,6 @@ func msiCred(msi string) (azcore.TokenCredential, error) {
 		if err != nil {
 			return nil, err
 		}
-		log.Println("Authentication is using identity token.")
 		return cred, nil
 	}
 	// Otherwise, allow authentication via az login
@@ -161,7 +159,7 @@ func msiCred(msi string) (azcore.TokenCredential, error) {
 		return nil, fmt.Errorf("creating az cli credential: %s", err)
 	}
 
-	log.Println("Authentication is using az cli token.", azCred)
+	log.Println("Authentication is using az cli token.")
 	return azCred, nil
 }
 

@@ -14,6 +14,7 @@ import (
 )
 
 var zeroTime = time.Time{}
+var emptyItemOptions = &azcosmos.TransactionalBatchItemOptions{}
 
 // commitPlan commits a plan to the database. This commits the entire plan and all sub-objects.
 func (c creator) commitPlan(ctx context.Context, p *workflow.Plan) (err error) {
@@ -26,16 +27,17 @@ func (c creator) commitPlan(ctx context.Context, p *workflow.Plan) (err error) {
 		return err
 	}
 
-	batch := azcosmos.TransactionalBatch{}
+	batch := c.client.NewTransactionalBatch(c.pk)
 	for _, item := range itemContext.items {
-		batch.CreateItem(item, &azcosmos.TransactionalBatchItemOptions{})
+		batch.CreateItem(item, emptyItemOptions)
 	}
 
-	if _, err = c.client.ExecuteTransactionalBatch(ctx, batch, &azcosmos.TransactionalBatchOptions{}); err != nil {
+	_, err = c.client.ExecuteTransactionalBatch(ctx, batch, &azcosmos.TransactionalBatchOptions{EnableContentResponseOnWrite: true})
+	if err != nil {
 		return fmt.Errorf("failed to create plan through Cosmos DB API: %w", err)
 	}
 
-	// need to reread plan, because batch response does not contain ETag for each item
+	// need to re-read plan, because batch response does not contain ETag for each item.
 	result, err := c.reader.fetchPlan(ctx, p.ID)
 	if err != nil {
 		return fmt.Errorf("failed to fetch plan: %w", err)

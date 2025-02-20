@@ -13,7 +13,6 @@ import (
 	"log/slog"
 	"os"
 	"sync"
-	"testing"
 
 	"github.com/element-of-surprise/coercion/internal/private"
 	"github.com/element-of-surprise/coercion/plugins"
@@ -87,7 +86,7 @@ func WithClientOptions(opts *azcosmos.ClientOptions) Option {
 	}
 }
 
-// WithMaxThroughput sets container throughput in RU/s in autoscale mode. Default is 400.
+// WithMaxThroughput sets container throughput in RU/s in autoscale mode. Default is 10000.
 func WithMaxThroughput(maxRU int32) Option {
 	return func(r *Vault) error {
 		r.maxRU = maxRU
@@ -142,6 +141,9 @@ func New(ctx context.Context, db, container, pval string, cred azcore.TokenCrede
 	}
 	r.client = client
 	r.contClient, err = r.createContainerClient(ctx)
+	if err != nil {
+		return nil, err
+	}
 
 	mu := &sync.RWMutex{}
 
@@ -229,7 +231,7 @@ func (v *Vault) createContainer(ctx context.Context, database *azcosmos.Database
 	}
 
 	if v.maxRU == 0 {
-		v.maxRU = 400
+		v.maxRU = 10000
 	}
 	throughput := azcosmos.NewAutoscaleThroughputProperties(v.maxRU)
 	response, err := database.CreateContainer(ctx, v.props, &azcosmos.CreateContainerOptions{ThroughputProperties: &throughput})
@@ -241,10 +243,6 @@ func (v *Vault) createContainer(ctx context.Context, database *azcosmos.Database
 
 // Teardown deletes a container from a given CosmosDB database. This is for testing only.
 func Teardown(ctx context.Context, db, container string, cred azcore.TokenCredential, clientOpts *azcosmos.ClientOptions) error {
-	if !testing.Testing() {
-		panic("Teardown should only be used in tests")
-	}
-
 	endpoint := fmt.Sprintf("https://%s.documents.azure.com:443/", db)
 
 	client, err := azcosmos.NewClient(endpoint, cred, clientOpts)

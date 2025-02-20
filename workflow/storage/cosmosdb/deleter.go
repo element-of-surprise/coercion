@@ -14,7 +14,8 @@ import (
 )
 
 type deleteClient interface {
-	ExecuteTransactionalBatch(ctx context.Context, b azcosmos.TransactionalBatch, o *azcosmos.TransactionalBatchOptions)(azcosmos.TransactionalBatchResponse, error)
+	NewTransactionalBatch(partitionKey azcosmos.PartitionKey) azcosmos.TransactionalBatch
+	ExecuteTransactionalBatch(ctx context.Context, b azcosmos.TransactionalBatch, o *azcosmos.TransactionalBatchOptions) (azcosmos.TransactionalBatchResponse, error)
 }
 
 type deleterReader interface {
@@ -58,7 +59,7 @@ func (d deleter) Delete(ctx context.Context, id uuid.UUID) error {
 }
 
 func (d deleter) deletePlan(ctx context.Context, plan *workflow.Plan) error {
-	batch := azcosmos.TransactionalBatch{}
+	batch := d.client.NewTransactionalBatch(d.pk)
 
 	if err := d.deleteChecks(ctx, &batch, plan.BypassChecks); err != nil {
 		return fmt.Errorf("couldn't delete plan bypasschecks: %w", err)
