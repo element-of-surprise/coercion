@@ -15,8 +15,10 @@ var _ storage.PlanUpdater = planUpdater{}
 
 // planUpdater implements the storage.PlanUpdater interface.
 type planUpdater struct {
-	mu *sync.RWMutex
-	client
+	mu           *sync.RWMutex
+	client       patchItemer
+	pk           azcosmos.PartitionKey
+	defaultIOpts *azcosmos.ItemOptions
 
 	private.Storage
 }
@@ -32,14 +34,14 @@ func (u planUpdater) UpdatePlan(ctx context.Context, p *workflow.Plan) error {
 	patch.AppendReplace("/stateStart", p.State.Start)
 	patch.AppendReplace("/stateEnd", p.State.End)
 
-	itemOpt := u.itemOptions()
+	itemOpt := itemOptions(u.defaultIOpts)
 	var ifMatchEtag *azcore.ETag = nil
 	if p.State.ETag != "" {
 		ifMatchEtag = (*azcore.ETag)(&p.State.ETag)
 	}
 	itemOpt.IfMatchEtag = ifMatchEtag
 
-	resp, err := patchItemWithRetry(ctx, u.getUpdater(), u.getPK(), p.ID.String(), patch, itemOpt)
+	resp, err := patchItemWithRetry(ctx, u.client, u.pk, p.ID.String(), patch, itemOpt)
 	if err != nil {
 		return err
 	}

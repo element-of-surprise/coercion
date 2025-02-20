@@ -13,11 +13,23 @@ import (
 	"github.com/gostdlib/base/retry/exponential"
 )
 
-type deleter struct {
-	mu *sync.RWMutex
-	client
+type deleteClient interface {
+	NewTransactionalBatch(partitionKey azcosmos.PartitionKey) azcosmos.TransactionalBatch
+	ExecuteTransactionalBatch(ctx context.Context, b azcosmos.TransactionalBatch, o *azcosmos.TransactionalBatchOptions) (azcosmos.TransactionalBatchResponse, error)
+}
 
-	reader reader
+type deleterReader interface {
+	Read(ctx context.Context, id uuid.UUID) (*workflow.Plan, error)
+}
+
+var _ deleteClient = &azcosmos.ContainerClient{}
+
+type deleter struct {
+	mu     *sync.RWMutex
+	client deleteClient
+	pk     azcosmos.PartitionKey
+
+	reader deleterReader
 }
 
 // Delete deletes a plan with "id" from the storage.
@@ -47,24 +59,24 @@ func (d deleter) Delete(ctx context.Context, id uuid.UUID) error {
 }
 
 func (d deleter) deletePlan(ctx context.Context, plan *workflow.Plan) error {
-	batch := d.newTransactionalBatch()
+	batch := d.client.NewTransactionalBatch(d.pk)
 
-	if err := d.deleteChecks(ctx, batch, plan.BypassChecks); err != nil {
+	if err := d.deleteChecks(ctx, &batch, plan.BypassChecks); err != nil {
 		return fmt.Errorf("couldn't delete plan bypasschecks: %w", err)
 	}
-	if err := d.deleteChecks(ctx, batch, plan.PreChecks); err != nil {
+	if err := d.deleteChecks(ctx, &batch, plan.PreChecks); err != nil {
 		return fmt.Errorf("couldn't delete plan prechecks: %w", err)
 	}
-	if err := d.deleteChecks(ctx, batch, plan.PostChecks); err != nil {
+	if err := d.deleteChecks(ctx, &batch, plan.PostChecks); err != nil {
 		return fmt.Errorf("couldn't delete plan postchecks: %w", err)
 	}
-	if err := d.deleteChecks(ctx, batch, plan.ContChecks); err != nil {
+	if err := d.deleteChecks(ctx, &batch, plan.ContChecks); err != nil {
 		return fmt.Errorf("couldn't delete plan contchecks: %w", err)
 	}
-	if err := d.deleteChecks(ctx, batch, plan.DeferredChecks); err != nil {
+	if err := d.deleteChecks(ctx, &batch, plan.DeferredChecks); err != nil {
 		return fmt.Errorf("couldn't delete plan deferredchecks: %w", err)
 	}
-	if err := d.deleteBlocks(ctx, batch, plan.Blocks); err != nil {
+	if err := d.deleteBlocks(ctx, &batch, plan.Blocks); err != nil {
 		return fmt.Errorf("couldn't delete blocks: %w", err)
 	}
 
@@ -76,16 +88,15 @@ func (d deleter) deletePlan(ctx context.Context, plan *workflow.Plan) error {
 		IfMatchETag: ifMatchEtag,
 	}
 	batch.DeleteItem(plan.ID.String(), itemOpt)
-	d.setBatch(batch) // for testing
 
-	if _, err := d.executeTransactionalBatch(ctx, batch, nil); err != nil {
+	if _, err := d.client.ExecuteTransactionalBatch(ctx, batch, nil); err != nil {
 		return fmt.Errorf("failed to delete plan through Cosmos DB API: %w", err)
 	}
 
 	return nil
 }
 
-func (d deleter) deleteBlocks(ctx context.Context, batch transactionalBatch, blocks []*workflow.Block) error {
+func (d deleter) deleteBlocks(ctx context.Context, batch *azcosmos.TransactionalBatch, blocks []*workflow.Block) error {
 	if len(blocks) == 0 {
 		return nil
 	}
@@ -125,7 +136,7 @@ func (d deleter) deleteBlocks(ctx context.Context, batch transactionalBatch, blo
 	return nil
 }
 
-func (d deleter) deleteChecks(ctx context.Context, batch transactionalBatch, checks *workflow.Checks) error {
+func (d deleter) deleteChecks(ctx context.Context, batch *azcosmos.TransactionalBatch, checks *workflow.Checks) error {
 	if checks == nil {
 		return nil
 	}
@@ -147,7 +158,7 @@ func (d deleter) deleteChecks(ctx context.Context, batch transactionalBatch, che
 	return nil
 }
 
-func (d deleter) deleteSeqs(ctx context.Context, batch transactionalBatch, seqs []*workflow.Sequence) error {
+func (d deleter) deleteSeqs(ctx context.Context, batch *azcosmos.TransactionalBatch, seqs []*workflow.Sequence) error {
 	if len(seqs) == 0 {
 		return nil
 	}
@@ -172,7 +183,7 @@ func (d deleter) deleteSeqs(ctx context.Context, batch transactionalBatch, seqs 
 	return nil
 }
 
-func (d deleter) deleteActions(ctx context.Context, batch transactionalBatch, actions []*workflow.Action) error {
+func (d deleter) deleteActions(ctx context.Context, batch *azcosmos.TransactionalBatch, actions []*workflow.Action) error {
 	if len(actions) == 0 {
 		return nil
 	}

@@ -15,8 +15,11 @@ var _ storage.ChecksUpdater = checksUpdater{}
 
 // checksUpdater implements the storage.checksUpdater interface.
 type checksUpdater struct {
-	mu *sync.RWMutex
-	client
+	mu     *sync.RWMutex
+	client patchItemer
+
+	pk           azcosmos.PartitionKey
+	defaultIOpts *azcosmos.ItemOptions
 
 	private.Storage
 }
@@ -31,14 +34,14 @@ func (u checksUpdater) UpdateChecks(ctx context.Context, check *workflow.Checks)
 	patch.AppendReplace("/stateStart", check.State.Start)
 	patch.AppendReplace("/stateEnd", check.State.End)
 
-	itemOpt := u.itemOptions()
+	itemOpt := itemOptions(u.defaultIOpts)
 	var ifMatchEtag *azcore.ETag = nil
 	if check.State.ETag != "" {
 		ifMatchEtag = (*azcore.ETag)(&check.State.ETag)
 	}
 	itemOpt.IfMatchEtag = ifMatchEtag
 
-	resp, err := patchItemWithRetry(ctx, u.getUpdater(), u.getPK(), check.ID.String(), patch, itemOpt)
+	resp, err := patchItemWithRetry(ctx, u.client, u.pk, check.ID.String(), patch, itemOpt)
 	if err != nil {
 		return err
 	}
