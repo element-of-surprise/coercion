@@ -3,7 +3,6 @@ package cosmosdb
 import (
 	"context"
 	"fmt"
-	"log"
 	"strings"
 	"sync"
 
@@ -60,9 +59,6 @@ func (r reader) Exists(ctx context.Context, id uuid.UUID) (bool, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	log.Println(r.pk)
-	log.Println(id)
-	log.Println(r.defaultIOpts)
 	_, err := r.client.ReadItem(ctx, r.pk, id.String(), r.defaultIOpts)
 	if err != nil {
 		if isNotFound(err) {
