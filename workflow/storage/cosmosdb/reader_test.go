@@ -8,10 +8,10 @@ import (
 
 	"github.com/element-of-surprise/coercion/workflow"
 	"github.com/element-of-surprise/coercion/workflow/storage"
+	"github.com/kylelemons/godebug/pretty"
 
 	"github.com/Azure/azure-sdk-for-go/sdk/data/azcosmos"
 	"github.com/google/uuid"
-	"github.com/kylelemons/godebug/pretty"
 )
 
 func TestBuildSearchQuery(t *testing.T) {
@@ -207,7 +207,7 @@ func TestExists(t *testing.T) {
 	store := newFakeStorage(nil)
 
 	tp := NewTestPlan()
-	if err := store.WritePlan(context.Background(), "somekey", tp); err != nil {
+	if err := store.WritePlan(context.Background(), tp); err != nil {
 		panic(err)
 	}
 
@@ -271,7 +271,7 @@ func TestRead(t *testing.T) {
 	store := newFakeStorage(testReg)
 
 	tp := NewTestPlan()
-	if err := store.WritePlan(context.Background(), "somekey", tp); err != nil {
+	if err := store.WritePlan(context.Background(), tp); err != nil {
 		panic(err)
 	}
 
@@ -310,7 +310,7 @@ func TestRead(t *testing.T) {
 		case err != nil:
 			continue
 		}
-		if diff := pretty.Compare(tp, result); diff != "" {
+		if diff := prettyConfig.Compare(tp, result); diff != "" {
 			t.Errorf("TestRead(%s): returned params: -want/+got:\n%s", test.name, diff)
 			continue
 		}

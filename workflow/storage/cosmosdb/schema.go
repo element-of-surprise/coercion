@@ -9,9 +9,13 @@ import (
 )
 
 type plansEntry struct {
-	PK             string                 `json:"pk,omitempty"`
-	Type           workflow.ObjectType    `json:"type,omitempty"`
-	ID             uuid.UUID              `json:"id,omitempty"`
+	PartitionKey string              `json:"partitionKey"`
+	Type         workflow.ObjectType `json:"type,omitempty"`
+	ID           uuid.UUID           `json:"id,omitempty"`
+	// PlanID is the unique identifier for the plan. This is a duplicate of ID. All other items have ID and PlanID.
+	// While a plan technically doesn't need both, this fits well into the model. While it can be worked around,
+	// it causes all kinds of sublte bugs. By having both it makes everything easier.
+	PlanID         uuid.UUID              `json:"planID,omitempty"`
 	GroupID        uuid.UUID              `json:"groupID,omitempty"`
 	Name           string                 `json:"name,omitempty"`
 	Descr          string                 `json:"descr,omitempty"`
@@ -32,7 +36,7 @@ type plansEntry struct {
 }
 
 type blocksEntry struct {
-	PK                string              `json:"pk,omitempty"`
+	PartitionKey      string              `json:"partitionKey"`
 	Type              workflow.ObjectType `json:"type,omitempty"`
 	ID                uuid.UUID           `json:"id,omitempty"`
 	Key               uuid.UUID           `json:"key,omitempty"`
@@ -58,54 +62,54 @@ type blocksEntry struct {
 }
 
 type checksEntry struct {
-	PK          string              `json:"pk,omitempty"`
-	Type        workflow.ObjectType `json:"type,omitempty"`
-	ID          uuid.UUID           `json:"id,omitempty"`
-	Key         uuid.UUID           `json:"key,omitempty"`
-	PlanID      uuid.UUID           `json:"planID,omitempty"`
-	Actions     []uuid.UUID         `json:"actions,omitempty"`
-	Delay       time.Duration       `json:"delay,omitempty"`
-	StateStatus workflow.Status     `json:"stateStatus,omitempty"`
-	StateStart  time.Time           `json:"stateStart,omitempty"`
-	StateEnd    time.Time           `json:"stateEnd,omitempty"`
+	PartitionKey string              `json:"partitionKey"`
+	Type         workflow.ObjectType `json:"type,omitempty"`
+	ID           uuid.UUID           `json:"id,omitempty"`
+	Key          uuid.UUID           `json:"key,omitempty"`
+	PlanID       uuid.UUID           `json:"planID,omitempty"`
+	Actions      []uuid.UUID         `json:"actions,omitempty"`
+	Delay        time.Duration       `json:"delay,omitempty"`
+	StateStatus  workflow.Status     `json:"stateStatus,omitempty"`
+	StateStart   time.Time           `json:"stateStart,omitempty"`
+	StateEnd     time.Time           `json:"stateEnd,omitempty"`
 
 	ETag azcore.ETag `json:"_etag,omitempty"`
 }
 
 type sequencesEntry struct {
-	PK          string              `json:"pk,omitempty"`
-	Type        workflow.ObjectType `json:"type,omitempty"`
-	ID          uuid.UUID           `json:"id,omitempty"`
-	Key         uuid.UUID           `json:"key,omitempty"`
-	PlanID      uuid.UUID           `json:"planID,omitempty"`
-	Name        string              `json:"name,omitempty"`
-	Descr       string              `json:"descr,omitempty"`
-	Pos         int                 `json:"pos,omitempty"`
-	Actions     []uuid.UUID         `json:"actions,omitempty"`
-	StateStatus workflow.Status     `json:"stateStatus,omitempty"`
-	StateStart  time.Time           `json:"stateStart,omitempty"`
-	StateEnd    time.Time           `json:"stateEnd,omitempty"`
+	PartitionKey string              `json:"partitionKey"`
+	Type         workflow.ObjectType `json:"type,omitempty"`
+	ID           uuid.UUID           `json:"id,omitempty"`
+	Key          uuid.UUID           `json:"key,omitempty"`
+	PlanID       uuid.UUID           `json:"planID,omitempty"`
+	Name         string              `json:"name,omitempty"`
+	Descr        string              `json:"descr,omitempty"`
+	Pos          int                 `json:"pos,omitempty"`
+	Actions      []uuid.UUID         `json:"actions,omitempty"`
+	StateStatus  workflow.Status     `json:"stateStatus,omitempty"`
+	StateStart   time.Time           `json:"stateStart,omitempty"`
+	StateEnd     time.Time           `json:"stateEnd,omitempty"`
 
 	ETag azcore.ETag `json:"_etag,omitempty"`
 }
 
 type actionsEntry struct {
-	PK          string              `json:"pk,omitempty"`
-	Type        workflow.ObjectType `json:"type,omitempty"`
-	ID          uuid.UUID           `json:"id,omitempty"`
-	Key         uuid.UUID           `json:"key,omitempty"`
-	PlanID      uuid.UUID           `json:"planID,omitempty"`
-	Name        string              `json:"name,omitempty"`
-	Descr       string              `json:"descr,omitempty"`
-	Pos         int                 `json:"pos,omitempty"`
-	Plugin      string              `json:"plugin,omitempty"`
-	Timeout     time.Duration       `json:"timeout,omitempty"`
-	Retries     int                 `json:"retries,omitempty"`
-	Req         []byte              `json:"req,omitempty"`
-	Attempts    []byte              `json:"attempts,omitempty"`
-	StateStatus workflow.Status     `json:"stateStatus,omitempty"`
-	StateStart  time.Time           `json:"stateStart,omitempty"`
-	StateEnd    time.Time           `json:"stateEnd,omitempty"`
+	PartitionKey string              `json:"partitionKey"`
+	Type         workflow.ObjectType `json:"type,omitempty"`
+	ID           uuid.UUID           `json:"id,omitempty"`
+	Key          uuid.UUID           `json:"key,omitempty"`
+	PlanID       uuid.UUID           `json:"planID,omitempty"`
+	Name         string              `json:"name,omitempty"`
+	Descr        string              `json:"descr,omitempty"`
+	Pos          int                 `json:"pos,omitempty"`
+	Plugin       string              `json:"plugin,omitempty"`
+	Timeout      time.Duration       `json:"timeout,omitempty"`
+	Retries      int                 `json:"retries,omitempty"`
+	Req          []byte              `json:"req,omitempty"`
+	Attempts     []byte              `json:"attempts,omitempty"`
+	StateStatus  workflow.Status     `json:"stateStatus,omitempty"`
+	StateStart   time.Time           `json:"stateStart,omitempty"`
+	StateEnd     time.Time           `json:"stateEnd,omitempty"`
 
 	ETag azcore.ETag `json:"_etag,omitempty"`
 }

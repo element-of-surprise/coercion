@@ -7,7 +7,6 @@ import (
 
 	"github.com/Azure/azure-sdk-for-go/sdk/data/azcosmos"
 	"github.com/google/uuid"
-	"github.com/kylelemons/godebug/pretty"
 
 	"github.com/element-of-surprise/coercion/workflow"
 	"github.com/element-of-surprise/coercion/workflow/storage"
@@ -26,7 +25,6 @@ func TestStorageItemCRUD(t *testing.T) {
 
 	mu := &sync.RWMutex{}
 	container := "container"
-	pk := azcosmos.NewPartitionKeyString("who cares")
 	defaultIOpts := &azcosmos.ItemOptions{}
 	reader := reader{
 		mu:           mu,
@@ -36,21 +34,18 @@ func TestStorageItemCRUD(t *testing.T) {
 		reg:          testReg,
 	}
 
-	newUpdater(mu, store, pk, defaultIOpts)
+	newUpdater(mu, store, defaultIOpts)
 	v := &Vault{
 		reader: reader,
 		creator: creator{
 			mu:     mu,
 			client: store,
-			pkStr:  "test-partition",
-			pk:     pk,
 			reader: reader,
 		},
-		updater: newUpdater(mu, store, pk, defaultIOpts),
+		updater: newUpdater(mu, store, defaultIOpts),
 		deleter: deleter{
 			mu:     mu,
 			client: store,
-			pk:     pk,
 			reader: reader,
 		},
 	}
@@ -66,7 +61,7 @@ func TestStorageItemCRUD(t *testing.T) {
 		if err != nil {
 			panic(err)
 		}
-		if diff := pretty.Compare(p, gotPlan); diff != "" {
+		if diff := prettyConfig.Compare(p, gotPlan); diff != "" {
 			t.Fatalf("TestStorageItemCRUD(Create(%d): -want/+got:\n%s", i, diff)
 		}
 	}
@@ -93,7 +88,7 @@ func TestStorageItemCRUD(t *testing.T) {
 			t.Fatalf("expected %s, got %s", p.State.Status, result.State.Status)
 		}
 
-		if diff := pretty.Compare(p, result); diff != "" {
+		if diff := prettyConfig.Compare(p, result); diff != "" {
 			t.Errorf("TestStorageItemCRUD(%s): returned plan: -want/+got:\n%s", p.ID, diff)
 		}
 	}
@@ -152,7 +147,7 @@ func TestStorageItemCRUD(t *testing.T) {
 	if err != nil {
 		t.Fatalf("TestStorageItemCRUD(read back changed object): error reading plan back")
 	}
-	if diff := pretty.Compare(plan0, got); diff != "" {
+	if diff := prettyConfig.Compare(plan0, got); diff != "" {
 		t.Fatalf("TestStorageItemCRUD(read back changed object): -want/+got:\n%s", diff)
 	}
 

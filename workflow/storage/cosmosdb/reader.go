@@ -36,7 +36,6 @@ type reader struct {
 	mu           *sync.RWMutex
 	container    string
 	client       readerClient // *azcosmos.ContainerClient
-	pk           azcosmos.PartitionKey
 	defaultIOpts *azcosmos.ItemOptions
 
 	reg *registry.Register
@@ -59,7 +58,9 @@ func (r reader) Exists(ctx context.Context, id uuid.UUID) (bool, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	_, err := r.client.ReadItem(ctx, r.pk, id.String(), r.defaultIOpts)
+	idStr := id.String()
+
+	_, err := r.client.ReadItem(ctx, key(id), idStr, r.defaultIOpts)
 	if err != nil {
 		if isNotFound(err) {
 			return false, nil
@@ -103,7 +104,7 @@ func (r reader) Search(ctx context.Context, filters storage.Filters) (chan stora
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	pager := r.client.NewQueryItemsPager(q, r.pk, &azcosmos.QueryOptions{QueryParameters: parameters})
+	pager := r.client.NewQueryItemsPager(q, key("doesntmatterwhatIput"), &azcosmos.QueryOptions{QueryParameters: parameters})
 	results := make(chan storage.Stream[storage.ListResult], 1)
 	go func() {
 		defer close(results)
@@ -210,7 +211,7 @@ func (r reader) List(ctx context.Context, limit int) (chan storage.Stream[storag
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	pager := r.client.NewQueryItemsPager(q, r.pk, &azcosmos.QueryOptions{QueryParameters: []azcosmos.QueryParameter{}})
+	pager := r.client.NewQueryItemsPager(q, azcosmos.NullPartitionKey, &azcosmos.QueryOptions{QueryParameters: []azcosmos.QueryParameter{}})
 	results := make(chan storage.Stream[storage.ListResult], 1)
 	go func() {
 		defer close(results)
@@ -251,7 +252,7 @@ func (r reader) listResultsFunc(item []byte) (storage.ListResult, error) {
 	}
 
 	result := storage.ListResult{
-		ID:         resp.ID,
+		ID:         resp.PlanID,
 		GroupID:    resp.GroupID,
 		Name:       resp.Name,
 		Descr:      resp.Descr,

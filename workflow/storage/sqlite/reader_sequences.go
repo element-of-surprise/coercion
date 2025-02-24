@@ -68,6 +68,13 @@ func (p reader) sequenceRowToSequence(ctx context.Context, conn *sqlite.Conn, st
 	if err != nil {
 		return nil, fmt.Errorf("couldn't read block id: %w", err)
 	}
+
+	planID, err := uuid.Parse(stmt.GetText("plan_id"))
+	if err != nil {
+		return nil, fmt.Errorf("couldn't parse action id: %w", err)
+	}
+	s.SetPlanID(planID)
+
 	k := stmt.GetText("key")
 	if k != "" {
 		s.Key, err = uuid.Parse(k)

@@ -29,8 +29,6 @@ type creatorReader interface {
 type creator struct {
 	mu     *sync.RWMutex
 	client creatorClient
-	pkStr  string
-	pk     azcosmos.PartitionKey
 	reader creatorReader
 
 	private.Storage

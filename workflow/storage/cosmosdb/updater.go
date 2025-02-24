@@ -32,37 +32,32 @@ type updater struct {
 	private.Storage
 }
 
-func newUpdater(mu *sync.RWMutex, client patchItemer, pk azcosmos.PartitionKey, defaultIOpts *azcosmos.ItemOptions) updater {
+func newUpdater(mu *sync.RWMutex, client patchItemer, defaultIOpts *azcosmos.ItemOptions) updater {
 	uo := updater{}
 
 	uo.planUpdater = planUpdater{
 		mu:           mu,
 		client:       client,
-		pk:           pk,
 		defaultIOpts: defaultIOpts,
 	}
 	uo.checksUpdater = checksUpdater{
 		mu:           mu,
 		client:       client,
-		pk:           pk,
 		defaultIOpts: defaultIOpts,
 	}
 	uo.blockUpdater = blockUpdater{
 		mu:           mu,
 		client:       client,
-		pk:           pk,
 		defaultIOpts: defaultIOpts,
 	}
 	uo.sequenceUpdater = sequenceUpdater{
 		mu:           mu,
 		client:       client,
-		pk:           pk,
 		defaultIOpts: defaultIOpts,
 	}
 	uo.actionUpdater = actionUpdater{
 		mu:           mu,
 		client:       client,
-		pk:           pk,
 		defaultIOpts: defaultIOpts,
 	}
 	return uo

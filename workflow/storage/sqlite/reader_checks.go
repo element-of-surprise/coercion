@@ -64,10 +64,18 @@ func (p reader) fetchChecksByID(ctx context.Context, conn *sqlite.Conn, id uuid.
 func (p reader) checksRowToChecks(ctx context.Context, conn *sqlite.Conn, stmt *sqlite.Stmt) (*workflow.Checks, error) {
 	var err error
 	c := &workflow.Checks{}
+
 	c.ID, err = uuid.Parse(stmt.GetText("id"))
 	if err != nil {
 		return nil, fmt.Errorf("checksRowToChecks: couldn't convert ID to UUID: %w", err)
 	}
+
+	planID, err := uuid.Parse(stmt.GetText("plan_id"))
+	if err != nil {
+		return nil, fmt.Errorf("couldn't parse action id: %w", err)
+	}
+	c.SetPlanID(planID)
+
 	k := stmt.GetText("key")
 	if k != "" {
 		c.Key, err = uuid.Parse(k)

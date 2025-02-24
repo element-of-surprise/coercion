@@ -27,7 +27,6 @@ var _ deleteClient = &azcosmos.ContainerClient{}
 type deleter struct {
 	mu     *sync.RWMutex
 	client deleteClient
-	pk     azcosmos.PartitionKey
 
 	reader deleterReader
 }
@@ -59,7 +58,7 @@ func (d deleter) Delete(ctx context.Context, id uuid.UUID) error {
 }
 
 func (d deleter) deletePlan(ctx context.Context, plan *workflow.Plan) error {
-	batch := d.client.NewTransactionalBatch(d.pk)
+	batch := d.client.NewTransactionalBatch(key(plan))
 
 	if err := d.deleteChecks(ctx, &batch, plan.BypassChecks); err != nil {
 		return fmt.Errorf("couldn't delete plan bypasschecks: %w", err)
