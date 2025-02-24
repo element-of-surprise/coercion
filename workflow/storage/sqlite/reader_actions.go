@@ -64,10 +64,18 @@ var emptyAttemptsJSON = []byte(`[]`)
 func (r reader) actionRowToAction(ctx context.Context, stmt *sqlite.Stmt) (*workflow.Action, error) {
 	var err error
 	a := &workflow.Action{}
+
 	a.ID, err = uuid.Parse(stmt.GetText("id"))
 	if err != nil {
 		return nil, fmt.Errorf("couldn't parse action id: %w", err)
 	}
+
+	planID, err := uuid.Parse(stmt.GetText("plan_id"))
+	if err != nil {
+		return nil, fmt.Errorf("couldn't parse action id: %w", err)
+	}
+	a.SetPlanID(planID)
+
 	k := stmt.GetText("key")
 	if k != "" {
 		a.Key, err = uuid.Parse(k)

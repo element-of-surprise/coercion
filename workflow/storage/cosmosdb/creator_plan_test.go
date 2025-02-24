@@ -4,7 +4,6 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
-	"github.com/kylelemons/godebug/pretty"
 
 	"github.com/element-of-surprise/coercion/workflow"
 )
@@ -81,7 +80,7 @@ func TestObjsToIDs(t *testing.T) {
 		case err != nil:
 			continue
 		}
-		if diff := pretty.Compare(test.want, ids); diff != "" {
+		if diff := prettyConfig.Compare(test.want, ids); diff != "" {
 			t.Errorf("TestObjsToIDs(%s): returned ids: -want/+got:\n%s", test.name, diff)
 		}
 	}

@@ -17,8 +17,6 @@ import (
 func TestDelete(t *testing.T) {
 	t.Parallel()
 
-	pkStr := "test-partition"
-	pk := azcosmos.NewPartitionKeyString(pkStr)
 	goodPlan := NewTestPlan()
 
 	planWithETag := NewTestPlan()
@@ -83,7 +81,7 @@ func TestDelete(t *testing.T) {
 
 		store := newFakeStorage(testReg)
 		if test.plan != nil {
-			if err := store.WritePlan(ctx, pkStr, test.plan); err != nil {
+			if err := store.WritePlan(ctx, test.plan); err != nil {
 				panic(err)
 			}
 		}
@@ -94,13 +92,11 @@ func TestDelete(t *testing.T) {
 		v := &Vault{
 			deleter: deleter{
 				mu:     mu,
-				pk:     pk,
 				client: store,
 				reader: reader{
 					mu:           mu,
 					container:    "container",
 					client:       store,
-					pk:           pk,
 					defaultIOpts: &azcosmos.ItemOptions{},
 					reg:          testReg,
 				},

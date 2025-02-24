@@ -261,6 +261,19 @@ type Checks struct {
 
 	// State represents the internal state of the object. Should not be set by the user.
 	State *State
+
+	planID uuid.UUID
+}
+
+// GetPlanID returns the Plan ID that the object belongs to.
+func (c *Checks) GetPlanID() uuid.UUID {
+	return c.planID
+}
+
+// SetPlanID sets the Plan ID that the object belongs to.
+// This should not be used by the user.
+func (c *Checks) SetPlanID(u uuid.UUID) {
+	c.planID = u
 }
 
 // GetID is a getter for the ID field.
@@ -378,6 +391,8 @@ type Block struct {
 
 	// State represents settings that should not be set by the user, but users can query.
 	State *State
+
+	planID uuid.UUID
 }
 
 // GetID is a getter for the ID field.
@@ -392,6 +407,17 @@ func (b *Block) GetID() uuid.UUID {
 // This should not be used by the user.
 func (b *Block) SetID(id uuid.UUID) {
 	b.ID = id
+}
+
+// GetPlanID returns the Plan ID that the object belongs to.
+func (b *Block) GetPlanID() uuid.UUID {
+	return b.planID
+}
+
+// SetPlanID sets the Plan ID that the object belongs to.
+// This should not be used by the user.
+func (b *Block) SetPlanID(u uuid.UUID) {
+	b.planID = u
 }
 
 // GetState is a getter for the State settings.
@@ -476,6 +502,8 @@ type Sequence struct {
 
 	// State represents settings that should not be set by the user, but users can query.
 	State *State
+
+	planID uuid.UUID
 }
 
 // GetID is a getter for the ID field.
@@ -499,6 +527,17 @@ func (s *Sequence) GetState() *State {
 // SetState is a setter for the State settings.
 func (s *Sequence) SetState(state *State) {
 	s.State = state
+}
+
+// GetPlanID returns the Plan ID that the object belongs to.
+func (s *Sequence) GetPlanID() uuid.UUID {
+	return s.planID
+}
+
+// SetPlanID sets the Plan ID that the object belongs to.
+// This should not be used by the user.
+func (s *Sequence) SetPlanID(u uuid.UUID) {
+	s.planID = u
 }
 
 // Type implements the Object.Type().
@@ -592,6 +631,8 @@ type Action struct {
 	// State represents settings that should not be set by the user, but users can query.
 	State *State
 
+	planID uuid.UUID
+
 	register *registry.Register `json:"-"`
 }
 
@@ -617,6 +658,17 @@ func (a *Action) GetState() *State {
 // SetState is a setter for the State settings.
 func (a *Action) SetState(state *State) {
 	a.State = state
+}
+
+// GetPlanID returns the Plan ID that the object belongs to.
+func (a *Action) GetPlanID() uuid.UUID {
+	return a.planID
+}
+
+// SetPlanID sets the Plan ID that the object belongs to.
+// This should not be used by the user.
+func (a *Action) SetPlanID(u uuid.UUID) {
+	a.planID = u
 }
 
 // Type implements the Object.Type().
