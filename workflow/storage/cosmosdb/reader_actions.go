@@ -13,23 +13,23 @@ import (
 
 const fetchActionsByID = `
 SELECT
-	a.id,
-	a.key,
-	a.planID,
-	a.name,
-	a.descr,
-	a.plugin,
-	a.timeout,
-	a.retries,
-	a.req,
-	a.attempts,
-	a.stateStatus,
-	a.stateStart,
-	a.stateEnd,
-	a._etag
-FROM actions a
-WHERE a.type=7 AND ARRAY_CONTAINS(@ids, a.id)
-ORDER BY a.pos ASC`
+	c.id,
+	c.key,
+	c.planID,
+	c.name,
+	c.descr,
+	c.plugin,
+	c.timeout,
+	c.retries,
+	c.req,
+	c.attempts,
+	c.stateStatus,
+	c.stateStart,
+	c.stateEnd,
+	c._etag
+FROM c
+WHERE c.type=@objectType AND ARRAY_CONTAINS(@ids, c.id)
+ORDER BY c.pos ASC`
 
 // idsToActions converts the "actions" field in a cosmosdb document to a list of *workflow.Actions.
 func (r reader) idsToActions(ctx context.Context, planID azcosmos.PartitionKey, actionIDs []uuid.UUID) ([]*workflow.Action, error) {
@@ -51,6 +51,10 @@ func (r reader) fetchActionsByIDs(ctx context.Context, planID azcosmos.Partition
 		{
 			Name:  "@ids",
 			Value: ids,
+		},
+		{
+			Name:  "@objectType",
+			Value: int64(workflow.OTAction),
 		},
 	}
 
