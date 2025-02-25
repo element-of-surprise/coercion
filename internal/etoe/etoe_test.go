@@ -189,7 +189,7 @@ func TestEtoE(t *testing.T) {
 		vault, err = sqlite.New(ctx, "", reg, sqlite.WithInMemory())
 	case "cosmosdb":
 		logger.Info(fmt.Sprintf("TestEtoE: Using cosmosdb: %s, %s, %s", *db, *container, *pk))
-		vault, err = cosmosdb.New(ctx, *db, *container, *pk, cred, reg)
+		vault, err = cosmosdb.New(ctx, *db, *container, cred, reg)
 	default:
 		panic(fmt.Errorf("TestEtoE: unknown storage vault type: %s", *vaultType))
 	}
@@ -405,7 +405,7 @@ func TestBypassPlan(t *testing.T) {
 		vault, err = sqlite.New(ctx, "", reg, sqlite.WithInMemory())
 	case "cosmosdb":
 		logger.Info(fmt.Sprintf("TestBypassPlan: Using cosmosdb: %s, %s, %s", *db, *container, *pk))
-		vault, err = cosmosdb.New(ctx, *db, *container, *pk, cred, reg)
+		vault, err = cosmosdb.New(ctx, *db, *container, cred, reg)
 	default:
 		panic(fmt.Errorf("TestBypassPlan: unknown storage vault type: %s", *vaultType))
 	}
@@ -588,7 +588,7 @@ func TestBypassBlock(t *testing.T) {
 		vault, err = sqlite.New(ctx, "", reg, sqlite.WithInMemory())
 	case "cosmosdb":
 		logger.Info(fmt.Sprintf("TestBypassBlock: Using cosmosdb: %s, %s, %s", *db, *container, *pk))
-		vault, err = cosmosdb.New(ctx, *db, *container, *pk, cred, reg)
+		vault, err = cosmosdb.New(ctx, *db, *container, cred, reg)
 	default:
 		panic(fmt.Errorf("TestBypassBlock: unknown storage vault type: %s", *vaultType))
 	}
