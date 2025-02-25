@@ -31,7 +31,6 @@ func (c creator) commitPlan(ctx context.Context, p *workflow.Plan) (err error) {
 	}
 
 	batch := c.client.NewTransactionalBatch(key(p))
-	//batch := c.client.NewTransactionalBatch(azcosmos.NewPartitionKeyString(p.ID.String()))
 	for _, item := range itemContext.items {
 		batch.CreateItem(item, emptyItemOptions)
 	}

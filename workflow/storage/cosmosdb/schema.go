@@ -14,7 +14,7 @@ type plansEntry struct {
 	ID           uuid.UUID           `json:"id,omitempty"`
 	// PlanID is the unique identifier for the plan. This is a duplicate of ID. All other items have ID and PlanID.
 	// While a plan technically doesn't need both, this fits well into the model. While it can be worked around,
-	// it causes all kinds of sublte bugs. By having both it makes everything easier.
+	// it causes all kinds of subtle bugs. By having both it makes everything easier.
 	PlanID         uuid.UUID              `json:"planID,omitempty"`
 	GroupID        uuid.UUID              `json:"groupID,omitempty"`
 	Name           string                 `json:"name,omitempty"`

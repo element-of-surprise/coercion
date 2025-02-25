@@ -94,33 +94,31 @@ func TestCreate(t *testing.T) {
 			plan:    goodPlan,
 			wantErr: false,
 		},
-		/*
-			{
-				name:    "Success and etag set",
-				plan:    planWithETag,
-				wantErr: false,
-			},
-			{
-				name:    "Success: not all checks defined",
-				plan:    planWithNilChecks,
-				wantErr: false,
-			},
-			{
-				name:    "Error: nil block",
-				plan:    planWithNilBlock,
-				wantErr: true,
-			},
-			{
-				name:    "Error: nil blocks",
-				plan:    planWithNilBlocks,
-				wantErr: true,
-			},
-			{
-				name:    "Error: nil block ID",
-				plan:    planWithBadIDs,
-				wantErr: true,
-			},
-		*/
+		{
+			name:    "Success and etag set",
+			plan:    planWithETag,
+			wantErr: false,
+		},
+		{
+			name:    "Success: not all checks defined",
+			plan:    planWithNilChecks,
+			wantErr: false,
+		},
+		{
+			name:    "Error: nil block",
+			plan:    planWithNilBlock,
+			wantErr: true,
+		},
+		{
+			name:    "Error: nil blocks",
+			plan:    planWithNilBlocks,
+			wantErr: true,
+		},
+		{
+			name:    "Error: nil block ID",
+			plan:    planWithBadIDs,
+			wantErr: true,
+		},
 		// could test with bad plan data, like invalid list of actions, attempts encoding issue, etc.,
 		// to make sure it causes the entire plan creation to fail.
 	}
