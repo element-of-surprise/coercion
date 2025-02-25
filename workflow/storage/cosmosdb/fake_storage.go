@@ -319,13 +319,21 @@ func (f *fakeStorage) NewQueryItemsPager(query string, pk azcosmos.PartitionKey,
 		})
 	}
 
+	if o.QueryParameters == nil {
+		panic("NewQueryItemsPager: query parameters must exist")
+	}
 	var queryType workflow.ObjectType
-	switch {
-	case strings.Contains(query, fmt.Sprintf("a.type=%d", workflow.OTAction)):
-		queryType = workflow.OTAction
-	case strings.Contains(query, fmt.Sprintf("p.type=%d", workflow.OTPlan)):
-		queryType = workflow.OTPlan
-	default:
+	for _, p := range o.QueryParameters {
+		if p.Name == "@objectType" {
+			switch p.Value.(int64) {
+			case int64(workflow.OTAction):
+				queryType = workflow.OTAction
+			case int64(workflow.OTPlan):
+				queryType = workflow.OTPlan
+			}
+		}
+	}
+	if queryType == workflow.OTUnknown {
 		panic(fmt.Sprintf("NewQueryItemsPager: called on query(%s) we don't support)", query))
 	}
 
