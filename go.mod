@@ -18,6 +18,7 @@ require (
 	github.com/gostdlib/base v0.0.0-20250212054550-d6c7d84cbae2
 	github.com/inancgumus/screen v0.0.0-20190314163918-06e984b86ed3
 	github.com/kylelemons/godebug v1.1.0
+	github.com/microsoft/gocosmos v1.1.1
 	github.com/rodaine/table v1.3.0
 	github.com/spf13/afero v1.12.0
 	github.com/spf13/viper v1.19.0
@@ -36,6 +37,12 @@ require (
 	github.com/ProtonMail/go-crypto v1.1.5 // indirect
 	github.com/andybalholm/brotli v1.1.1 // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
+	github.com/btnguyen2k/consu/checksum v1.1.0 // indirect
+	github.com/btnguyen2k/consu/g18 v0.1.0 // indirect
+	github.com/btnguyen2k/consu/gjrc v0.2.1 // indirect
+	github.com/btnguyen2k/consu/olaf v0.1.3 // indirect
+	github.com/btnguyen2k/consu/reddo v0.1.8 // indirect
+	github.com/btnguyen2k/consu/semita v0.1.5 // indirect
 	github.com/cenkalti/backoff/v4 v4.3.0 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/cloudflare/circl v1.6.0 // indirect

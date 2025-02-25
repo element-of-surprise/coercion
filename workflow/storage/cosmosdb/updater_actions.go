@@ -20,7 +20,6 @@ type actionUpdater struct {
 
 	client patchItemer
 
-	pk           azcosmos.PartitionKey
 	defaultIOpts *azcosmos.ItemOptions
 
 	private.Storage
@@ -48,7 +47,9 @@ func (u actionUpdater) UpdateAction(ctx context.Context, action *workflow.Action
 	}
 	itemOpt.IfMatchEtag = ifMatchEtag
 
-	resp, err := patchItemWithRetry(ctx, u.client, u.pk, action.ID.String(), patch, itemOpt)
+	k := key(action.GetPlanID())
+
+	resp, err := patchItemWithRetry(ctx, u.client, k, action.ID.String(), patch, itemOpt)
 	if err != nil {
 		return err
 	}

@@ -30,6 +30,10 @@ type setters interface {
 	SetState(*workflow.State)
 }
 
+type setPlanIDer interface {
+	SetPlanID(uuid.UUID)
+}
+
 func init() {
 	ctx := context.Background()
 
@@ -105,6 +109,9 @@ func init() {
 	for item := range walk.Plan(context.Background(), plan) {
 		setter := item.Value.(setters)
 		setter.SetID(mustUUID())
+		if item.Value.Type() != workflow.OTPlan {
+			setter.(setPlanIDer).SetPlanID(plan.ID)
+		}
 		setter.SetState(
 			&workflow.State{
 				Status: workflow.Running,
@@ -197,7 +204,7 @@ func TestCommitPlan(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if diff := cmp.Diff(plan, storedPlan, cmp.AllowUnexported(workflow.Action{})); diff != "" {
+	if diff := cmp.Diff(plan, storedPlan, cmp.AllowUnexported(workflow.Action{}, workflow.Block{}, workflow.Checks{}, workflow.Sequence{})); diff != "" {
 		t.Fatalf("Read plan does not match the original plan: -want/+got:\n%s", diff)
 	}
 }

@@ -20,9 +20,9 @@ import (
 
 const (
 	// beginning of query to list plans with a filter
-	searchPlans = `SELECT p.id, p.groupID, p.name, p.descr, p.submitTime, p.stateStatus, p.stateStart, p.stateEnd FROM %s p WHERE p.type=1 AND`
+	searchPlans = `SELECT c.id, c.groupID, c.name, c.descr, c.submitTime, c.stateStatus, c.stateStart, c.stateEnd FROM c WHERE c.type=@objectType AND`
 	// list all plans without parameters
-	listPlans = `SELECT p.id, p.groupID, p.name, p.descr, p.submitTime, p.stateStatus, p.stateStart, p.stateEnd FROM %s p WHERE p.type=1 ORDER BY p.submitTime DESC`
+	listPlans = `SELECT c.id, c.groupID, c.name, c.descr, c.submitTime, c.stateStatus, c.stateStart, c.stateEnd FROM c WHERE c.type=@objectType ORDER BY c.submitTime DESC`
 )
 
 // readerClient provides abstraction for testing reader. This is implmented by *azcosmos.ContainerClient.
@@ -36,7 +36,6 @@ type reader struct {
 	mu           *sync.RWMutex
 	container    string
 	client       readerClient // *azcosmos.ContainerClient
-	pk           azcosmos.PartitionKey
 	defaultIOpts *azcosmos.ItemOptions
 
 	reg *registry.Register
@@ -59,7 +58,9 @@ func (r reader) Exists(ctx context.Context, id uuid.UUID) (bool, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	_, err := r.client.ReadItem(ctx, r.pk, id.String(), r.defaultIOpts)
+	idStr := id.String()
+
+	_, err := r.client.ReadItem(ctx, key(id), idStr, r.defaultIOpts)
 	if err != nil {
 		if isNotFound(err) {
 			return false, nil
@@ -103,7 +104,7 @@ func (r reader) Search(ctx context.Context, filters storage.Filters) (chan stora
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	pager := r.client.NewQueryItemsPager(q, r.pk, &azcosmos.QueryOptions{QueryParameters: parameters})
+	pager := r.client.NewQueryItemsPager(q, key("doesntmatterwhatiput"), &azcosmos.QueryOptions{QueryParameters: parameters})
 	results := make(chan storage.Stream[storage.ListResult], 1)
 	go func() {
 		defer close(results)
@@ -137,23 +138,23 @@ func (r reader) Search(ctx context.Context, filters storage.Filters) (chan stora
 }
 
 func (r reader) buildSearchQuery(filters storage.Filters) (string, []azcosmos.QueryParameter) {
-	parameters := []azcosmos.QueryParameter{}
+	parameters := []azcosmos.QueryParameter{{Name: "@objectType", Value: int64(workflow.OTPlan)}}
 
 	build := strings.Builder{}
-	build.WriteString(fmt.Sprintf(searchPlans, r.container))
+	build.WriteString(searchPlans)
 
 	numFilters := 0
 
 	if len(filters.ByIDs) > 0 {
 		numFilters++
-		build.WriteString(" ARRAY_CONTAINS(@ids, p.id)")
+		build.WriteString(" ARRAY_CONTAINS(@ids, c.id)")
 	}
 	if len(filters.ByGroupIDs) > 0 {
 		if numFilters > 0 {
 			build.WriteString(" AND")
 		}
 		numFilters++
-		build.WriteString(" ARRAY_CONTAINS(@group_ids, p.groupID)")
+		build.WriteString(" ARRAY_CONTAINS(@group_ids, c.groupID)")
 	}
 	if len(filters.ByStatus) > 0 {
 		if numFilters > 0 {
@@ -167,9 +168,9 @@ func (r reader) buildSearchQuery(filters storage.Filters) (string, []azcosmos.Qu
 		for i, s := range filters.ByStatus {
 			name := fmt.Sprintf("@status%d", i)
 			if i == 0 {
-				build.WriteString(fmt.Sprintf("p.stateStatus = %s", name))
+				build.WriteString(fmt.Sprintf("c.stateStatus = %s", name))
 			} else {
-				build.WriteString(fmt.Sprintf(" OR p.stateStatus = %s", name))
+				build.WriteString(fmt.Sprintf(" OR c.stateStatus = %s", name))
 			}
 			parameters = append(parameters, azcosmos.QueryParameter{
 				Name:  name,
@@ -180,7 +181,7 @@ func (r reader) buildSearchQuery(filters storage.Filters) (string, []azcosmos.Qu
 			build.WriteString(")")
 		}
 	}
-	build.WriteString(" ORDER BY p.submitTime DESC")
+	build.WriteString(" ORDER BY c.submitTime DESC")
 	query := build.String()
 
 	if len(filters.ByIDs) > 0 {
@@ -202,7 +203,8 @@ func (r reader) buildSearchQuery(filters storage.Filters) (string, []azcosmos.Qu
 // return with most recent submitted first. limit sets the maximum number of entries to return. If
 // limit == 0, there is no limit.
 func (r reader) List(ctx context.Context, limit int) (chan storage.Stream[storage.ListResult], error) {
-	q := fmt.Sprintf(listPlans, r.container)
+	parameters := []azcosmos.QueryParameter{{Name: "@objectType", Value: int64(workflow.OTPlan)}}
+	q := listPlans
 	if limit > 0 {
 		q += fmt.Sprintf(" OFFSET 0 LIMIT %d", limit)
 	}
@@ -210,7 +212,7 @@ func (r reader) List(ctx context.Context, limit int) (chan storage.Stream[storag
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	pager := r.client.NewQueryItemsPager(q, r.pk, &azcosmos.QueryOptions{QueryParameters: []azcosmos.QueryParameter{}})
+	pager := r.client.NewQueryItemsPager(q, azcosmos.NullPartitionKey, &azcosmos.QueryOptions{QueryParameters: parameters})
 	results := make(chan storage.Stream[storage.ListResult], 1)
 	go func() {
 		defer close(results)
@@ -251,7 +253,7 @@ func (r reader) listResultsFunc(item []byte) (storage.ListResult, error) {
 	}
 
 	result := storage.ListResult{
-		ID:         resp.ID,
+		ID:         resp.PlanID,
 		GroupID:    resp.GroupID,
 		Name:       resp.Name,
 		Descr:      resp.Descr,

@@ -18,7 +18,6 @@ type checksUpdater struct {
 	mu     *sync.RWMutex
 	client patchItemer
 
-	pk           azcosmos.PartitionKey
 	defaultIOpts *azcosmos.ItemOptions
 
 	private.Storage
@@ -41,7 +40,9 @@ func (u checksUpdater) UpdateChecks(ctx context.Context, check *workflow.Checks)
 	}
 	itemOpt.IfMatchEtag = ifMatchEtag
 
-	resp, err := patchItemWithRetry(ctx, u.client, u.pk, check.ID.String(), patch, itemOpt)
+	k := key(check.GetPlanID())
+
+	resp, err := patchItemWithRetry(ctx, u.client, k, check.ID.String(), patch, itemOpt)
 	if err != nil {
 		return err
 	}

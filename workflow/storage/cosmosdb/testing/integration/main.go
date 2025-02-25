@@ -25,7 +25,6 @@ import (
 var (
 	db        = flag.String("db-name", os.Getenv("AZURE_COSMOSDB_DBNAME"), "the name of the cosmosdb database")
 	container = flag.String("container-name", os.Getenv("AZURE_COSMOSDB_CNAME"), "the name of the cosmosdb container")
-	pk        = flag.String("partition-key", os.Getenv("AZURE_COSMOSDB_PK"), "the name of the cosmosdb partition key value")
 	msi       = flag.String("msi", "", "the identity with vmss contributor role. If empty, az login is used")
 	teardown  = flag.Bool("teardown", false, "teardown the cosmosdb container")
 )
@@ -38,6 +37,12 @@ func init() {
 	flag.Parse()
 
 	plan = cosmosdb.NewTestPlan()
+}
+
+var prettyConfig = pretty.Config{
+	PrintStringers:      true,
+	PrintTextMarshalers: true,
+	SkipZeroFields:      true,
 }
 
 func main() {
@@ -62,7 +67,7 @@ func main() {
 		fatalErr(logger, "Failed to create credential: %v", err)
 	}
 
-	vault, err := cosmosdb.New(ctx, *db, *container, *pk, cred, reg)
+	vault, err := cosmosdb.New(ctx, *db, *container, cred, reg)
 	if err != nil {
 		fatalErr(logger, "Failed to create vault: %v", err)
 	}
@@ -119,7 +124,7 @@ func main() {
 	}
 
 	// creator will set to zero time
-	if diff := pretty.Compare(plan, result); diff != "" {
+	if diff := prettyConfig.Compare(plan, result); diff != "" {
 		fatalErr(logger, "mismatch in submitted and returned plan with ID %s: returned plan: -want/+got:\n%s", plan.ID, diff)
 	}
 
@@ -132,7 +137,7 @@ func main() {
 	if err != nil {
 		fatalErr(logger, "Failed to read plan entry: %v", err)
 	}
-	if diff := pretty.Compare(plan, result); diff != "" {
+	if diff := prettyConfig.Compare(plan, result); diff != "" {
 		fatalErr(logger, "mismatch in submitted and returned plan with ID %s: returned plan: -want/+got:\n%s", plan.ID, diff)
 	}
 
