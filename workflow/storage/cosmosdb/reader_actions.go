@@ -13,27 +13,27 @@ import (
 
 const fetchActionsByID = `
 SELECT
-	a.id,
-	a.key,
-	a.planID,
-	a.name,
-	a.descr,
-	a.plugin,
-	a.timeout,
-	a.retries,
-	a.req,
-	a.attempts,
-	a.stateStatus,
-	a.stateStart,
-	a.stateEnd,
-	a._etag
-FROM actions a
-WHERE a.type=7 AND ARRAY_CONTAINS(@ids, a.id)
-ORDER BY a.pos ASC`
+	c.id,
+	c.key,
+	c.planID,
+	c.name,
+	c.descr,
+	c.plugin,
+	c.timeout,
+	c.retries,
+	c.req,
+	c.attempts,
+	c.stateStatus,
+	c.stateStart,
+	c.stateEnd,
+	c._etag
+FROM c
+WHERE c.type=@objectType AND ARRAY_CONTAINS(@ids, c.id)
+ORDER BY c.pos ASC`
 
 // idsToActions converts the "actions" field in a cosmosdb document to a list of *workflow.Actions.
-func (r reader) idsToActions(ctx context.Context, actionIDs []uuid.UUID) ([]*workflow.Action, error) {
-	actions, err := r.fetchActionsByIDs(ctx, actionIDs)
+func (r reader) idsToActions(ctx context.Context, planID azcosmos.PartitionKey, actionIDs []uuid.UUID) ([]*workflow.Action, error) {
+	actions, err := r.fetchActionsByIDs(ctx, planID, actionIDs)
 	if err != nil {
 		return nil, fmt.Errorf("couldn't fetch actions by ids: %w", err)
 	}
@@ -41,7 +41,7 @@ func (r reader) idsToActions(ctx context.Context, actionIDs []uuid.UUID) ([]*wor
 }
 
 // fetchActionsByIDs fetches a list of actions by their IDs.
-func (r reader) fetchActionsByIDs(ctx context.Context, ids []uuid.UUID) ([]*workflow.Action, error) {
+func (r reader) fetchActionsByIDs(ctx context.Context, planID azcosmos.PartitionKey, ids []uuid.UUID) ([]*workflow.Action, error) {
 	if len(ids) == 0 {
 		return nil, nil
 	}
@@ -52,9 +52,13 @@ func (r reader) fetchActionsByIDs(ctx context.Context, ids []uuid.UUID) ([]*work
 			Name:  "@ids",
 			Value: ids,
 		},
+		{
+			Name:  "@objectType",
+			Value: int64(workflow.OTAction),
+		},
 	}
 
-	pager := r.client.NewQueryItemsPager(fetchActionsByID, r.pk, &azcosmos.QueryOptions{QueryParameters: parameters})
+	pager := r.client.NewQueryItemsPager(fetchActionsByID, planID, &azcosmos.QueryOptions{QueryParameters: parameters})
 	for pager.More() {
 		res, err := pager.NextPage(ctx)
 		if err != nil {
@@ -95,6 +99,7 @@ func (r reader) docToAction(ctx context.Context, response []byte) (*workflow.Act
 			ETag:   string(resp.ETag),
 		},
 	}
+	a.SetPlanID(resp.PlanID)
 
 	plug := r.reg.Plugin(a.Plugin)
 	if plug == nil {

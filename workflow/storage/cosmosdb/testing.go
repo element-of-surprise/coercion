@@ -7,6 +7,7 @@ import (
 	"github.com/Azure/azure-sdk-for-go/sdk/data/azcosmos"
 	"github.com/go-json-experiment/json"
 	"github.com/google/uuid"
+	"github.com/kylelemons/godebug/pretty"
 
 	pluglib "github.com/element-of-surprise/coercion/plugins"
 	"github.com/element-of-surprise/coercion/plugins/registry"
@@ -26,11 +27,21 @@ func init() {
 	testReg.MustRegister(&plugins.HelloPlugin{})
 }
 
+var prettyConfig = pretty.Config{
+	PrintStringers:      true,
+	PrintTextMarshalers: true,
+	SkipZeroFields:      true,
+}
+
 type setters interface {
 	// SetID is a setter for the ID field.
 	SetID(uuid.UUID)
 	// SetState is a setter for the State settings.
 	SetState(*workflow.State)
+}
+
+type setPlanIDer interface {
+	SetPlanID(uuid.UUID)
 }
 
 func NewTestPlan() *workflow.Plan {
@@ -128,6 +139,9 @@ func NewTestPlan() *workflow.Plan {
 	for item := range walk.Plan(context.Background(), plan) {
 		setter := item.Value.(setters)
 		setter.SetID(mustUUID())
+		if item.Value.Type() != workflow.OTPlan {
+			item.Value.(setPlanIDer).SetPlanID(plan.ID)
+		}
 		setter.SetState(
 			&workflow.State{
 				Status: workflow.Running,

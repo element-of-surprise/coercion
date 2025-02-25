@@ -11,10 +11,10 @@ import (
 )
 
 // idsToBlocks converts the "blocks" field in a cosmosdb document to a list of *workflow.Blocks.
-func (p reader) idsToBlocks(ctx context.Context, blockIDs []uuid.UUID) ([]*workflow.Block, error) {
+func (p reader) idsToBlocks(ctx context.Context, planID azcosmos.PartitionKey, blockIDs []uuid.UUID) ([]*workflow.Block, error) {
 	blocks := make([]*workflow.Block, 0, len(blockIDs))
 	for _, id := range blockIDs {
-		block, err := p.fetchBlockByID(ctx, id)
+		block, err := p.fetchBlockByID(ctx, planID, id)
 		if err != nil {
 			return nil, fmt.Errorf("couldn't fetch block(%s)by id: %w", id, err)
 		}
@@ -24,8 +24,8 @@ func (p reader) idsToBlocks(ctx context.Context, blockIDs []uuid.UUID) ([]*workf
 }
 
 // fetchBlockByID fetches a block by its id.
-func (p reader) fetchBlockByID(ctx context.Context, id uuid.UUID) (*workflow.Block, error) {
-	res, err := p.client.ReadItem(ctx, p.pk, id.String(), p.defaultIOpts)
+func (p reader) fetchBlockByID(ctx context.Context, planID azcosmos.PartitionKey, id uuid.UUID) (*workflow.Block, error) {
+	res, err := p.client.ReadItem(ctx, planID, id.String(), p.defaultIOpts)
 	if err != nil {
 		return nil, fmt.Errorf("couldn't fetch block by id: %w", err)
 	}
@@ -57,27 +57,30 @@ func (p reader) docToBlock(ctx context.Context, response *azcosmos.ItemResponse)
 		Concurrency:       resp.Concurrency,
 		ToleratedFailures: resp.ToleratedFailures,
 	}
-	b.BypassChecks, err = p.idToCheck(ctx, resp.BypassChecks)
+	b.SetPlanID(resp.PlanID)
+
+	k := key(resp.PlanID)
+	b.BypassChecks, err = p.idToCheck(ctx, k, resp.BypassChecks)
 	if err != nil {
 		return nil, fmt.Errorf("couldn't get block bypasschecks: %w", err)
 	}
-	b.PreChecks, err = p.idToCheck(ctx, resp.PreChecks)
+	b.PreChecks, err = p.idToCheck(ctx, k, resp.PreChecks)
 	if err != nil {
 		return nil, fmt.Errorf("couldn't get block prechecks: %w", err)
 	}
-	b.ContChecks, err = p.idToCheck(ctx, resp.ContChecks)
+	b.ContChecks, err = p.idToCheck(ctx, k, resp.ContChecks)
 	if err != nil {
 		return nil, fmt.Errorf("couldn't get block contchecks: %w", err)
 	}
-	b.PostChecks, err = p.idToCheck(ctx, resp.PostChecks)
+	b.PostChecks, err = p.idToCheck(ctx, k, resp.PostChecks)
 	if err != nil {
 		return nil, fmt.Errorf("couldn't get block postchecks: %w", err)
 	}
-	b.DeferredChecks, err = p.idToCheck(ctx, resp.DeferredChecks)
+	b.DeferredChecks, err = p.idToCheck(ctx, k, resp.DeferredChecks)
 	if err != nil {
 		return nil, fmt.Errorf("couldn't get block deferredchecks: %w", err)
 	}
-	b.Sequences, err = p.idsToSequences(ctx, resp.Sequences)
+	b.Sequences, err = p.idsToSequences(ctx, k, resp.Sequences)
 	if err != nil {
 		return nil, fmt.Errorf("couldn't read block sequences: %w", err)
 	}

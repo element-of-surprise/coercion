@@ -17,7 +17,6 @@ var _ storage.PlanUpdater = planUpdater{}
 type planUpdater struct {
 	mu           *sync.RWMutex
 	client       patchItemer
-	pk           azcosmos.PartitionKey
 	defaultIOpts *azcosmos.ItemOptions
 
 	private.Storage
@@ -41,7 +40,8 @@ func (u planUpdater) UpdatePlan(ctx context.Context, p *workflow.Plan) error {
 	}
 	itemOpt.IfMatchEtag = ifMatchEtag
 
-	resp, err := patchItemWithRetry(ctx, u.client, u.pk, p.ID.String(), patch, itemOpt)
+	k := key(p.ID)
+	resp, err := patchItemWithRetry(ctx, u.client, k, p.ID.String(), patch, itemOpt)
 	if err != nil {
 		return err
 	}

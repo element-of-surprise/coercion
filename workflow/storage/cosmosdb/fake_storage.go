@@ -23,6 +23,8 @@ import (
 	"zombiezen.com/go/sqlite/sqlitex"
 )
 
+// TODO: Improve this so that we take into account the partition key so if that doesn't match it doesn't return.
+
 // fakeStorage fakes the storage methods needed to communicate with azcosmos used in this package.
 // We have to use some unsafe methods to avoid writing unneccesary wrappers to get at data used for mocks.
 // This is sad and cost us a lot of time.
@@ -97,7 +99,7 @@ func (f *fakeStorage) writeData(ctx context.Context, id, planID string, data []b
 
 	err = sqlitex.Execute(conn, q, &sqlitex.ExecOptions{
 		Named: map[string]any{
-			"$id":      strings.TrimSpace(id),
+			"$id":      id,
 			"$plan_id": planID,
 			"$data":    data,
 		},
@@ -141,20 +143,11 @@ type data struct {
 	data   []byte
 }
 
-func (f *fakeStorage) allIDs() ([]data, error) {
+func (f *fakeStorage) allIDs(conn *sqlite.Conn) ([]data, error) {
 	const fetchAll = `SELECT id, plan_id, data FROM pages`
 
-	f.mu.Lock()
-	defer f.mu.Unlock()
-
-	conn, err := f.pool.Take(context.Background())
-	if err != nil {
-		panic(err)
-	}
-	defer f.pool.Put(conn)
-
 	d := []data{}
-	err = sqlitex.Execute(
+	err := sqlitex.Execute(
 		conn,
 		fetchAll,
 		&sqlitex.ExecOptions{
@@ -173,6 +166,9 @@ func (f *fakeStorage) allIDs() ([]data, error) {
 			},
 		},
 	)
+	if err != nil {
+		panic(err)
+	}
 	return d, nil
 }
 
@@ -199,13 +195,13 @@ func (f *fakeStorage) ExecuteTransactionalBatch(ctx context.Context, b azcosmos.
 				panic(err)
 			}
 
-			var planID = fields.ID
+			var id = fields.ID
 
-			if fields.Type != workflow.OTPlan {
-				planID = fields.PlanID
+			if fields.Type == workflow.OTPlan {
+				id = fields.PlanID
 			}
 
-			if err := f.writeData(ctx, fields.ID.String(), planID.String(), op.resourceBody); err != nil {
+			if err := f.writeData(ctx, id.String(), fields.PlanID.String(), op.resourceBody); err != nil {
 				panic(err)
 			}
 		case "Delete":
@@ -222,11 +218,11 @@ func (f *fakeStorage) ExecuteTransactionalBatch(ctx context.Context, b azcosmos.
 	return azcosmos.TransactionalBatchResponse{}, nil
 }
 
-func (f *fakeStorage) WritePlan(ctx context.Context, pkStr string, plan *workflow.Plan) error {
+func (f *fakeStorage) WritePlan(ctx context.Context, plan *workflow.Plan) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 
-	ictx, err := planToItems(pkStr, plan)
+	ictx, err := planToItems(plan)
 	if err != nil {
 		panic(err)
 	}
@@ -262,6 +258,21 @@ func (f *fakeStorage) readItem(ctx context.Context, itemID string) (data []byte,
 		panic(err)
 	}
 	defer f.pool.Put(conn)
+
+	// Leave for debugging.
+	/*
+		all, err := f.allIDs(conn)
+		if err != nil {
+			panic(err)
+		}
+
+		for _, d := range all {
+			common, err := getCommonFields(d.data)
+			if err != nil {
+				panic(err)
+			}
+		}
+	*/
 
 	var item []byte
 	err = sqlitex.Execute(
@@ -308,13 +319,21 @@ func (f *fakeStorage) NewQueryItemsPager(query string, pk azcosmos.PartitionKey,
 		})
 	}
 
+	if o.QueryParameters == nil {
+		panic("NewQueryItemsPager: query parameters must exist")
+	}
 	var queryType workflow.ObjectType
-	switch {
-	case strings.Contains(query, "a.type=7"):
-		queryType = workflow.OTAction
-	case strings.Contains(query, "p.type=1"):
-		queryType = workflow.OTPlan
-	default:
+	for _, p := range o.QueryParameters {
+		if p.Name == "@objectType" {
+			switch p.Value.(int64) {
+			case int64(workflow.OTAction):
+				queryType = workflow.OTAction
+			case int64(workflow.OTPlan):
+				queryType = workflow.OTPlan
+			}
+		}
+	}
+	if queryType == workflow.OTUnknown {
 		panic(fmt.Sprintf("NewQueryItemsPager: called on query(%s) we don't support)", query))
 	}
 
@@ -345,7 +364,11 @@ func (f *fakeStorage) NewQueryItemsPager(query string, pk azcosmos.PartitionKey,
 					log.Fatalf("failed to get type and id from item: %v", err)
 				}
 				if c.Type == queryType {
-					if _, ok := ids[c.ID]; len(ids) > 0 && !ok {
+					id := c.ID
+					if c.Type == workflow.OTPlan {
+						id = c.PlanID
+					}
+					if _, ok := ids[id]; len(ids) > 0 && !ok {
 						return nil
 					}
 					items = append(items, b)
@@ -372,7 +395,7 @@ type getIDer interface {
 	GetID() uuid.UUID
 }
 
-func (f *fakeStorage) PatchItem(ctx context.Context, pk azcosmos.PartitionKey, itemID string, po azcosmos.PatchOperations, opts *azcosmos.ItemOptions) (azcosmos.ItemResponse, error) {
+func (f *fakeStorage) PatchItem(ctx context.Context, key azcosmos.PartitionKey, itemID string, po azcosmos.PatchOperations, opts *azcosmos.ItemOptions) (azcosmos.ItemResponse, error) {
 	ops := unsafePathOps(&po)
 	for _, op := range ops {
 		switch op.Op {
@@ -417,7 +440,7 @@ func (f *fakeStorage) PatchItem(ctx context.Context, pk azcosmos.PartitionKey, i
 			}
 			f.patchObject(op, item.Value.(stateObject))
 
-			ictx, err := planToItems("who cares", plan)
+			ictx, err := planToItems(plan)
 			if err != nil {
 				panic(err)
 			}

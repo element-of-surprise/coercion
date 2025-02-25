@@ -65,10 +65,18 @@ func (p reader) fetchBlockByID(ctx context.Context, conn *sqlite.Conn, id uuid.U
 func (p reader) blockRowToBlock(ctx context.Context, conn *sqlite.Conn, stmt *sqlite.Stmt) (*workflow.Block, error) {
 	var err error
 	b := &workflow.Block{}
+
 	b.ID, err = fieldToID("id", stmt)
 	if err != nil {
 		return nil, fmt.Errorf("couldn't read block id: %w", err)
 	}
+
+	planID, err := uuid.Parse(stmt.GetText("plan_id"))
+	if err != nil {
+		return nil, fmt.Errorf("couldn't parse action id: %w", err)
+	}
+	b.SetPlanID(planID)
+
 	k := stmt.GetText("key")
 	if k != "" {
 		b.Key, err = uuid.Parse(k)

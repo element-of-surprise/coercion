@@ -102,9 +102,16 @@ func (w *Workstream) Submit(ctx context.Context, plan *workflow.Plan) (uuid.UUID
 	return plan.ID, nil
 }
 
+type setPlanIDer interface {
+	SetPlanID(uuid.UUID)
+}
+
 // requestDefaults finds all request objects in the plan and calls their Defaults() method.
 func (w *Workstream) requestDefaults(ctx context.Context, plan *workflow.Plan) {
 	for item := range walk.Plan(ctx, plan) {
+		if item.Value.Type() != workflow.OTPlan {
+			item.Value.(setPlanIDer).SetPlanID(plan.ID)
+		}
 		switch item.Value.Type() {
 		case workflow.OTAction:
 			a := item.Action()

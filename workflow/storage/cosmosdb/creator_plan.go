@@ -2,6 +2,7 @@ package cosmosdb
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -13,6 +14,8 @@ import (
 	"github.com/google/uuid"
 )
 
+// TODO: Optimize memory by using json.MarshalWrite and recycling buffers (might require changes to upstream).
+
 var zeroTime = time.Time{}
 var emptyItemOptions = &azcosmos.TransactionalBatchItemOptions{}
 
@@ -22,17 +25,17 @@ func (c creator) commitPlan(ctx context.Context, p *workflow.Plan) (err error) {
 		return fmt.Errorf("commitPlan: plan cannot be nil")
 	}
 
-	itemContext, err := planToItems(c.pkStr, p)
+	itemContext, err := planToItems(p)
 	if err != nil {
 		return err
 	}
 
-	batch := c.client.NewTransactionalBatch(c.pk)
+	batch := c.client.NewTransactionalBatch(key(p))
 	for _, item := range itemContext.items {
 		batch.CreateItem(item, emptyItemOptions)
 	}
 
-	_, err = c.client.ExecuteTransactionalBatch(ctx, batch, &azcosmos.TransactionalBatchOptions{EnableContentResponseOnWrite: true})
+	_, err = c.client.ExecuteTransactionalBatch(ctx, batch, &azcosmos.TransactionalBatchOptions{})
 	if err != nil {
 		return fmt.Errorf("failed to create plan through Cosmos DB API: %w", err)
 	}
@@ -48,20 +51,18 @@ func (c creator) commitPlan(ctx context.Context, p *workflow.Plan) (err error) {
 }
 
 type itemsContext struct {
-	pkStr  string
 	planID uuid.UUID
 	m      map[string][]byte
 	items  [][]byte
 }
 
-func planToItems(pkStr string, p *workflow.Plan) (*itemsContext, error) {
+func planToItems(p *workflow.Plan) (*itemsContext, error) {
 	itemsContext := &itemsContext{
-		pkStr:  pkStr,
 		planID: p.GetID(),
 		m:      map[string][]byte{},
 	}
 
-	plan, err := planToEntry(itemsContext.pkStr, p)
+	plan, err := planToEntry(p)
 	if err != nil {
 		return nil, err
 	}
@@ -69,7 +70,7 @@ func planToItems(pkStr string, p *workflow.Plan) (*itemsContext, error) {
 	for _, check := range [5]*workflow.Checks{p.BypassChecks, p.PreChecks, p.PostChecks, p.ContChecks, p.DeferredChecks} {
 		err = checksToItems(itemsContext, check)
 		if err != nil {
-			return nil, fmt.Errorf("planToEntry(commitChecks): %w", err)
+			return nil, fmt.Errorf("planToItems(commitChecks): %w", err)
 		}
 	}
 
@@ -79,7 +80,7 @@ func planToItems(pkStr string, p *workflow.Plan) (*itemsContext, error) {
 	for i, b := range p.Blocks {
 		err = blockToItem(itemsContext, i, b)
 		if err != nil {
-			return nil, fmt.Errorf("planToEntry(commitBlocks): %w", err)
+			return nil, fmt.Errorf("planToItems(commitBlocks): %w", err)
 		}
 	}
 
@@ -87,14 +88,20 @@ func planToItems(pkStr string, p *workflow.Plan) (*itemsContext, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal item: %w", err)
 	}
-	itemsContext.m[plan.ID.String()] = item
+
+	itemsContext.m[p.ID.String()] = item
 	itemsContext.items = append(itemsContext.items, item)
 	return itemsContext, nil
 }
 
-func planToEntry(pk string, p *workflow.Plan) (plansEntry, error) {
+func planToEntry(p *workflow.Plan) (plansEntry, error) {
 	if p == nil {
 		return plansEntry{}, fmt.Errorf("planToEntry: plan cannot be nil")
+	}
+
+	// Super basic defense in depth check.
+	if p.ID == uuid.Nil {
+		return plansEntry{}, errors.New("plan must have an ID")
 	}
 
 	blocks, err := objsToIDs(p.Blocks)
@@ -103,18 +110,19 @@ func planToEntry(pk string, p *workflow.Plan) (plansEntry, error) {
 	}
 
 	plan := plansEntry{
-		PK:          pk,
-		Type:        workflow.OTPlan,
-		ID:          p.ID,
-		GroupID:     p.GroupID,
-		Name:        p.Name,
-		Descr:       p.Descr,
-		Meta:        p.Meta,
-		Blocks:      blocks,
-		StateStatus: p.State.Status,
-		StateStart:  p.State.Start,
-		StateEnd:    p.State.End,
-		Reason:      p.Reason,
+		PartitionKey: keyStr(p.ID),
+		Type:         workflow.OTPlan,
+		ID:           p.ID,
+		PlanID:       p.ID,
+		GroupID:      p.GroupID,
+		Name:         p.Name,
+		Descr:        p.Descr,
+		Meta:         p.Meta,
+		Blocks:       blocks,
+		StateStatus:  p.State.Status,
+		StateStart:   p.State.Start,
+		StateEnd:     p.State.End,
+		Reason:       p.Reason,
 	}
 
 	if p.BypassChecks != nil {
@@ -142,7 +150,7 @@ func checksToItems(itemsContext *itemsContext, ch *workflow.Checks) error {
 		return nil
 	}
 
-	checks, err := checkToEntry(itemsContext.pkStr, itemsContext.planID, ch)
+	checks, err := checkToEntry(itemsContext.planID, ch)
 	if err != nil {
 		return err
 	}
@@ -164,7 +172,7 @@ func checksToItems(itemsContext *itemsContext, ch *workflow.Checks) error {
 	return nil
 }
 
-func checkToEntry(pk string, planID uuid.UUID, c *workflow.Checks) (checksEntry, error) {
+func checkToEntry(planID uuid.UUID, c *workflow.Checks) (checksEntry, error) {
 	if c == nil {
 		return checksEntry{}, nil
 	}
@@ -174,16 +182,16 @@ func checkToEntry(pk string, planID uuid.UUID, c *workflow.Checks) (checksEntry,
 		return checksEntry{}, fmt.Errorf("objsToIDs(checks.Actions): %w", err)
 	}
 	return checksEntry{
-		PK:          pk,
-		Type:        workflow.OTCheck,
-		ID:          c.ID,
-		Key:         c.Key,
-		PlanID:      planID,
-		Actions:     actions,
-		Delay:       c.Delay,
-		StateStatus: c.State.Status,
-		StateStart:  c.State.Start,
-		StateEnd:    c.State.End,
+		PartitionKey: keyStr(planID),
+		Type:         workflow.OTCheck,
+		ID:           c.ID,
+		Key:          c.Key,
+		PlanID:       planID,
+		Actions:      actions,
+		Delay:        c.Delay,
+		StateStatus:  c.State.Status,
+		StateStart:   c.State.Start,
+		StateEnd:     c.State.End,
 	}, nil
 }
 
@@ -192,7 +200,7 @@ func blockToItem(itemsContext *itemsContext, pos int, b *workflow.Block) error {
 		return fmt.Errorf("commitBlock: block cannot be nil")
 	}
 
-	block, err := blockToEntry(itemsContext.pkStr, itemsContext.planID, pos, b)
+	block, err := blockToEntry(itemsContext.planID, pos, b)
 	if err != nil {
 		return err
 	}
@@ -221,7 +229,7 @@ func blockToItem(itemsContext *itemsContext, pos int, b *workflow.Block) error {
 	return nil
 }
 
-func blockToEntry(pk string, planID uuid.UUID, pos int, b *workflow.Block) (blocksEntry, error) {
+func blockToEntry(planID uuid.UUID, pos int, b *workflow.Block) (blocksEntry, error) {
 	if b == nil {
 		return blocksEntry{}, fmt.Errorf("blockToEntry: block cannot be nil")
 	}
@@ -232,7 +240,7 @@ func blockToEntry(pk string, planID uuid.UUID, pos int, b *workflow.Block) (bloc
 	}
 
 	block := blocksEntry{
-		PK:                pk,
+		PartitionKey:      keyStr(planID),
 		Type:              workflow.OTBlock,
 		ID:                b.ID,
 		Key:               b.Key,
@@ -273,7 +281,7 @@ func seqToItems(itemsContext *itemsContext, pos int, seq *workflow.Sequence) err
 		return fmt.Errorf("commitSequence: sequence cannot be nil")
 	}
 
-	sequence, err := sequenceToEntry(itemsContext.pkStr, itemsContext.planID, pos, seq)
+	sequence, err := sequenceToEntry(itemsContext.planID, pos, seq)
 	if err != nil {
 		return err
 	}
@@ -295,7 +303,7 @@ func seqToItems(itemsContext *itemsContext, pos int, seq *workflow.Sequence) err
 	return nil
 }
 
-func sequenceToEntry(pk string, planID uuid.UUID, pos int, seq *workflow.Sequence) (sequencesEntry, error) {
+func sequenceToEntry(planID uuid.UUID, pos int, seq *workflow.Sequence) (sequencesEntry, error) {
 	if seq == nil {
 		return sequencesEntry{}, fmt.Errorf("sequenceToEntry: sequence cannot be nil")
 	}
@@ -306,18 +314,18 @@ func sequenceToEntry(pk string, planID uuid.UUID, pos int, seq *workflow.Sequenc
 	}
 
 	return sequencesEntry{
-		PK:          pk,
-		Type:        workflow.OTSequence,
-		ID:          seq.ID,
-		Key:         seq.Key,
-		PlanID:      planID,
-		Name:        seq.Name,
-		Descr:       seq.Descr,
-		Pos:         pos,
-		Actions:     actions,
-		StateStatus: seq.State.Status,
-		StateStart:  seq.State.Start,
-		StateEnd:    seq.State.End,
+		PartitionKey: keyStr(planID),
+		Type:         workflow.OTSequence,
+		ID:           seq.ID,
+		Key:          seq.Key,
+		PlanID:       planID,
+		Name:         seq.Name,
+		Descr:        seq.Descr,
+		Pos:          pos,
+		Actions:      actions,
+		StateStatus:  seq.State.Status,
+		StateStart:   seq.State.Start,
+		StateEnd:     seq.State.End,
 	}, nil
 }
 
@@ -326,7 +334,7 @@ func actionToItems(itemsContext *itemsContext, pos int, a *workflow.Action) erro
 		return fmt.Errorf("commitAction: action cannot be nil")
 	}
 
-	action, err := actionToEntry(itemsContext.pkStr, itemsContext.planID, pos, a)
+	action, err := actionToEntry(itemsContext.planID, pos, a)
 	if err != nil {
 		return err
 	}
@@ -341,7 +349,7 @@ func actionToItems(itemsContext *itemsContext, pos int, a *workflow.Action) erro
 	return nil
 }
 
-func actionToEntry(pk string, planID uuid.UUID, pos int, a *workflow.Action) (actionsEntry, error) {
+func actionToEntry(planID uuid.UUID, pos int, a *workflow.Action) (actionsEntry, error) {
 	if a == nil {
 		return actionsEntry{}, fmt.Errorf("actionToEntry: action cannot be nil")
 	}
@@ -355,22 +363,22 @@ func actionToEntry(pk string, planID uuid.UUID, pos int, a *workflow.Action) (ac
 		return actionsEntry{}, fmt.Errorf("can't encode action.Attempts: %w", err)
 	}
 	return actionsEntry{
-		PK:          pk,
-		ID:          a.ID,
-		Type:        workflow.OTAction,
-		Key:         a.Key,
-		PlanID:      planID,
-		Name:        a.Name,
-		Descr:       a.Descr,
-		Pos:         pos,
-		Plugin:      a.Plugin,
-		Timeout:     a.Timeout,
-		Retries:     a.Retries,
-		Req:         req,
-		Attempts:    attempts,
-		StateStatus: a.State.Status,
-		StateStart:  a.State.Start,
-		StateEnd:    a.State.End,
+		PartitionKey: keyStr(planID),
+		ID:           a.ID,
+		Type:         workflow.OTAction,
+		Key:          a.Key,
+		PlanID:       planID,
+		Name:         a.Name,
+		Descr:        a.Descr,
+		Pos:          pos,
+		Plugin:       a.Plugin,
+		Timeout:      a.Timeout,
+		Retries:      a.Retries,
+		Req:          req,
+		Attempts:     attempts,
+		StateStatus:  a.State.Status,
+		StateStart:   a.State.Start,
+		StateEnd:     a.State.End,
 	}, nil
 }
 

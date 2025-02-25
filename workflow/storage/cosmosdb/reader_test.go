@@ -8,10 +8,10 @@ import (
 
 	"github.com/element-of-surprise/coercion/workflow"
 	"github.com/element-of-surprise/coercion/workflow/storage"
+	"github.com/kylelemons/godebug/pretty"
 
 	"github.com/Azure/azure-sdk-for-go/sdk/data/azcosmos"
 	"github.com/google/uuid"
-	"github.com/kylelemons/godebug/pretty"
 )
 
 func TestBuildSearchQuery(t *testing.T) {
@@ -33,10 +33,15 @@ func TestBuildSearchQuery(t *testing.T) {
 		wantParams []azcosmos.QueryParameter
 	}{
 		{
-			name:       "Success: empty filters",
-			filters:    storage.Filters{},
-			wantQuery:  `SELECT p.id, p.groupID, p.name, p.descr, p.submitTime, p.stateStatus, p.stateStart, p.stateEnd FROM test p WHERE p.type=1 AND ORDER BY p.submitTime DESC`,
-			wantParams: nil,
+			name:      "Success: empty filters",
+			filters:   storage.Filters{},
+			wantQuery: `SELECT c.id, c.groupID, c.name, c.descr, c.submitTime, c.stateStatus, c.stateStart, c.stateEnd FROM c WHERE c.type=@objectType AND ORDER BY c.submitTime DESC`,
+			wantParams: []azcosmos.QueryParameter{
+				{
+					Name:  "@objectType",
+					Value: int64(1),
+				},
+			},
 		},
 		{
 			name: "Success: by IDs with single ID",
@@ -45,8 +50,12 @@ func TestBuildSearchQuery(t *testing.T) {
 					id1,
 				},
 			},
-			wantQuery: `SELECT p.id, p.groupID, p.name, p.descr, p.submitTime, p.stateStatus, p.stateStart, p.stateEnd FROM test p WHERE p.type=1 AND ARRAY_CONTAINS(@ids, p.id) ORDER BY p.submitTime DESC`,
+			wantQuery: `SELECT c.id, c.groupID, c.name, c.descr, c.submitTime, c.stateStatus, c.stateStart, c.stateEnd FROM c WHERE c.type=@objectType AND ARRAY_CONTAINS(@ids, c.id) ORDER BY c.submitTime DESC`,
 			wantParams: []azcosmos.QueryParameter{
+				{
+					Name:  "@objectType",
+					Value: int64(1),
+				},
 				{
 					Name: "@ids",
 					Value: []uuid.UUID{
@@ -63,8 +72,12 @@ func TestBuildSearchQuery(t *testing.T) {
 					id2,
 				},
 			},
-			wantQuery: `SELECT p.id, p.groupID, p.name, p.descr, p.submitTime, p.stateStatus, p.stateStart, p.stateEnd FROM test p WHERE p.type=1 AND ARRAY_CONTAINS(@ids, p.id) ORDER BY p.submitTime DESC`,
+			wantQuery: `SELECT c.id, c.groupID, c.name, c.descr, c.submitTime, c.stateStatus, c.stateStart, c.stateEnd FROM c WHERE c.type=@objectType AND ARRAY_CONTAINS(@ids, c.id) ORDER BY c.submitTime DESC`,
 			wantParams: []azcosmos.QueryParameter{
+				{
+					Name:  "@objectType",
+					Value: int64(1),
+				},
 				{
 					Name: "@ids",
 					Value: []uuid.UUID{
@@ -81,8 +94,12 @@ func TestBuildSearchQuery(t *testing.T) {
 					id1,
 				},
 			},
-			wantQuery: `SELECT p.id, p.groupID, p.name, p.descr, p.submitTime, p.stateStatus, p.stateStart, p.stateEnd FROM test p WHERE p.type=1 AND ARRAY_CONTAINS(@group_ids, p.groupID) ORDER BY p.submitTime DESC`,
+			wantQuery: `SELECT c.id, c.groupID, c.name, c.descr, c.submitTime, c.stateStatus, c.stateStart, c.stateEnd FROM c WHERE c.type=@objectType AND ARRAY_CONTAINS(@group_ids, c.groupID) ORDER BY c.submitTime DESC`,
 			wantParams: []azcosmos.QueryParameter{
+				{
+					Name:  "@objectType",
+					Value: int64(1),
+				},
 				{
 					Name: "@group_ids",
 					Value: []uuid.UUID{
@@ -99,8 +116,12 @@ func TestBuildSearchQuery(t *testing.T) {
 					id2,
 				},
 			},
-			wantQuery: `SELECT p.id, p.groupID, p.name, p.descr, p.submitTime, p.stateStatus, p.stateStart, p.stateEnd FROM test p WHERE p.type=1 AND ARRAY_CONTAINS(@group_ids, p.groupID) ORDER BY p.submitTime DESC`,
+			wantQuery: `SELECT c.id, c.groupID, c.name, c.descr, c.submitTime, c.stateStatus, c.stateStart, c.stateEnd FROM c WHERE c.type=@objectType AND ARRAY_CONTAINS(@group_ids, c.groupID) ORDER BY c.submitTime DESC`,
 			wantParams: []azcosmos.QueryParameter{
+				{
+					Name:  "@objectType",
+					Value: int64(1),
+				},
 				{
 					Name: "@group_ids",
 					Value: []uuid.UUID{
@@ -117,8 +138,12 @@ func TestBuildSearchQuery(t *testing.T) {
 					workflow.Completed,
 				},
 			},
-			wantQuery: `SELECT p.id, p.groupID, p.name, p.descr, p.submitTime, p.stateStatus, p.stateStart, p.stateEnd FROM test p WHERE p.type=1 AND p.stateStatus = @status0 ORDER BY p.submitTime DESC`,
+			wantQuery: `SELECT c.id, c.groupID, c.name, c.descr, c.submitTime, c.stateStatus, c.stateStart, c.stateEnd FROM c WHERE c.type=@objectType AND c.stateStatus = @status0 ORDER BY c.submitTime DESC`,
 			wantParams: []azcosmos.QueryParameter{
+				{
+					Name:  "@objectType",
+					Value: int64(1),
+				},
 				{
 					Name:  "@status0",
 					Value: workflow.Completed,
@@ -133,8 +158,12 @@ func TestBuildSearchQuery(t *testing.T) {
 					workflow.Failed,
 				},
 			},
-			wantQuery: `SELECT p.id, p.groupID, p.name, p.descr, p.submitTime, p.stateStatus, p.stateStart, p.stateEnd FROM test p WHERE p.type=1 AND (p.stateStatus = @status0 OR p.stateStatus = @status1) ORDER BY p.submitTime DESC`,
+			wantQuery: `SELECT c.id, c.groupID, c.name, c.descr, c.submitTime, c.stateStatus, c.stateStart, c.stateEnd FROM c WHERE c.type=@objectType AND (c.stateStatus = @status0 OR c.stateStatus = @status1) ORDER BY c.submitTime DESC`,
 			wantParams: []azcosmos.QueryParameter{
+				{
+					Name:  "@objectType",
+					Value: int64(1),
+				},
 				{
 					Name:  "@status0",
 					Value: workflow.Completed,
@@ -160,8 +189,12 @@ func TestBuildSearchQuery(t *testing.T) {
 					workflow.Failed,
 				},
 			},
-			wantQuery: `SELECT p.id, p.groupID, p.name, p.descr, p.submitTime, p.stateStatus, p.stateStart, p.stateEnd FROM test p WHERE p.type=1 AND ARRAY_CONTAINS(@ids, p.id) AND ARRAY_CONTAINS(@group_ids, p.groupID) AND (p.stateStatus = @status0 OR p.stateStatus = @status1) ORDER BY p.submitTime DESC`,
+			wantQuery: `SELECT c.id, c.groupID, c.name, c.descr, c.submitTime, c.stateStatus, c.stateStart, c.stateEnd FROM c WHERE c.type=@objectType AND ARRAY_CONTAINS(@ids, c.id) AND ARRAY_CONTAINS(@group_ids, c.groupID) AND (c.stateStatus = @status0 OR c.stateStatus = @status1) ORDER BY c.submitTime DESC`,
 			wantParams: []azcosmos.QueryParameter{
+				{
+					Name:  "@objectType",
+					Value: int64(1),
+				},
 				{
 					Name:  "@status0",
 					Value: workflow.Completed,
@@ -207,7 +240,7 @@ func TestExists(t *testing.T) {
 	store := newFakeStorage(nil)
 
 	tp := NewTestPlan()
-	if err := store.WritePlan(context.Background(), "somekey", tp); err != nil {
+	if err := store.WritePlan(context.Background(), tp); err != nil {
 		panic(err)
 	}
 
@@ -271,7 +304,7 @@ func TestRead(t *testing.T) {
 	store := newFakeStorage(testReg)
 
 	tp := NewTestPlan()
-	if err := store.WritePlan(context.Background(), "somekey", tp); err != nil {
+	if err := store.WritePlan(context.Background(), tp); err != nil {
 		panic(err)
 	}
 
@@ -310,7 +343,7 @@ func TestRead(t *testing.T) {
 		case err != nil:
 			continue
 		}
-		if diff := pretty.Compare(tp, result); diff != "" {
+		if diff := prettyConfig.Compare(tp, result); diff != "" {
 			t.Errorf("TestRead(%s): returned params: -want/+got:\n%s", test.name, diff)
 			continue
 		}

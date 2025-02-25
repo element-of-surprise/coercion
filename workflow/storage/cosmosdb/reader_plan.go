@@ -12,7 +12,8 @@ import (
 
 // fetchPlan fetches a plan by its id.
 func (p reader) fetchPlan(ctx context.Context, id uuid.UUID) (*workflow.Plan, error) {
-	res, err := p.client.ReadItem(ctx, p.pk, id.String(), p.defaultIOpts)
+	k := key(id)
+	res, err := p.client.ReadItem(ctx, k, id.String(), p.defaultIOpts)
 	if err != nil {
 		return nil, fmt.Errorf("couldn't fetch plan: %w", err)
 	}
@@ -27,7 +28,7 @@ func (p reader) docToPlan(ctx context.Context, response *azcosmos.ItemResponse) 
 	}
 
 	plan := &workflow.Plan{
-		ID:         resp.ID,
+		ID:         resp.PlanID,
 		GroupID:    resp.GroupID,
 		Name:       resp.Name,
 		Descr:      resp.Descr,
@@ -39,27 +40,28 @@ func (p reader) docToPlan(ctx context.Context, response *azcosmos.ItemResponse) 
 			ETag:   string(resp.ETag),
 		},
 	}
-	plan.BypassChecks, err = p.idToCheck(ctx, resp.BypassChecks)
+	k := key(resp.PlanID)
+	plan.BypassChecks, err = p.idToCheck(ctx, k, resp.BypassChecks)
 	if err != nil {
 		return nil, fmt.Errorf("couldn't get plan bypasschecks: %w", err)
 	}
-	plan.PreChecks, err = p.idToCheck(ctx, resp.PreChecks)
+	plan.PreChecks, err = p.idToCheck(ctx, k, resp.PreChecks)
 	if err != nil {
 		return nil, fmt.Errorf("couldn't get plan prechecks: %w", err)
 	}
-	plan.ContChecks, err = p.idToCheck(ctx, resp.ContChecks)
+	plan.ContChecks, err = p.idToCheck(ctx, k, resp.ContChecks)
 	if err != nil {
 		return nil, fmt.Errorf("couldn't get plan contchecks: %w", err)
 	}
-	plan.PostChecks, err = p.idToCheck(ctx, resp.PostChecks)
+	plan.PostChecks, err = p.idToCheck(ctx, k, resp.PostChecks)
 	if err != nil {
 		return nil, fmt.Errorf("couldn't get plan postchecks: %w", err)
 	}
-	plan.DeferredChecks, err = p.idToCheck(ctx, resp.DeferredChecks)
+	plan.DeferredChecks, err = p.idToCheck(ctx, k, resp.DeferredChecks)
 	if err != nil {
 		return nil, fmt.Errorf("couldn't get plan deferredchecks: %w", err)
 	}
-	plan.Blocks, err = p.idsToBlocks(ctx, resp.Blocks)
+	plan.Blocks, err = p.idsToBlocks(ctx, k, resp.Blocks)
 	if err != nil {
 		return nil, fmt.Errorf("couldn't get blocks: %w", err)
 	}

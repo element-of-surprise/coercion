@@ -37,9 +37,6 @@ type Vault struct {
 	container string
 	// endpoint is the CosmosDB account endpoint
 	endpoint string
-	// pkVal is the partition key value for the storage.
-	// This assumes the service will use a single partition.
-	pkVal string
 
 	client     *azcosmos.Client
 	contClient *azcosmos.ContainerClient
@@ -115,16 +112,13 @@ func WithItemOptions(opts azcosmos.ItemOptions) Option {
 
 // New is the constructor for *Vault. db, container, and pval are used to identify the storage container.
 // If the container does not exist, it will be created.
-// The partition key has a set key name, so users should decide what partition key value means to them depending on
-// their architecture.
-func New(ctx context.Context, db, container, pval string, cred azcore.TokenCredential, reg *registry.Register, options ...Option) (*Vault, error) {
+func New(ctx context.Context, db, container string, cred azcore.TokenCredential, reg *registry.Register, options ...Option) (*Vault, error) {
 	ctx = context.WithoutCancel(ctx)
 
 	r := &Vault{
 		db:        db,
 		container: container,
 		endpoint:  fmt.Sprintf("https://%s.documents.azure.com:443/", db),
-		pkVal:     pval,
 	}
 	for _, o := range options {
 		if err := o(r); err != nil {
@@ -147,27 +141,22 @@ func New(ctx context.Context, db, container, pval string, cred azcore.TokenCrede
 
 	mu := &sync.RWMutex{}
 
-	pk := azcosmos.NewPartitionKeyString(pval)
 	r.reader = reader{
 		mu:           mu,
 		container:    container,
 		client:       r.contClient,
-		pk:           pk,
 		defaultIOpts: &r.itemOpts,
 		reg:          reg,
 	}
 	r.creator = creator{
 		mu:     mu,
 		client: r.contClient,
-		pkStr:  pval,
-		pk:     pk,
 		reader: r.reader,
 	}
-	r.updater = newUpdater(mu, r.contClient, pk, &r.itemOpts)
+	r.updater = newUpdater(mu, r.contClient, &r.itemOpts)
 	r.deleter = deleter{
 		mu:     mu,
 		client: r.contClient,
-		pk:     pk,
 		reader: r.reader,
 	}
 	r.closer = closer{}
@@ -216,7 +205,7 @@ func (v *Vault) createContainerClient(ctx context.Context) (*azcosmos.ContainerC
 func (v *Vault) createContainer(ctx context.Context, database *azcosmos.DatabaseClient, indexPaths []azcosmos.IncludedPath) (string, error) {
 	v.props.ID = v.container
 	v.props.PartitionKeyDefinition = azcosmos.PartitionKeyDefinition{
-		Paths: []string{"/pk"},
+		Paths: []string{"/partitionKey"},
 	}
 	v.props.IndexingPolicy = &azcosmos.IndexingPolicy{
 		IncludedPaths: indexPaths,
