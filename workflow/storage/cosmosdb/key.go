@@ -12,7 +12,7 @@ func key(v any) azcosmos.PartitionKey {
 	// being able to actually use the database. So, it doesn't support not using partition keys.
 	// This means I have to use cosmos as a key value store, which is not what I want.
 	// Because there weren't a bunch of way better products to do key/value with...........
-	// Anyways, so until then we have to return a staic key.
+	// Anyways, so until then we have to return a static key.
 	//
 	// When we enable this one day in 2030, r.client.NewQueryItemsPager() in reader.Search() will need to
 	// be updated to use the nil parition key and remove key().
@@ -40,7 +40,7 @@ func keyStr(v any) string {
 	// Anyways, so until then we have to return a staic key.
 	//
 	// When we enable this one day in 2030, r.client.NewQueryItemsPager() in reader.Search() will need to
-	// be updated to use the nil parition key and remove key().
+	// be updated to use the nil partition key and remove key().
 	/*
 		switch x := v.(type) {
 		case uuid.UUID:

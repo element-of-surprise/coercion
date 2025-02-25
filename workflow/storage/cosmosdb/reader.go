@@ -104,7 +104,7 @@ func (r reader) Search(ctx context.Context, filters storage.Filters) (chan stora
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	pager := r.client.NewQueryItemsPager(q, key("doesntmatterwhatIput"), &azcosmos.QueryOptions{QueryParameters: parameters})
+	pager := r.client.NewQueryItemsPager(q, key("doesntmatterwhatiput"), &azcosmos.QueryOptions{QueryParameters: parameters})
 	results := make(chan storage.Stream[storage.ListResult], 1)
 	go func() {
 		defer close(results)
