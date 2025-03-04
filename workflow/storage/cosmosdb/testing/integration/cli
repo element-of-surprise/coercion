@@ -1,0 +1,1 @@
+ go run main.go -db-name="medbaydb" -container-name="doak"
