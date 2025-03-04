@@ -50,7 +50,19 @@ func (d deleter) Delete(ctx context.Context, id uuid.UUID) error {
 		}
 		return nil
 	}
+	deleteSearch := func(ctx context.Context, r exponential.Record) error {
+		if err := d.deleteSearch(ctx, plan.ID); err != nil {
+			if !isRetriableError(err) {
+				return fmt.Errorf("%w: %w", err, exponential.ErrPermanent)
+			}
+			return err
+		}
+		return nil
+	}
 	if err := backoff.Retry(context.WithoutCancel(ctx), deletePlan); err != nil {
+		return fmt.Errorf("couldn't delete plan: %w", err)
+	}
+	if err := backoff.Retry(context.WithoutCancel(ctx), deleteSearch); err != nil {
 		return fmt.Errorf("couldn't delete plan: %w", err)
 	}
 
@@ -88,7 +100,18 @@ func (d deleter) deletePlan(ctx context.Context, plan *workflow.Plan) error {
 	}
 	batch.DeleteItem(plan.ID.String(), itemOpt)
 
-	if _, err := d.client.ExecuteTransactionalBatch(ctx, batch, nil); err != nil {
+	if _, err := d.client.ExecuteTransactionalBatch(ctx, batch, emptyBatchOptions); err != nil {
+		return fmt.Errorf("failed to delete plan through Cosmos DB API: %w", err)
+	}
+
+	return nil
+}
+
+func (d deleter) deleteSearch(ctx context.Context, id uuid.UUID) error {
+	batch := d.client.NewTransactionalBatch(searchKey)
+	batch.DeleteItem(id.String(), emptyItemOptions)
+
+	if _, err := d.client.ExecuteTransactionalBatch(ctx, batch, emptyBatchOptions); err != nil {
 		return fmt.Errorf("failed to delete plan through Cosmos DB API: %w", err)
 	}
 

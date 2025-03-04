@@ -20,9 +20,9 @@ import (
 
 const (
 	// beginning of query to list plans with a filter
-	searchPlans = `SELECT c.id, c.groupID, c.name, c.descr, c.submitTime, c.stateStatus, c.stateStart, c.stateEnd FROM c WHERE c.type=@objectType AND`
+	searchPlans = `SELECT c.id, c.groupID, c.name, c.descr, c.submitTime, c.stateStatus, c.stateStart, c.stateEnd FROM c `
 	// list all plans without parameters
-	listPlans = `SELECT c.id, c.groupID, c.name, c.descr, c.submitTime, c.stateStatus, c.stateStart, c.stateEnd FROM c WHERE c.type=@objectType ORDER BY c.submitTime DESC`
+	listPlans = `SELECT c.id, c.groupID, c.name, c.descr, c.submitTime, c.stateStatus, c.stateStart, c.stateEnd FROM c ORDER BY c.submitTime DESC`
 )
 
 // readerClient provides abstraction for testing reader. This is implmented by *azcosmos.ContainerClient.
@@ -93,6 +93,13 @@ func (r reader) Read(ctx context.Context, id uuid.UUID) (*workflow.Plan, error) 
 	return plan, nil
 }
 
+const searchKeyStr = "planSearch"
+
+var searchKey = azcosmos.NewPartitionKeyString(searchKeyStr)
+
+// DOAK - This is where you are at, fix Search and List to use the searchKey and search records.
+// ALSO, you need to update key.go to use the right keys and remove "doesntmatterwhatiput" from any code.
+
 // Search returns a list of Plan IDs that match the filter.
 func (r reader) Search(ctx context.Context, filters storage.Filters) (chan storage.Stream[storage.ListResult], error) {
 	if err := filters.Validate(); err != nil {
@@ -104,7 +111,7 @@ func (r reader) Search(ctx context.Context, filters storage.Filters) (chan stora
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	pager := r.client.NewQueryItemsPager(q, key("doesntmatterwhatiput"), &azcosmos.QueryOptions{QueryParameters: parameters})
+	pager := r.client.NewQueryItemsPager(q, searchKey, &azcosmos.QueryOptions{QueryParameters: parameters})
 	results := make(chan storage.Stream[storage.ListResult], 1)
 	go func() {
 		defer close(results)
@@ -138,12 +145,25 @@ func (r reader) Search(ctx context.Context, filters storage.Filters) (chan stora
 }
 
 func (r reader) buildSearchQuery(filters storage.Filters) (string, []azcosmos.QueryParameter) {
-	parameters := []azcosmos.QueryParameter{{Name: "@objectType", Value: int64(workflow.OTPlan)}}
+	parameters := []azcosmos.QueryParameter{}
 
 	build := strings.Builder{}
 	build.WriteString(searchPlans)
 
 	numFilters := 0
+
+	// Determine if we need a where clause.
+	where := []int{
+		len(filters.ByIDs),
+		len(filters.ByGroupIDs),
+		len(filters.ByStatus),
+	}
+	for _, i := range where {
+		if i > 0 {
+			build.WriteString("WHERE")
+			break
+		}
+	}
 
 	if len(filters.ByIDs) > 0 {
 		numFilters++
@@ -181,7 +201,11 @@ func (r reader) buildSearchQuery(filters storage.Filters) (string, []azcosmos.Qu
 			build.WriteString(")")
 		}
 	}
-	build.WriteString(" ORDER BY c.submitTime DESC")
+	if numFilters > 0 {
+		build.WriteString(" ORDER BY c.submitTime DESC")
+	} else {
+		build.WriteString("ORDER BY c.submitTime DESC")
+	}
 	query := build.String()
 
 	if len(filters.ByIDs) > 0 {
@@ -203,16 +227,17 @@ func (r reader) buildSearchQuery(filters storage.Filters) (string, []azcosmos.Qu
 // return with most recent submitted first. limit sets the maximum number of entries to return. If
 // limit == 0, there is no limit.
 func (r reader) List(ctx context.Context, limit int) (chan storage.Stream[storage.ListResult], error) {
-	parameters := []azcosmos.QueryParameter{{Name: "@objectType", Value: int64(workflow.OTPlan)}}
+	parameters := []azcosmos.QueryParameter{}
 	q := listPlans
 	if limit > 0 {
-		q += fmt.Sprintf(" OFFSET 0 LIMIT %d", limit)
+		q += " OFFSET 0 LIMIT @limit"
+		parameters = append(parameters, azcosmos.QueryParameter{Name: "@limit", Value: limit})
 	}
 
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	pager := r.client.NewQueryItemsPager(q, azcosmos.NullPartitionKey, &azcosmos.QueryOptions{QueryParameters: parameters})
+	pager := r.client.NewQueryItemsPager(q, searchKey, &azcosmos.QueryOptions{QueryParameters: parameters})
 	results := make(chan storage.Stream[storage.ListResult], 1)
 	go func() {
 		defer close(results)
@@ -247,13 +272,13 @@ func (r reader) List(ctx context.Context, limit int) (chan storage.Stream[storag
 // listResultsFunc is a helper function to convert a CosmosDB document into a ListResult.
 func (r reader) listResultsFunc(item []byte) (storage.ListResult, error) {
 	var err error
-	var resp plansEntry
+	var resp searchEntry
 	if err = json.Unmarshal(item, &resp); err != nil {
 		return storage.ListResult{}, err
 	}
 
 	result := storage.ListResult{
-		ID:         resp.PlanID,
+		ID:         resp.ID,
 		GroupID:    resp.GroupID,
 		Name:       resp.Name,
 		Descr:      resp.Descr,
@@ -262,7 +287,6 @@ func (r reader) listResultsFunc(item []byte) (storage.ListResult, error) {
 			Status: resp.StateStatus,
 			Start:  resp.StateStart,
 			End:    resp.StateEnd,
-			ETag:   string(resp.ETag),
 		},
 	}
 	return result, nil

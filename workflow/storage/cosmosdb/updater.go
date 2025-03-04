@@ -8,6 +8,7 @@ import (
 	"github.com/element-of-surprise/coercion/internal/private"
 	"github.com/element-of-surprise/coercion/workflow"
 	"github.com/element-of-surprise/coercion/workflow/storage"
+	"github.com/go-json-experiment/json"
 
 	"github.com/Azure/azure-sdk-for-go/sdk/data/azcosmos"
 	"github.com/gostdlib/base/retry/exponential"
@@ -32,7 +33,7 @@ type updater struct {
 	private.Storage
 }
 
-func newUpdater(mu *sync.RWMutex, client patchItemer, defaultIOpts *azcosmos.ItemOptions) updater {
+func newUpdater(mu *sync.RWMutex, client planPatcher, defaultIOpts *azcosmos.ItemOptions) updater {
 	uo := updater{}
 
 	uo.planUpdater = planUpdater{
@@ -81,7 +82,15 @@ func (u updater) UpdateObject(ctx context.Context, o workflow.Object) error {
 	panic(fmt.Sprintf("bug: cannot update object type %T", o))
 }
 
-type patchItem func(ctx context.Context, cc patchItemer, pk azcosmos.PartitionKey, id string, patch azcosmos.PatchOperations, itemOpt *azcosmos.ItemOptions) (azcosmos.ItemResponse, error)
+// patchPlan patches the plan in the database and updates the search index.
+func patchPlan(ctx context.Context, client planPatcher, plan *workflow.Plan, patch azcosmos.PatchOperations, itemOpt *azcosmos.ItemOptions) (azcosmos.ItemResponse, error) {
+	resp, err := patchItemWithRetry(ctx, client, key(plan), plan.GetID().String(), patch, itemOpt)
+	if err != nil {
+		return azcosmos.ItemResponse{}, fmt.Errorf("failed to patch plan through Cosmos DB API: %w", err)
+	}
+	_, err = replaceSearch(ctx, client, plan)
+	return resp, err
+}
 
 func patchItemWithRetry(ctx context.Context, cc patchItemer, pk azcosmos.PartitionKey, id string, patch azcosmos.PatchOperations, itemOpt *azcosmos.ItemOptions) (azcosmos.ItemResponse, error) {
 	var resp azcosmos.ItemResponse
@@ -98,6 +107,51 @@ func patchItemWithRetry(ctx context.Context, cc patchItemer, pk azcosmos.Partiti
 	}
 	if err := backoff.Retry(context.WithoutCancel(ctx), patchItem); err != nil {
 		return azcosmos.ItemResponse{}, fmt.Errorf("failed to patch item through Cosmos DB API: %w", err)
+	}
+	return resp, nil
+}
+
+// replace search replaces the search entry for the plan.
+func replaceSearch(ctx context.Context, client creatorClient, plan *workflow.Plan) (azcosmos.TransactionalBatchResponse, error) {
+	var resp azcosmos.TransactionalBatchResponse
+	var err error
+
+	b, err := json.Marshal(plan)
+	if err != nil {
+		return azcosmos.TransactionalBatchResponse{}, fmt.Errorf("failed to marshal search recordd: %w", err)
+	}
+
+	se := searchEntry{
+		PartitionKey: searchKeyStr,
+		Name:         plan.Name,
+		Descr:        plan.Descr,
+		ID:           plan.ID,
+		GroupID:      plan.GroupID,
+		SubmitTime:   plan.SubmitTime,
+		StateStatus:  plan.State.Status,
+		StateStart:   plan.State.Start,
+		StateEnd:     plan.State.End,
+	}
+	b, err = json.Marshal(se)
+	if err != nil {
+		return azcosmos.TransactionalBatchResponse{}, fmt.Errorf("failed to marshal search record: %w", err)
+	}
+
+	searchBatch := client.NewTransactionalBatch(searchKey)
+	searchBatch.ReplaceItem(plan.GetID().String(), b, emptyItemOptions)
+
+	replaceSearch := func(ctx context.Context, r exponential.Record) error {
+		resp, err = client.ExecuteTransactionalBatch(ctx, searchBatch, emptyBatchOptions)
+		if err != nil {
+			if !isRetriableError(err) {
+				return fmt.Errorf("%w: %w", err, exponential.ErrPermanent)
+			}
+			return err
+		}
+		return nil
+	}
+	if err := backoff.Retry(context.WithoutCancel(ctx), replaceSearch); err != nil {
+		return azcosmos.TransactionalBatchResponse{}, fmt.Errorf("failed to patch item through Cosmos DB API: %w", err)
 	}
 	return resp, nil
 }

@@ -113,3 +113,19 @@ type actionsEntry struct {
 
 	ETag azcore.ETag `json:"_etag,omitempty"`
 }
+
+// ok, to deal with the fact that we can't do multiple partition keys in the go sdk, we are going to put all an index
+// for searching into a single partition key. This will be the partition key will contain only the search index.
+// Without any compression, about 500K entries make about 109MiB. So this should hold us for a while, especially if we are
+// going to do 30/60/90 day retention.
+type searchEntry struct {
+	PartitionKey string          `json:"partitionKey"`
+	Name         string          `json:"name,omitempty"`
+	Descr        string          `json:"descr,omitempty"`
+	ID           uuid.UUID       `json:"id,omitempty"`
+	GroupID      uuid.UUID       `json:"groupID,omitempty"`
+	SubmitTime   time.Time       `json:"submitTime,omitempty"`
+	StateStatus  workflow.Status `json:"stateStatus,omitempty"`
+	StateStart   time.Time       `json:"stateStart,omitempty"`
+	StateEnd     time.Time       `json:"stateEnd,omitempty"`
+}

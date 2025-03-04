@@ -10,7 +10,6 @@ import (
 	"github.com/element-of-surprise/coercion/workflow"
 
 	"github.com/google/uuid"
-	"github.com/gostdlib/base/retry/exponential"
 )
 
 // creatorClient provides a method to execute a batch of transactions.
@@ -56,17 +55,5 @@ func (c creator) Create(ctx context.Context, plan *workflow.Plan) error {
 		return fmt.Errorf("plan with ID(%s) already exists", plan.ID)
 	}
 
-	commitPlan := func(ctx context.Context, r exponential.Record) error {
-		if err = c.commitPlan(ctx, plan); err != nil {
-			if !isRetriableError(err) {
-				return fmt.Errorf("%w: %w", err, exponential.ErrPermanent)
-			}
-			return err
-		}
-		return nil
-	}
-	if err := backoff.Retry(context.WithoutCancel(ctx), commitPlan); err != nil {
-		return fmt.Errorf("failed to commit plan: %w", err)
-	}
-	return nil
+	return c.commitPlan(ctx, plan)
 }

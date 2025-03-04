@@ -4,6 +4,8 @@ to implement the storage.Vault interface.
 
 This package is for use only by the coercion.Workstream and any use outside of that is not
 supported.
+
+DO NOT USE THIS PACKAGE!!!! SERIOUSLY, DO NOT USE THIS PACKAGE!!!!! See notes in the file READ_FIRST.md .
 */
 package cosmosdb
 

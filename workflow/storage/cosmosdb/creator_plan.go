@@ -8,6 +8,7 @@ import (
 
 	"github.com/element-of-surprise/coercion/plugins"
 	"github.com/element-of-surprise/coercion/workflow"
+	"github.com/gostdlib/base/retry/exponential"
 
 	"github.com/Azure/azure-sdk-for-go/sdk/data/azcosmos"
 	"github.com/go-json-experiment/json"
@@ -18,6 +19,7 @@ import (
 
 var zeroTime = time.Time{}
 var emptyItemOptions = &azcosmos.TransactionalBatchItemOptions{}
+var emptyBatchOptions = &azcosmos.TransactionalBatchOptions{}
 
 // commitPlan commits a plan to the database. This commits the entire plan and all sub-objects.
 func (c creator) commitPlan(ctx context.Context, p *workflow.Plan) (err error) {
@@ -30,14 +32,19 @@ func (c creator) commitPlan(ctx context.Context, p *workflow.Plan) (err error) {
 		return err
 	}
 
+	se, err := planToSearchEntry(p)
+	if err != nil {
+		return fmt.Errorf("failed to create search entry: %w", err)
+	}
+
+	// Commit to our plan collection.
 	batch := c.client.NewTransactionalBatch(key(p))
 	for _, item := range itemContext.items {
 		batch.CreateItem(item, emptyItemOptions)
 	}
 
-	_, err = c.client.ExecuteTransactionalBatch(ctx, batch, &azcosmos.TransactionalBatchOptions{})
-	if err != nil {
-		return fmt.Errorf("failed to create plan through Cosmos DB API: %w", err)
+	if err := backoff.Retry(ctx, batchRetryer(batch, c.client)); err != nil {
+		return fmt.Errorf("failed to commit plan: %w", err)
 	}
 
 	// need to re-read plan, because batch response does not contain ETag for each item.
@@ -47,7 +54,61 @@ func (c creator) commitPlan(ctx context.Context, p *workflow.Plan) (err error) {
 	}
 	*p = *result
 
+	// Commit to our search collection.
+	batch = c.client.NewTransactionalBatch(searchKey)
+	b, err := json.Marshal(se)
+	if err != nil {
+		return fmt.Errorf("failed to marshal search record: %w", err)
+	}
+	batch.CreateItem(b, emptyItemOptions)
+	if err := backoff.Retry(ctx, batchRetryer(batch, c.client)); err != nil {
+		return fmt.Errorf("failed to commit plan to search records: %w", err)
+	}
+
 	return nil
+}
+
+// batchRetryer returns a retry function that retries the batch operation.
+func batchRetryer(batch azcosmos.TransactionalBatch, client creatorClient) exponential.Op {
+	return func(ctx context.Context, r exponential.Record) error {
+		results, err := client.ExecuteTransactionalBatch(ctx, batch, emptyBatchOptions)
+		if err != nil {
+			if !isRetriableError(err) {
+				return fmt.Errorf("%w: %w", err, exponential.ErrPermanent)
+			}
+			return err
+		}
+		for i, result := range results.OperationResults {
+			if result.StatusCode != 201 {
+				return fmt.Errorf("item(%d) has status code %d: %w", i, result.StatusCode, exponential.ErrPermanent)
+			}
+		}
+		return nil
+	}
+}
+
+// planToSearchEntry converts a plan to a searchEntry.
+func planToSearchEntry(p *workflow.Plan) (searchEntry, error) {
+	if p == nil {
+		return searchEntry{}, fmt.Errorf("planToSearchEntry: plan cannot be nil")
+	}
+
+	// Super basic defense in depth check.
+	if p.ID == uuid.Nil {
+		return searchEntry{}, errors.New("plan must have an ID")
+	}
+
+	return searchEntry{
+		PartitionKey: searchKeyStr,
+		Name:         p.Name,
+		Descr:        p.Descr,
+		ID:           p.ID,
+		GroupID:      p.GroupID,
+		StateStatus:  p.State.Status,
+		SubmitTime:   p.SubmitTime,
+		StateStart:   p.State.Start,
+		StateEnd:     p.State.End,
+	}, nil
 }
 
 type itemsContext struct {
