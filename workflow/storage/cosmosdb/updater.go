@@ -118,7 +118,7 @@ func replaceSearch(ctx context.Context, client creatorClient, plan *workflow.Pla
 
 	b, err := json.Marshal(plan)
 	if err != nil {
-		return azcosmos.TransactionalBatchResponse{}, fmt.Errorf("failed to marshal search recordd: %w", err)
+		return azcosmos.TransactionalBatchResponse{}, fmt.Errorf("failed to marshal search record: %w", err)
 	}
 
 	se := searchEntry{

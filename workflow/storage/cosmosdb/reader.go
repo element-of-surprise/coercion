@@ -97,9 +97,6 @@ const searchKeyStr = "planSearch"
 
 var searchKey = azcosmos.NewPartitionKeyString(searchKeyStr)
 
-// DOAK - This is where you are at, fix Search and List to use the searchKey and search records.
-// ALSO, you need to update key.go to use the right keys and remove "doesntmatterwhatiput" from any code.
-
 // Search returns a list of Plan IDs that match the filter.
 func (r reader) Search(ctx context.Context, filters storage.Filters) (chan storage.Stream[storage.ListResult], error) {
 	if err := filters.Validate(); err != nil {
