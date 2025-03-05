@@ -178,9 +178,13 @@ func getIDsFromQueryParameters(params []azcosmos.QueryParameter) map[uuid.UUID]s
 
 type commonFields struct {
 	ID          uuid.UUID           `json:"id"`
-	PlanID      uuid.UUID           `json:"planID"` // not set on a Type plan
+	PlanID      uuid.UUID           `json:"planID"`  // not set on a Type plan
+	GroupID     uuid.UUID           `json:"groupID"` // not set except on Type plan
+	Name        string              `json:"name"`
+	Descr       string              `json:"descr"`
 	Type        workflow.ObjectType `json:"type"`
 	StateStatus workflow.Status     `json:"stateStatus"`
+	SubmitTime  time.Time           `json:"submitTime"` // not set except on Type plan
 	StateStart  time.Time           `json:"stateStart"`
 	StateEnd    time.Time           `json:"stateEnd"`
 }

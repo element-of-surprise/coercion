@@ -16,8 +16,7 @@ var _ storage.ActionUpdater = actionUpdater{}
 
 // actionUpdater implements the storage.actionUpdater interface.
 type actionUpdater struct {
-	mu *sync.RWMutex
-
+	mu     *sync.RWMutex
 	client patchItemer
 
 	defaultIOpts *azcosmos.ItemOptions

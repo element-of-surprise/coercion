@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"math"
 	"net/http"
 	"reflect"
 	"strings"
@@ -18,12 +19,15 @@ import (
 	"github.com/element-of-surprise/coercion/plugins/registry"
 	"github.com/element-of-surprise/coercion/workflow"
 	"github.com/element-of-surprise/coercion/workflow/utils/walk"
+	"github.com/go-json-experiment/json"
 	"github.com/google/uuid"
 	"zombiezen.com/go/sqlite"
 	"zombiezen.com/go/sqlite/sqlitex"
 )
 
 // TODO: Improve this so that we take into account the partition key so if that doesn't match it doesn't return.
+
+const swarm = "swarm"
 
 // fakeStorage fakes the storage methods needed to communicate with azcosmos used in this package.
 // We have to use some unsafe methods to avoid writing unneccesary wrappers to get at data used for mocks.
@@ -36,19 +40,36 @@ type fakeStorage struct {
 	pool *sqlitex.Pool
 	reg  *registry.Register
 
-	readItemErr   error
-	queryItemsErr bool
-	createItemErr bool
-	deleteItemErr bool
+	readItemErr    error
+	queryItemsErr  bool
+	createItemErr  bool
+	deleteItemErr  bool
+	replaceItemErr bool
 }
 
 func newFakeStorage(reg *registry.Register) *fakeStorage {
-	const table = `
+	const (
+		pagesTable = `
 CREATE Table If Not Exists pages (
 	id TEXT PRIMARY KEY,
 	plan_id TEXT NOT NULL,
 	data BLOB NOT NULL
 );`
+
+		searchTable = `
+CREATE Table If Not Exists search (
+	id TEXT PRIMARY KEY,
+	group_id TEXT,
+	name string,
+	descr string,
+	status INTEGER,
+	stateStart INTEGER,
+	stateEnd INTEGER,
+	submitTime INTEGER,
+	data BLOB NOT NULL
+);`
+	)
+
 	var flags sqlite.OpenFlags
 	flags |= sqlite.OpenReadWrite
 	flags |= sqlite.OpenCreate
@@ -79,7 +100,14 @@ CREATE Table If Not Exists pages (
 
 	if err := sqlitex.ExecuteTransient(
 		conn,
-		table,
+		pagesTable,
+		&sqlitex.ExecOptions{},
+	); err != nil {
+		panic(fmt.Sprintf("couldn't create table: %s", err))
+	}
+	if err := sqlitex.ExecuteTransient(
+		conn,
+		searchTable,
 		&sqlitex.ExecOptions{},
 	); err != nil {
 		panic(fmt.Sprintf("couldn't create table: %s", err))
@@ -102,6 +130,41 @@ func (f *fakeStorage) writeData(ctx context.Context, id, planID string, data []b
 			"$id":      id,
 			"$plan_id": planID,
 			"$data":    data,
+		},
+	})
+
+	if err != nil {
+		panic(err)
+	}
+	return nil
+}
+
+func (f *fakeStorage) writeSearchData(ctx context.Context, data []byte) (err error) {
+	const q = `INSERT OR REPLACE INTO search (id, group_id, name, descr, status, stateStart, stateEnd, submitTime, data) VALUES ($id, $group_id, $name, $descr, $status, $stateStart, $stateEnd, $submitTime, $data);`
+
+	se := searchEntry{}
+	if err := json.Unmarshal(data, &se); err != nil {
+		panic(err)
+	}
+
+	conn, err := f.pool.Take(ctx)
+	if err != nil {
+		panic(fmt.Sprintf("couldn't get a connection from the pool: %s", err))
+	}
+	defer f.pool.Put(conn)
+	defer sqlitex.Transaction(conn)(&err)
+
+	err = sqlitex.Execute(conn, q, &sqlitex.ExecOptions{
+		Named: map[string]any{
+			"$id":         se.ID.String(),
+			"$group_id":   se.GroupID.String(),
+			"$name":       se.Name,
+			"$descr":      se.Descr,
+			"$status":     int(se.StateStatus),
+			"$stateStart": int(se.StateStart.UnixNano()),
+			"$stateEnd":   int(se.StateEnd.UnixNano()),
+			"$submitTime": int(se.SubmitTime.UnixNano()),
+			"$data":       data,
 		},
 	})
 
@@ -137,44 +200,45 @@ func (f *fakeStorage) deleteItem(ctx context.Context, id string) (err error) {
 	return nil
 }
 
-type data struct {
-	id     string
-	planID string
-	data   []byte
-}
+func (f *fakeStorage) deleteSearchEntry(ctx context.Context, id string) (err error) {
+	const q = `DELETE FROM search WHERE id = $id;`
 
-func (f *fakeStorage) allIDs(conn *sqlite.Conn) ([]data, error) {
-	const fetchAll = `SELECT id, plan_id, data FROM pages`
+	if f.deleteItemErr {
+		return errors.New("error")
+	}
 
-	d := []data{}
-	err := sqlitex.Execute(
-		conn,
-		fetchAll,
-		&sqlitex.ExecOptions{
-			ResultFunc: func(stmt *sqlite.Stmt) error {
-				b := make([]byte, stmt.GetLen("data"))
-				stmt.GetBytes("data", b)
-				d = append(
-					d,
-					data{
-						id:     stmt.GetText("id"),
-						planID: stmt.GetText("plan_id"),
-						data:   b,
-					},
-				)
-				return nil
-			},
+	conn, err := f.pool.Take(ctx)
+	if err != nil {
+		panic(fmt.Sprintf("couldn't get a connection from the pool: %s", err))
+	}
+	defer f.pool.Put(conn)
+	defer sqlitex.Transaction(conn)(&err)
+
+	err = sqlitex.Execute(conn, q, &sqlitex.ExecOptions{
+		Named: map[string]any{
+			"$id": id,
 		},
-	)
+	})
+
 	if err != nil {
 		panic(err)
 	}
-	return d, nil
+	return nil
 }
 
-// ExecuteTransactionalBatch creates a transactional batch.
+// NewTransactionalBatch creates a transactional batch.
 func (f *fakeStorage) NewTransactionalBatch(partitionKey azcosmos.PartitionKey) azcosmos.TransactionalBatch {
-	return azcosmos.TransactionalBatch{}
+	batch := &azcosmos.TransactionalBatch{}
+	// Ensure the input is a pointer to a struct
+	batchVal := reflect.ValueOf(batch).Elem()
+
+	// Get the field
+	partitionKeyField := batchVal.FieldByName("partitionKey")
+
+	// Use unsafe to set the field directly
+	fieldPtr := unsafe.Pointer(partitionKeyField.UnsafeAddr())
+	*(*azcosmos.PartitionKey)(fieldPtr) = partitionKey
+	return *batch
 }
 
 // ExecuteTransactionalBatch implements the ExecuteBatcher interface.
@@ -182,7 +246,7 @@ func (f *fakeStorage) ExecuteTransactionalBatch(ctx context.Context, b azcosmos.
 	if reflect.ValueOf(b).IsZero() {
 		return azcosmos.TransactionalBatchResponse{}, fmt.Errorf("empty transactional batch")
 	}
-	ops := unsafeBatchOps(&b)
+	key, ops := unsafeBatchOps(&b)
 
 	for _, op := range ops {
 		switch op.op {
@@ -190,6 +254,7 @@ func (f *fakeStorage) ExecuteTransactionalBatch(ctx context.Context, b azcosmos.
 			if f.createItemErr {
 				return azcosmos.TransactionalBatchResponse{}, errors.New("error")
 			}
+
 			fields, err := getCommonFields(op.resourceBody)
 			if err != nil {
 				panic(err)
@@ -201,15 +266,41 @@ func (f *fakeStorage) ExecuteTransactionalBatch(ctx context.Context, b azcosmos.
 				id = fields.PlanID
 			}
 
-			if err := f.writeData(ctx, id.String(), fields.PlanID.String(), op.resourceBody); err != nil {
-				panic(err)
+			if key == searchKeyStr {
+				if err := f.writeSearchData(ctx, op.resourceBody); err != nil {
+					panic(err)
+				}
+			} else {
+				if err := f.writeData(ctx, id.String(), fields.PlanID.String(), op.resourceBody); err != nil {
+					panic(err)
+				}
 			}
 		case "Delete":
 			if f.deleteItemErr {
 				return azcosmos.TransactionalBatchResponse{}, errors.New("error")
 			}
-			if err := f.deleteItem(ctx, op.itemID); err != nil {
-				return azcosmos.TransactionalBatchResponse{}, err
+			if key == searchKeyStr {
+				if err := f.deleteSearchEntry(ctx, op.itemID); err != nil {
+					return azcosmos.TransactionalBatchResponse{}, err
+				}
+			} else {
+				if err := f.deleteItem(ctx, op.itemID); err != nil {
+					return azcosmos.TransactionalBatchResponse{}, err
+				}
+			}
+		case "Replace":
+			if f.replaceItemErr {
+				return azcosmos.TransactionalBatchResponse{}, errors.New("error")
+			}
+
+			if key == searchKeyStr {
+				if err := f.writeSearchData(ctx, op.resourceBody); err != nil {
+					panic(err)
+				}
+			} else {
+				if err := f.writeData(ctx, op.itemID, "", op.resourceBody); err != nil {
+					panic(err)
+				}
 			}
 		default:
 			panic("do not support the TransactionBatch op: " + op.op)
@@ -222,7 +313,7 @@ func (f *fakeStorage) WritePlan(ctx context.Context, plan *workflow.Plan) error 
 	f.mu.Lock()
 	defer f.mu.Unlock()
 
-	ictx, err := planToItems(plan)
+	ictx, err := planToItems(swarm, plan)
 	if err != nil {
 		panic(err)
 	}
@@ -287,6 +378,9 @@ func (f *fakeStorage) readItem(ctx context.Context, itemID string) (data []byte,
 				stmt.GetBytes("data", b)
 				item = b
 				planID = stmt.GetText("plan_id")
+				if planID == "" {
+					planID = itemID
+				}
 				return nil
 			},
 		},
@@ -318,6 +412,17 @@ func (f *fakeStorage) NewQueryItemsPager(query string, pk azcosmos.PartitionKey,
 			},
 		})
 	}
+
+	s, _ := partitionKeyToStr(&pk)
+	if s == searchKeyStr {
+		return f.searchItemPager(query, pk, o)
+	}
+
+	return f.pagesItemPager(query, pk, o)
+}
+
+func (f *fakeStorage) pagesItemPager(query string, pk azcosmos.PartitionKey, o *azcosmos.QueryOptions) *runtime.Pager[azcosmos.QueryItemsResponse] {
+	const q = `SELECT id, data FROM pages`
 
 	if o.QueryParameters == nil {
 		panic("NewQueryItemsPager: query parameters must exist")
@@ -391,6 +496,109 @@ func (f *fakeStorage) NewQueryItemsPager(query string, pk azcosmos.PartitionKey,
 	})
 }
 
+func (f *fakeStorage) searchItemPager(query string, pk azcosmos.PartitionKey, o *azcosmos.QueryOptions) *runtime.Pager[azcosmos.QueryItemsResponse] {
+	const q = `SELECT id, group_id, name, descr, status, stateStart, stateEnd, submitTime, data FROM search`
+
+	// id, group_id, name, descr, status, stateStart, stateEnd, submitTime
+	if o.QueryParameters == nil {
+		panic("NewQueryItemsPager: query parameters must exist")
+	}
+
+	if len(o.QueryParameters) == 1 {
+		return f.limitItemPager(query, pk, o)
+	}
+	for _, p := range o.QueryParameters {
+		if "@limit" == p.Name {
+			return f.limitItemPager(query, pk, o)
+		}
+	}
+	ids := map[uuid.UUID]struct{}{}
+	if o != nil && len(o.QueryParameters) > 0 {
+		ids = getIDsFromQueryParameters(o.QueryParameters)
+	}
+
+	conn, err := f.pool.Take(context.Background())
+	if err != nil {
+		panic("can't get conn object")
+	}
+	defer f.pool.Put(conn)
+
+	items := [][]byte{}
+	err = sqlitex.Execute(
+		conn,
+		q,
+		&sqlitex.ExecOptions{
+			ResultFunc: func(stmt *sqlite.Stmt) error {
+				b := make([]byte, stmt.GetLen("data"))
+				stmt.GetBytes("data", b)
+				if _, ok := ids[uuid.MustParse(stmt.GetText("id"))]; ok {
+					items = append(items, b)
+				}
+				return nil
+			},
+		},
+	)
+	if err != nil {
+		panic("some type of sqlite error: " + err.Error())
+	}
+
+	return runtime.NewPager(runtime.PagingHandler[azcosmos.QueryItemsResponse]{
+		More: func(page azcosmos.QueryItemsResponse) bool {
+			return page.ContinuationToken != nil
+		},
+		Fetcher: func(ctx context.Context, page *azcosmos.QueryItemsResponse) (azcosmos.QueryItemsResponse, error) {
+			return azcosmos.QueryItemsResponse{Items: items}, nil
+		},
+	})
+}
+
+func (f *fakeStorage) limitItemPager(query string, pk azcosmos.PartitionKey, o *azcosmos.QueryOptions) *runtime.Pager[azcosmos.QueryItemsResponse] {
+	const q = `SELECT data FROM search limit $limit`
+
+	var limit = math.MaxInt
+	for _, p := range o.QueryParameters {
+		if "@limit" == p.Name {
+			limit = int(p.Value.(int64))
+			break
+		}
+	}
+
+	conn, err := f.pool.Take(context.Background())
+	if err != nil {
+		panic("can't get conn object")
+	}
+	defer f.pool.Put(conn)
+
+	items := [][]byte{}
+	err = sqlitex.Execute(
+		conn,
+		q,
+		&sqlitex.ExecOptions{
+			Named: map[string]any{
+				"$limit": limit,
+			},
+			ResultFunc: func(stmt *sqlite.Stmt) error {
+				b := make([]byte, stmt.GetLen("data"))
+				stmt.GetBytes("data", b)
+				items = append(items, b)
+				return nil
+			},
+		},
+	)
+	if err != nil {
+		panic("some type of sqlite error: " + err.Error())
+	}
+
+	return runtime.NewPager(runtime.PagingHandler[azcosmos.QueryItemsResponse]{
+		More: func(page azcosmos.QueryItemsResponse) bool {
+			return page.ContinuationToken != nil
+		},
+		Fetcher: func(ctx context.Context, page *azcosmos.QueryItemsResponse) (azcosmos.QueryItemsResponse, error) {
+			return azcosmos.QueryItemsResponse{Items: items}, nil
+		},
+	})
+}
+
 type getIDer interface {
 	GetID() uuid.UUID
 }
@@ -418,43 +626,62 @@ func (f *fakeStorage) PatchItem(ctx context.Context, key azcosmos.PartitionKey, 
 				log.Println("plan ID was: ", common.ID.String())
 			*/
 
-			reader := reader{client: f, reg: f.reg}
-
-			plan, err := reader.docToPlan(ctx, &azcosmos.ItemResponse{Value: b})
-			if err != nil {
-				panic("could not convert document to plan object: " + err.Error())
-			}
-			ctx, cancel := context.WithCancel(ctx)
-			defer cancel()
-			items := walk.Plan(ctx, plan)
-			var item walk.Item
-			for item = range items {
-				id := item.Value.(getIDer).GetID()
-				if id.String() == itemID {
-					cancel()
-					break
+			if k, _ := partitionKeyToStr(&key); k == searchKeyStr {
+				if resp, err := f.patchSearchEntry(ctx, b); err != nil {
+					return resp, err
 				}
 			}
-			if item.IsZero() {
-				return azcosmos.ItemResponse{}, fmt.Errorf("%q could not be found", itemID)
-			}
-			f.patchObject(op, item.Value.(stateObject))
-
-			ictx, err := planToItems(plan)
-			if err != nil {
-				panic(err)
-			}
-
-			for k, v := range ictx.m {
-				if err := f.writeData(context.Background(), k, plan.GetID().String(), v); err != nil {
-					panic(err)
-				}
+			if resp, err := f.patchPlan(ctx, itemID, op, po, b); err != nil {
+				return resp, err
 			}
 		default:
 			panic(fmt.Sprintf("we don't suport this operation yet: %s", op.Op))
 		}
 	}
 
+	return azcosmos.ItemResponse{}, nil
+}
+
+func (f *fakeStorage) patchSearchEntry(ctx context.Context, b []byte) (azcosmos.ItemResponse, error) {
+	if err := f.writeSearchData(ctx, b); err != nil {
+		return azcosmos.ItemResponse{}, fmt.Errorf("could not patch search entry: %s", err)
+	}
+	return azcosmos.ItemResponse{}, nil
+}
+
+func (f *fakeStorage) patchPlan(ctx context.Context, itemID string, op pathOps, po azcosmos.PatchOperations, b []byte) (azcosmos.ItemResponse, error) {
+	reader := reader{client: f, reg: f.reg}
+	plan, err := reader.docToPlan(ctx, &azcosmos.ItemResponse{Value: b})
+	if err != nil {
+		panic("could not convert document to plan object: " + err.Error())
+	}
+
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	items := walk.Plan(ctx, plan)
+	var item walk.Item
+	for item = range items {
+		id := item.Value.(getIDer).GetID()
+		if id.String() == itemID {
+			cancel()
+			break
+		}
+	}
+	if item.IsZero() {
+		return azcosmos.ItemResponse{}, fmt.Errorf("%q could not be found", itemID)
+	}
+	f.patchObject(op, item.Value.(stateObject))
+
+	ictx, err := planToItems(swarm, plan)
+	if err != nil {
+		panic(err)
+	}
+
+	for k, v := range ictx.m {
+		if err := f.writeData(context.Background(), k, plan.GetID().String(), v); err != nil {
+			panic(err)
+		}
+	}
 	return azcosmos.ItemResponse{}, nil
 }
 
@@ -490,6 +717,9 @@ func (f *fakeStorage) patchObject(op pathOps, o stateObject) {
 			state.Start = op.Value.(time.Time)
 		case "/stateEnd":
 			state.End = op.Value.(time.Time)
+		case "/submitTime":
+			plan := o.(*workflow.Plan)
+			plan.SubmitTime = op.Value.(time.Time)
 		default:
 			panic(fmt.Sprintf("unsupported op Path(%s) on replace op", op.Path))
 		}
@@ -568,8 +798,13 @@ type batchOp struct {
 // Rant: come on, they have an internal mock implementation they don't expose, make it difficult to locally test with
 // mock outs and love using pointers all over when they aren't necessary so my garbage collector can be full all the time.
 // Blah.........
-func unsafeBatchOps(t *azcosmos.TransactionalBatch) []batchOp {
+func unsafeBatchOps(t *azcosmos.TransactionalBatch) (string, []batchOp) {
 	poType := reflect.TypeOf(*t)
+
+	key, foundKey := getPartitionKeyValueAsString(t)
+	if !foundKey {
+		panic("Partition key not found")
+	}
 
 	// Locate the `operations` field.
 	field, found := poType.FieldByName("operations")
@@ -621,6 +856,10 @@ func unsafeBatchOps(t *azcosmos.TransactionalBatch) []batchOp {
 		case strings.Contains(name, "batchOperationCreate"):
 			field := getUnexportedField[[]byte](opValue, "resourceBody")
 			ops = append(ops, batchOp{op: "Create", resourceBody: field})
+		case strings.Contains(name, "batchOperationReplace"):
+			rsc := getUnexportedField[[]byte](opValue, "resourceBody")
+			id := getUnexportedField[string](opValue, "id")
+			ops = append(ops, batchOp{op: "Replace", itemID: id, resourceBody: rsc})
 		case strings.Contains(name, "batchOperationDelete"):
 			field := getUnexportedField[string](opValue, "id")
 			ops = append(ops, batchOp{op: "Delete", itemID: field})
@@ -628,7 +867,80 @@ func unsafeBatchOps(t *azcosmos.TransactionalBatch) []batchOp {
 			panic(fmt.Sprintf("TransactionalBatch contains an unknown operation type: %T", opValue.Interface()))
 		}
 	}
-	return ops
+	return key, ops
+}
+
+func getPartitionKeyValueAsString(batch *azcosmos.TransactionalBatch) (string, bool) {
+	// Use reflection to access the `partitionKey` field
+	batchVal := reflect.ValueOf(batch).Elem()
+	partitionKeyField := batchVal.FieldByName("partitionKey")
+
+	if !partitionKeyField.IsValid() {
+		return "", false
+	}
+
+	// Access `values` field inside `partitionKey`
+	valuesField := partitionKeyField.FieldByName("values")
+	if !valuesField.IsValid() || valuesField.Kind() != reflect.Slice {
+		return "", false
+	}
+
+	// Check if there is at least one element
+	if valuesField.Len() == 0 {
+		return "", false
+	}
+
+	// Access the first element
+	firstElem := valuesField.Index(0)
+
+	// Extract the actual value inside the interface{}
+	if firstElem.Kind() == reflect.Interface {
+		firstElem = firstElem.Elem() // Unwrap the interface
+	}
+
+	// Ensure the value is a string
+	if firstElem.Kind() != reflect.String {
+		return "", false
+	}
+
+	// Extract the string safely
+	str := firstElem.String()
+	return str, true
+}
+
+func partitionKeyToStr(k *azcosmos.PartitionKey) (string, bool) {
+	if k == nil {
+		return "", false
+	}
+
+	v := reflect.ValueOf(k).Elem()
+	valuesField := v.FieldByName("values")
+
+	if !valuesField.IsValid() || valuesField.Kind() != reflect.Slice {
+		return "", false
+	}
+
+	// Check if there is at least one element
+	if valuesField.Len() == 0 {
+		return "", false
+	}
+
+	// Access the first element
+	firstElem := valuesField.Index(0)
+
+	// Extract the actual value inside the interface{}
+	if firstElem.Kind() == reflect.Interface {
+		firstElem = firstElem.Elem() // Unwrap the interface
+	}
+
+	// Ensure the value is a string
+	if firstElem.Kind() != reflect.String {
+		return "", false
+	}
+
+	// Extract the string safely
+	str := firstElem.String()
+	return str, true
 }
 
 // getUnexportedField retrieves an unexported field using unsafe.Pointer

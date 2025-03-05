@@ -4,10 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
 	"time"
 
 	"github.com/element-of-surprise/coercion/plugins"
 	"github.com/element-of-surprise/coercion/workflow"
+	"github.com/gostdlib/base/retry/exponential"
 
 	"github.com/Azure/azure-sdk-for-go/sdk/data/azcosmos"
 	"github.com/go-json-experiment/json"
@@ -18,6 +20,7 @@ import (
 
 var zeroTime = time.Time{}
 var emptyItemOptions = &azcosmos.TransactionalBatchItemOptions{}
+var emptyBatchOptions = &azcosmos.TransactionalBatchOptions{}
 
 // commitPlan commits a plan to the database. This commits the entire plan and all sub-objects.
 func (c creator) commitPlan(ctx context.Context, p *workflow.Plan) (err error) {
@@ -25,19 +28,24 @@ func (c creator) commitPlan(ctx context.Context, p *workflow.Plan) (err error) {
 		return fmt.Errorf("commitPlan: plan cannot be nil")
 	}
 
-	itemContext, err := planToItems(p)
+	itemContext, err := planToItems(c.swarm, p)
 	if err != nil {
 		return err
 	}
 
+	se, err := planToSearchEntry(c.swarm, p)
+	if err != nil {
+		return fmt.Errorf("failed to create search entry: %w", err)
+	}
+
+	// Commit to our plan collection.
 	batch := c.client.NewTransactionalBatch(key(p))
 	for _, item := range itemContext.items {
 		batch.CreateItem(item, emptyItemOptions)
 	}
 
-	_, err = c.client.ExecuteTransactionalBatch(ctx, batch, &azcosmos.TransactionalBatchOptions{})
-	if err != nil {
-		return fmt.Errorf("failed to create plan through Cosmos DB API: %w", err)
+	if err := backoff.Retry(ctx, batchRetryer(batch, c.client)); err != nil {
+		return fmt.Errorf("failed to commit plan: %w", err)
 	}
 
 	// need to re-read plan, because batch response does not contain ETag for each item.
@@ -47,28 +55,85 @@ func (c creator) commitPlan(ctx context.Context, p *workflow.Plan) (err error) {
 	}
 	*p = *result
 
+	// Commit to our search collection.
+	batch = c.client.NewTransactionalBatch(searchKey)
+	b, err := json.Marshal(se)
+	if err != nil {
+		return fmt.Errorf("failed to marshal search record: %w", err)
+	}
+	batch.CreateItem(b, emptyItemOptions)
+	if err := backoff.Retry(ctx, batchRetryer(batch, c.client)); err != nil {
+		return fmt.Errorf("failed to commit plan to search records: %w", err)
+	}
+
 	return nil
 }
 
+// batchRetryer returns a retry function that retries the batch operation.
+func batchRetryer(batch azcosmos.TransactionalBatch, client creatorClient) exponential.Op {
+	return func(ctx context.Context, r exponential.Record) error {
+		results, err := client.ExecuteTransactionalBatch(ctx, batch, emptyBatchOptions)
+		if err != nil {
+			if !isRetriableError(err) {
+				return fmt.Errorf("%w: %w", err, exponential.ErrPermanent)
+			}
+			return err
+		}
+		for i, result := range results.OperationResults {
+			if result.StatusCode != http.StatusCreated {
+				return fmt.Errorf("item(%d) has status code %d: %w", i, result.StatusCode, exponential.ErrPermanent)
+			}
+		}
+		return nil
+	}
+}
+
+// planToSearchEntry converts a plan to a searchEntry.
+func planToSearchEntry(swarm string, p *workflow.Plan) (searchEntry, error) {
+	if p == nil {
+		return searchEntry{}, fmt.Errorf("planToSearchEntry: plan cannot be nil")
+	}
+
+	// Super basic defense in depth check.
+	if p.ID == uuid.Nil {
+		return searchEntry{}, errors.New("plan must have an ID")
+	}
+
+	return searchEntry{
+		PartitionKey: searchKeyStr,
+		Swarm:        swarm,
+		Name:         p.Name,
+		Descr:        p.Descr,
+		ID:           p.ID,
+		GroupID:      p.GroupID,
+		StateStatus:  p.State.Status,
+		SubmitTime:   p.SubmitTime,
+		StateStart:   p.State.Start,
+		StateEnd:     p.State.End,
+	}, nil
+}
+
 type itemsContext struct {
+	swarm  string
 	planID uuid.UUID
 	m      map[string][]byte
 	items  [][]byte
 }
 
-func planToItems(p *workflow.Plan) (*itemsContext, error) {
-	itemsContext := &itemsContext{
+func planToItems(swarm string, p *workflow.Plan) (*itemsContext, error) {
+	iCtx := &itemsContext{
+		swarm:  swarm,
 		planID: p.GetID(),
 		m:      map[string][]byte{},
 	}
 
-	plan, err := planToEntry(p)
+	plan, err := planToEntry(swarm, p)
 	if err != nil {
 		return nil, err
 	}
 
 	for _, check := range [5]*workflow.Checks{p.BypassChecks, p.PreChecks, p.PostChecks, p.ContChecks, p.DeferredChecks} {
-		err = checksToItems(itemsContext, check)
+		err = checksToItems(iCtx, check)
 		if err != nil {
 			return nil, fmt.Errorf("planToItems(commitChecks): %w", err)
 		}
@@ -78,7 +143,7 @@ func planToItems(p *workflow.Plan) (*itemsContext, error) {
 		return nil, fmt.Errorf("commitPlan: plan.Blocks cannot be nil")
 	}
 	for i, b := range p.Blocks {
-		err = blockToItem(itemsContext, i, b)
+		err = blockToItem(iCtx, i, b)
 		if err != nil {
 			return nil, fmt.Errorf("planToItems(commitBlocks): %w", err)
 		}
@@ -89,12 +154,12 @@ func planToItems(p *workflow.Plan) (*itemsContext, error) {
 		return nil, fmt.Errorf("failed to marshal item: %w", err)
 	}
 
-	itemsContext.m[p.ID.String()] = item
-	itemsContext.items = append(itemsContext.items, item)
-	return itemsContext, nil
+	iCtx.m[p.ID.String()] = item
+	iCtx.items = append(iCtx.items, item)
+	return iCtx, nil
 }
 
-func planToEntry(p *workflow.Plan) (plansEntry, error) {
+func planToEntry(swarm string, p *workflow.Plan) (plansEntry, error) {
 	if p == nil {
 		return plansEntry{}, fmt.Errorf("planToEntry: plan cannot be nil")
 	}
@@ -111,6 +176,7 @@ func planToEntry(p *workflow.Plan) (plansEntry, error) {
 
 	plan := plansEntry{
 		PartitionKey: keyStr(p.ID),
+		Swarm:        swarm,
 		Type:         workflow.OTPlan,
 		ID:           p.ID,
 		PlanID:       p.ID,
@@ -145,12 +211,12 @@ func planToEntry(p *workflow.Plan) (plansEntry, error) {
 	return plan, nil
 }
 
-func checksToItems(itemsContext *itemsContext, ch *workflow.Checks) error {
+func checksToItems(iCtx *itemsContext, ch *workflow.Checks) error {
 	if ch == nil {
 		return nil
 	}
 
-	checks, err := checkToEntry(itemsContext.planID, ch)
+	checks, err := checkToEntry(iCtx, ch)
 	if err != nil {
 		return err
 	}
@@ -159,7 +225,7 @@ func checksToItems(itemsContext *itemsContext, ch *workflow.Checks) error {
 		return fmt.Errorf("commitChecks: checks.Actions cannot be nil")
 	}
 	for i, a := range ch.Actions {
-		if err := actionToItems(itemsContext, i, a); err != nil {
+		if err := actionToItems(iCtx, i, a); err != nil {
 			return fmt.Errorf("commitAction: %w", err)
 		}
 	}
@@ -167,12 +233,12 @@ func checksToItems(itemsContext *itemsContext, ch *workflow.Checks) error {
 	if err != nil {
 		return fmt.Errorf("failed to marshal item: %w", err)
 	}
-	itemsContext.items = append(itemsContext.items, item)
-	itemsContext.m[ch.ID.String()] = item
+	iCtx.items = append(iCtx.items, item)
+	iCtx.m[ch.ID.String()] = item
 	return nil
 }
 
-func checkToEntry(planID uuid.UUID, c *workflow.Checks) (checksEntry, error) {
+func checkToEntry(iCtx *itemsContext, c *workflow.Checks) (checksEntry, error) {
 	if c == nil {
 		return checksEntry{}, nil
 	}
@@ -182,11 +248,12 @@ func checkToEntry(planID uuid.UUID, c *workflow.Checks) (checksEntry, error) {
 		return checksEntry{}, fmt.Errorf("objsToIDs(checks.Actions): %w", err)
 	}
 	return checksEntry{
-		PartitionKey: keyStr(planID),
+		PartitionKey: keyStr(iCtx.planID),
+		Swarm:        iCtx.swarm,
 		Type:         workflow.OTCheck,
 		ID:           c.ID,
 		Key:          c.Key,
-		PlanID:       planID,
+		PlanID:       iCtx.planID,
 		Actions:      actions,
 		Delay:        c.Delay,
 		StateStatus:  c.State.Status,
@@ -195,18 +262,18 @@ func checkToEntry(planID uuid.UUID, c *workflow.Checks) (checksEntry, error) {
 	}, nil
 }
 
-func blockToItem(itemsContext *itemsContext, pos int, b *workflow.Block) error {
+func blockToItem(iCtx *itemsContext, pos int, b *workflow.Block) error {
 	if b == nil {
 		return fmt.Errorf("commitBlock: block cannot be nil")
 	}
 
-	block, err := blockToEntry(itemsContext.planID, pos, b)
+	block, err := blockToEntry(iCtx, pos, b)
 	if err != nil {
 		return err
 	}
 
 	for _, check := range [5]*workflow.Checks{b.BypassChecks, b.PreChecks, b.PostChecks, b.ContChecks, b.DeferredChecks} {
-		if err = checksToItems(itemsContext, check); err != nil {
+		if err = checksToItems(iCtx, check); err != nil {
 			return fmt.Errorf("commitBlock(commitChecks): %w", err)
 		}
 	}
@@ -215,7 +282,7 @@ func blockToItem(itemsContext *itemsContext, pos int, b *workflow.Block) error {
 		return fmt.Errorf("commitBlock: block.Sequences cannot be nil")
 	}
 	for i, seq := range b.Sequences {
-		if err := seqToItems(itemsContext, i, seq); err != nil {
+		if err := seqToItems(iCtx, i, seq); err != nil {
 			return fmt.Errorf("(commitSequence: %w", err)
 		}
 	}
@@ -223,13 +290,13 @@ func blockToItem(itemsContext *itemsContext, pos int, b *workflow.Block) error {
 	if err != nil {
 		return fmt.Errorf("failed to marshal item: %w", err)
 	}
-	itemsContext.items = append(itemsContext.items, item)
-	itemsContext.m[b.ID.String()] = item
+	iCtx.items = append(iCtx.items, item)
+	iCtx.m[b.ID.String()] = item
 
 	return nil
 }
 
-func blockToEntry(planID uuid.UUID, pos int, b *workflow.Block) (blocksEntry, error) {
+func blockToEntry(iCtx *itemsContext, pos int, b *workflow.Block) (blocksEntry, error) {
 	if b == nil {
 		return blocksEntry{}, fmt.Errorf("blockToEntry: block cannot be nil")
 	}
@@ -240,11 +307,12 @@ func blockToEntry(planID uuid.UUID, pos int, b *workflow.Block) (blocksEntry, er
 	}
 
 	block := blocksEntry{
-		PartitionKey:      keyStr(planID),
+		PartitionKey:      keyStr(iCtx.planID),
+		Swarm:             iCtx.swarm,
 		Type:              workflow.OTBlock,
 		ID:                b.ID,
 		Key:               b.Key,
-		PlanID:            planID,
+		PlanID:            iCtx.planID,
 		Name:              b.Name,
 		Descr:             b.Descr,
 		Pos:               pos,
@@ -276,12 +344,12 @@ func blockToEntry(planID uuid.UUID, pos int, b *workflow.Block) (blocksEntry, er
 	return block, nil
 }
 
-func seqToItems(itemsContext *itemsContext, pos int, seq *workflow.Sequence) error {
+func seqToItems(iCtx *itemsContext, pos int, seq *workflow.Sequence) error {
 	if seq == nil {
 		return fmt.Errorf("commitSequence: sequence cannot be nil")
 	}
 
-	sequence, err := sequenceToEntry(itemsContext.planID, pos, seq)
+	sequence, err := sequenceToEntry(iCtx, pos, seq)
 	if err != nil {
 		return err
 	}
@@ -290,7 +358,7 @@ func seqToItems(itemsContext *itemsContext, pos int, seq *workflow.Sequence) err
 		return fmt.Errorf("commitSequence: sequence.Actions cannot be nil")
 	}
 	for i, a := range seq.Actions {
-		if err := actionToItems(itemsContext, i, a); err != nil {
+		if err := actionToItems(iCtx, i, a); err != nil {
 			return fmt.Errorf("planToEntry(commitAction): %w", err)
 		}
 	}
@@ -298,12 +366,12 @@ func seqToItems(itemsContext *itemsContext, pos int, seq *workflow.Sequence) err
 	if err != nil {
 		return fmt.Errorf("failed to marshal item: %w", err)
 	}
-	itemsContext.items = append(itemsContext.items, item)
-	itemsContext.m[seq.ID.String()] = item
+	iCtx.items = append(iCtx.items, item)
+	iCtx.m[seq.ID.String()] = item
 	return nil
 }
 
-func sequenceToEntry(planID uuid.UUID, pos int, seq *workflow.Sequence) (sequencesEntry, error) {
+func sequenceToEntry(iCtx *itemsContext, pos int, seq *workflow.Sequence) (sequencesEntry, error) {
 	if seq == nil {
 		return sequencesEntry{}, fmt.Errorf("sequenceToEntry: sequence cannot be nil")
 	}
@@ -314,11 +382,12 @@ func sequenceToEntry(planID uuid.UUID, pos int, seq *workflow.Sequence) (sequenc
 	}
 
 	return sequencesEntry{
-		PartitionKey: keyStr(planID),
+		PartitionKey: keyStr(iCtx.planID),
+		Swarm:        iCtx.swarm,
 		Type:         workflow.OTSequence,
 		ID:           seq.ID,
 		Key:          seq.Key,
-		PlanID:       planID,
+		PlanID:       iCtx.planID,
 		Name:         seq.Name,
 		Descr:        seq.Descr,
 		Pos:          pos,
@@ -329,12 +398,12 @@ func sequenceToEntry(planID uuid.UUID, pos int, seq *workflow.Sequence) (sequenc
 	}, nil
 }
 
-func actionToItems(itemsContext *itemsContext, pos int, a *workflow.Action) error {
+func actionToItems(iCtx *itemsContext, pos int, a *workflow.Action) error {
 	if a == nil {
 		return fmt.Errorf("commitAction: action cannot be nil")
 	}
 
-	action, err := actionToEntry(itemsContext.planID, pos, a)
+	action, err := actionToEntry(iCtx, pos, a)
 	if err != nil {
 		return err
 	}
@@ -343,13 +412,13 @@ func actionToItems(itemsContext *itemsContext, pos int, a *workflow.Action) erro
 	if err != nil {
 		return fmt.Errorf("failed to marshal item: %w", err)
 	}
-	itemsContext.items = append(itemsContext.items, item)
-	itemsContext.m[a.ID.String()] = item
+	iCtx.items = append(iCtx.items, item)
+	iCtx.m[a.ID.String()] = item
 
 	return nil
 }
 
-func actionToEntry(planID uuid.UUID, pos int, a *workflow.Action) (actionsEntry, error) {
+func actionToEntry(iCtx *itemsContext, pos int, a *workflow.Action) (actionsEntry, error) {
 	if a == nil {
 		return actionsEntry{}, fmt.Errorf("actionToEntry: action cannot be nil")
 	}
@@ -363,11 +432,12 @@ func actionToEntry(planID uuid.UUID, pos int, a *workflow.Action) (actionsEntry,
 		return actionsEntry{}, fmt.Errorf("can't encode action.Attempts: %w", err)
 	}
 	return actionsEntry{
-		PartitionKey: keyStr(planID),
+		PartitionKey: keyStr(iCtx.planID),
+		Swarm:        iCtx.swarm,
 		ID:           a.ID,
 		Type:         workflow.OTAction,
 		Key:          a.Key,
-		PlanID:       planID,
+		PlanID:       iCtx.planID,
 		Name:         a.Name,
 		Descr:        a.Descr,
 		Pos:          pos,

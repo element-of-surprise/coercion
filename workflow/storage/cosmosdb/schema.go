@@ -10,6 +10,7 @@ import (
 
 type plansEntry struct {
 	PartitionKey string              `json:"partitionKey"`
+	Swarm        string              `json:"swarm"`
 	Type         workflow.ObjectType `json:"type,omitempty"`
 	ID           uuid.UUID           `json:"id,omitempty"`
 	// PlanID is the unique identifier for the plan. This is a duplicate of ID. All other items have ID and PlanID.
@@ -37,6 +38,7 @@ type plansEntry struct {
 
 type blocksEntry struct {
 	PartitionKey      string              `json:"partitionKey"`
+	Swarm             string              `json:"swarm"`
 	Type              workflow.ObjectType `json:"type,omitempty"`
 	ID                uuid.UUID           `json:"id,omitempty"`
 	Key               uuid.UUID           `json:"key,omitempty"`
@@ -63,6 +65,7 @@ type blocksEntry struct {
 
 type checksEntry struct {
 	PartitionKey string              `json:"partitionKey"`
+	Swarm        string              `json:"swarm"`
 	Type         workflow.ObjectType `json:"type,omitempty"`
 	ID           uuid.UUID           `json:"id,omitempty"`
 	Key          uuid.UUID           `json:"key,omitempty"`
@@ -78,6 +81,7 @@ type checksEntry struct {
 
 type sequencesEntry struct {
 	PartitionKey string              `json:"partitionKey"`
+	Swarm        string              `json:"swarm"`
 	Type         workflow.ObjectType `json:"type,omitempty"`
 	ID           uuid.UUID           `json:"id,omitempty"`
 	Key          uuid.UUID           `json:"key,omitempty"`
@@ -95,6 +99,7 @@ type sequencesEntry struct {
 
 type actionsEntry struct {
 	PartitionKey string              `json:"partitionKey"`
+	Swarm        string              `json:"swarm"`
 	Type         workflow.ObjectType `json:"type,omitempty"`
 	ID           uuid.UUID           `json:"id,omitempty"`
 	Key          uuid.UUID           `json:"key,omitempty"`
@@ -112,4 +117,21 @@ type actionsEntry struct {
 	StateEnd     time.Time           `json:"stateEnd,omitempty"`
 
 	ETag azcore.ETag `json:"_etag,omitempty"`
+}
+
+// ok, to deal with the fact that we can't do multiple partition keys in the go sdk, we are going to put all an index
+// for searching into a single partition key. This will be the partition key will contain only the search index.
+// Without any compression, about 500K entries make about 109MiB. So this should hold us for a while, especially if we are
+// going to do 30/60/90 day retention.
+type searchEntry struct {
+	PartitionKey string          `json:"partitionKey"`
+	Swarm        string          `json:"swarm"`
+	Name         string          `json:"name,omitempty"`
+	Descr        string          `json:"descr,omitempty"`
+	ID           uuid.UUID       `json:"id,omitempty"`
+	GroupID      uuid.UUID       `json:"groupID,omitempty"`
+	SubmitTime   time.Time       `json:"submitTime,omitempty"`
+	StateStatus  workflow.Status `json:"stateStatus,omitempty"`
+	StateStart   time.Time       `json:"stateStart,omitempty"`
+	StateEnd     time.Time       `json:"stateEnd,omitempty"`
 }
