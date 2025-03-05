@@ -40,7 +40,7 @@ var (
 	vaultType = flag.String("vault", "sqlite", "The type of storage vault to use.")
 
 	// CosmosDB flags that are only used if vault is set to "cosmosdb".
-	swarm     = flag.String("collection", os.Getenv("AZURE_COSMOSDB_SWARM"), "The name of the coercion swarm.")
+	swarm     = flag.String("swarm", os.Getenv("AZURE_COSMOSDB_SWARM"), "The name of the coercion swarm.")
 	db        = flag.String("db", os.Getenv("AZURE_COSMOSDB_DBNAME"), "The name of the cosmosdb database.")
 	container = flag.String("container", os.Getenv("AZURE_COSMOSDB_CNAME"), "The name of the cosmosdb container.")
 	msi       = flag.String("msi", "", "The identity with vmss contributor role. If empty, az login is used.")
