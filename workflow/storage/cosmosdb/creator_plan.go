@@ -27,12 +27,12 @@ func (c creator) commitPlan(ctx context.Context, p *workflow.Plan) (err error) {
 		return fmt.Errorf("commitPlan: plan cannot be nil")
 	}
 
-	itemContext, err := planToItems(c.collection, p)
+	itemContext, err := planToItems(c.swarm, p)
 	if err != nil {
 		return err
 	}
 
-	se, err := planToSearchEntry(c.collection, p)
+	se, err := planToSearchEntry(c.swarm, p)
 	if err != nil {
 		return fmt.Errorf("failed to create search entry: %w", err)
 	}
@@ -88,7 +88,7 @@ func batchRetryer(batch azcosmos.TransactionalBatch, client creatorClient) expon
 }
 
 // planToSearchEntry converts a plan to a searchEntry.
-func planToSearchEntry(collection string, p *workflow.Plan) (searchEntry, error) {
+func planToSearchEntry(swarm string, p *workflow.Plan) (searchEntry, error) {
 	if p == nil {
 		return searchEntry{}, fmt.Errorf("planToSearchEntry: plan cannot be nil")
 	}
@@ -100,7 +100,7 @@ func planToSearchEntry(collection string, p *workflow.Plan) (searchEntry, error)
 
 	return searchEntry{
 		PartitionKey: searchKeyStr,
-		Collection:   collection,
+		Swarm:        swarm,
 		Name:         p.Name,
 		Descr:        p.Descr,
 		ID:           p.ID,
@@ -113,20 +113,20 @@ func planToSearchEntry(collection string, p *workflow.Plan) (searchEntry, error)
 }
 
 type itemsContext struct {
-	collection string
-	planID     uuid.UUID
-	m          map[string][]byte
-	items      [][]byte
+	swarm  string
+	planID uuid.UUID
+	m      map[string][]byte
+	items  [][]byte
 }
 
-func planToItems(collection string, p *workflow.Plan) (*itemsContext, error) {
+func planToItems(swarm string, p *workflow.Plan) (*itemsContext, error) {
 	iCtx := &itemsContext{
-		collection: collection,
-		planID:     p.GetID(),
-		m:          map[string][]byte{},
+		swarm:  swarm,
+		planID: p.GetID(),
+		m:      map[string][]byte{},
 	}
 
-	plan, err := planToEntry(collection, p)
+	plan, err := planToEntry(swarm, p)
 	if err != nil {
 		return nil, err
 	}
@@ -158,7 +158,7 @@ func planToItems(collection string, p *workflow.Plan) (*itemsContext, error) {
 	return iCtx, nil
 }
 
-func planToEntry(collection string, p *workflow.Plan) (plansEntry, error) {
+func planToEntry(swarm string, p *workflow.Plan) (plansEntry, error) {
 	if p == nil {
 		return plansEntry{}, fmt.Errorf("planToEntry: plan cannot be nil")
 	}
@@ -175,7 +175,7 @@ func planToEntry(collection string, p *workflow.Plan) (plansEntry, error) {
 
 	plan := plansEntry{
 		PartitionKey: keyStr(p.ID),
-		Collection:   collection,
+		Swarm:        swarm,
 		Type:         workflow.OTPlan,
 		ID:           p.ID,
 		PlanID:       p.ID,
@@ -248,7 +248,7 @@ func checkToEntry(iCtx *itemsContext, c *workflow.Checks) (checksEntry, error) {
 	}
 	return checksEntry{
 		PartitionKey: keyStr(iCtx.planID),
-		Collection:   iCtx.collection,
+		Swarm:        iCtx.swarm,
 		Type:         workflow.OTCheck,
 		ID:           c.ID,
 		Key:          c.Key,
@@ -307,7 +307,7 @@ func blockToEntry(iCtx *itemsContext, pos int, b *workflow.Block) (blocksEntry, 
 
 	block := blocksEntry{
 		PartitionKey:      keyStr(iCtx.planID),
-		Collection:        iCtx.collection,
+		Swarm:             iCtx.swarm,
 		Type:              workflow.OTBlock,
 		ID:                b.ID,
 		Key:               b.Key,
@@ -382,7 +382,7 @@ func sequenceToEntry(iCtx *itemsContext, pos int, seq *workflow.Sequence) (seque
 
 	return sequencesEntry{
 		PartitionKey: keyStr(iCtx.planID),
-		Collection:   iCtx.collection,
+		Swarm:        iCtx.swarm,
 		Type:         workflow.OTSequence,
 		ID:           seq.ID,
 		Key:          seq.Key,
@@ -432,7 +432,7 @@ func actionToEntry(iCtx *itemsContext, pos int, a *workflow.Action) (actionsEntr
 	}
 	return actionsEntry{
 		PartitionKey: keyStr(iCtx.planID),
-		Collection:   iCtx.collection,
+		Swarm:        iCtx.swarm,
 		ID:           a.ID,
 		Type:         workflow.OTAction,
 		Key:          a.Key,

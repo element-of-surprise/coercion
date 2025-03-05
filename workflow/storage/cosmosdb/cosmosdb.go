@@ -33,8 +33,8 @@ var _ storage.Vault = &Vault{}
 
 // Vault implements the storage.Vault interface.
 type Vault struct {
-	// collection is the name of the collection in the database.
-	collection string
+	// swarm is the name of the swarm in the database.
+	swarm string
 	// db is the CosmosDB database name for the storage.
 	db string
 	// container is the CosmosDB container name for the storage.
@@ -114,16 +114,16 @@ func WithItemOptions(opts azcosmos.ItemOptions) Option {
 	}
 }
 
-// New is the constructor for *Vault. collection is the name of the collection in the database. This is used to group
+// New is the constructor for *Vault. swarm is the name of the swarm in the database. This is used to group
 // a set of coercion nodes together while sharing the same database and container. db is the database name that will
 // be inserted in "https://%s.documents.azure.com:443/". Container is the name of the CosmosDB container.
 // "cred is the Azure CosmosDB token credential. reg is the coercion registry.
 // If the container does not exist, it will be created.
-func New(ctx context.Context, collection, db, container string, cred azcore.TokenCredential, reg *registry.Register, options ...Option) (*Vault, error) {
+func New(ctx context.Context, swarm, db, container string, cred azcore.TokenCredential, reg *registry.Register, options ...Option) (*Vault, error) {
 	ctx = context.WithoutCancel(ctx)
 
-	if collection == "" {
-		return nil, fmt.Errorf("collection name cannot be empty")
+	if swarm == "" {
+		return nil, fmt.Errorf("swarm name cannot be empty")
 	}
 	if db == "" {
 		return nil, fmt.Errorf("db name cannot be empty")
@@ -139,10 +139,10 @@ func New(ctx context.Context, collection, db, container string, cred azcore.Toke
 	}
 
 	r := &Vault{
-		collection: collection,
-		db:         db,
-		container:  container,
-		endpoint:   fmt.Sprintf("https://%s.documents.azure.com:443/", db),
+		swarm:     swarm,
+		db:        db,
+		container: container,
+		endpoint:  fmt.Sprintf("https://%s.documents.azure.com:443/", db),
 	}
 	for _, o := range options {
 		if err := o(r); err != nil {
@@ -167,17 +167,17 @@ func New(ctx context.Context, collection, db, container string, cred azcore.Toke
 
 	r.reader = reader{
 		mu:           mu,
-		collection:   collection,
+		swarm:        swarm,
 		container:    container,
 		client:       r.contClient,
 		defaultIOpts: &r.itemOpts,
 		reg:          reg,
 	}
 	r.creator = creator{
-		mu:         mu,
-		collection: collection,
-		client:     r.contClient,
-		reader:     r.reader,
+		mu:     mu,
+		swarm:  swarm,
+		client: r.contClient,
+		reader: r.reader,
 	}
 	r.updater = newUpdater(mu, r.contClient, &r.itemOpts)
 	r.deleter = deleter{
@@ -310,7 +310,7 @@ func pathToScalar(path string) azcosmos.IncludedPath {
 
 // indexPaths are the included paths for the container.
 var indexPaths = []azcosmos.IncludedPath{
-	pathToScalar("collection"), // plans, checks, sequences, actions
+	pathToScalar("swarm"),      // plans, checks, sequences, actions
 	pathToScalar("type"),       // plans, checks, sequences, actions
 	pathToScalar("groupID"),    // plans
 	pathToScalar("submitTime"), // plans
