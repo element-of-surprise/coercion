@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
 	"time"
 
 	"github.com/element-of-surprise/coercion/plugins"
@@ -79,7 +80,7 @@ func batchRetryer(batch azcosmos.TransactionalBatch, client creatorClient) expon
 			return err
 		}
 		for i, result := range results.OperationResults {
-			if result.StatusCode != 201 {
+			if result.StatusCode != http.StatusCreated {
 				return fmt.Errorf("item(%d) has status code %d: %w", i, result.StatusCode, exponential.ErrPermanent)
 			}
 		}
