@@ -26,9 +26,10 @@ type creatorReader interface {
 
 // creator implements the storage.creator interface.
 type creator struct {
-	mu     *sync.RWMutex
-	client creatorClient
-	reader creatorReader
+	mu         *sync.RWMutex
+	collection string
+	client     creatorClient
+	reader     creatorReader
 
 	private.Storage
 }
