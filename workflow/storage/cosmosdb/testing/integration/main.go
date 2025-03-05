@@ -23,10 +23,11 @@ import (
 //+gocover:ignore:file No need to test fake store.
 
 var (
-	db        = flag.String("db-name", os.Getenv("AZURE_COSMOSDB_DBNAME"), "the name of the cosmosdb database")
-	container = flag.String("container-name", os.Getenv("AZURE_COSMOSDB_CNAME"), "the name of the cosmosdb container")
-	msi       = flag.String("msi", "", "the identity with vmss contributor role. If empty, az login is used")
-	teardown  = flag.Bool("teardown", false, "teardown the cosmosdb container")
+	db         = flag.String("db-name", os.Getenv("AZURE_COSMOSDB_DBNAME"), "the name of the cosmosdb database")
+	collection = flag.String("collection-name", os.Getenv("AZURE_COSMOSDB_COLLECTION"), "the name of the cosmosdb collection")
+	container  = flag.String("container-name", os.Getenv("AZURE_COSMOSDB_CNAME"), "the name of the cosmosdb container")
+	msi        = flag.String("msi", "", "the identity with vmss contributor role. If empty, az login is used")
+	teardown   = flag.Bool("teardown", false, "teardown the cosmosdb container")
 )
 
 var zeroTime = time.Unix(0, 0)
@@ -67,7 +68,7 @@ func main() {
 		fatalErr(logger, "Failed to create credential: %v", err)
 	}
 
-	vault, err := cosmosdb.New(ctx, *db, *container, cred, reg)
+	vault, err := cosmosdb.New(ctx, *collection, *db, *container, cred, reg)
 	if err != nil {
 		fatalErr(logger, "Failed to create vault: %v", err)
 	}

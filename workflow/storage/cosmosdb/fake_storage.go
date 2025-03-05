@@ -27,6 +27,8 @@ import (
 
 // TODO: Improve this so that we take into account the partition key so if that doesn't match it doesn't return.
 
+const collection = "collection"
+
 // fakeStorage fakes the storage methods needed to communicate with azcosmos used in this package.
 // We have to use some unsafe methods to avoid writing unneccesary wrappers to get at data used for mocks.
 // This is sad and cost us a lot of time.
@@ -311,7 +313,7 @@ func (f *fakeStorage) WritePlan(ctx context.Context, plan *workflow.Plan) error 
 	f.mu.Lock()
 	defer f.mu.Unlock()
 
-	ictx, err := planToItems(plan)
+	ictx, err := planToItems(collection, plan)
 	if err != nil {
 		panic(err)
 	}
@@ -502,7 +504,7 @@ func (f *fakeStorage) searchItemPager(query string, pk azcosmos.PartitionKey, o 
 		panic("NewQueryItemsPager: query parameters must exist")
 	}
 
-	if len(o.QueryParameters) == 0 {
+	if len(o.QueryParameters) == 1 {
 		return f.limitItemPager(query, pk, o)
 	}
 	for _, p := range o.QueryParameters {
@@ -510,7 +512,6 @@ func (f *fakeStorage) searchItemPager(query string, pk azcosmos.PartitionKey, o 
 			return f.limitItemPager(query, pk, o)
 		}
 	}
-
 	ids := map[uuid.UUID]struct{}{}
 	if o != nil && len(o.QueryParameters) > 0 {
 		ids = getIDsFromQueryParameters(o.QueryParameters)
@@ -671,7 +672,7 @@ func (f *fakeStorage) patchPlan(ctx context.Context, itemID string, op pathOps, 
 	}
 	f.patchObject(op, item.Value.(stateObject))
 
-	ictx, err := planToItems(plan)
+	ictx, err := planToItems(collection, plan)
 	if err != nil {
 		panic(err)
 	}

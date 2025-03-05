@@ -20,9 +20,9 @@ import (
 
 const (
 	// beginning of query to list plans with a filter
-	searchPlans = `SELECT c.id, c.groupID, c.name, c.descr, c.submitTime, c.stateStatus, c.stateStart, c.stateEnd FROM c `
+	searchPlans = `SELECT c.id, c.groupID, c.name, c.descr, c.submitTime, c.stateStatus, c.stateStart, c.stateEnd FROM c WHERE c.collection=@collection`
 	// list all plans without parameters
-	listPlans = `SELECT c.id, c.groupID, c.name, c.descr, c.submitTime, c.stateStatus, c.stateStart, c.stateEnd FROM c ORDER BY c.submitTime DESC`
+	listPlans = `SELECT c.id, c.groupID, c.name, c.descr, c.submitTime, c.stateStatus, c.stateStart, c.stateEnd FROM c WHERE c.collection=@collection ORDER BY c.submitTime DESC`
 )
 
 // readerClient provides abstraction for testing reader. This is implmented by *azcosmos.ContainerClient.
@@ -34,6 +34,7 @@ type readerClient interface {
 // reader implements the storage.PlanReader interface.
 type reader struct {
 	mu           *sync.RWMutex
+	collection   string
 	container    string
 	client       readerClient // *azcosmos.ContainerClient
 	defaultIOpts *azcosmos.ItemOptions
@@ -142,42 +143,25 @@ func (r reader) Search(ctx context.Context, filters storage.Filters) (chan stora
 }
 
 func (r reader) buildSearchQuery(filters storage.Filters) (string, []azcosmos.QueryParameter) {
-	parameters := []azcosmos.QueryParameter{}
+	parameters := []azcosmos.QueryParameter{
+		{Name: "@collection", Value: r.collection},
+	}
 
 	build := strings.Builder{}
 	build.WriteString(searchPlans)
 
 	numFilters := 0
 
-	// Determine if we need a where clause.
-	where := []int{
-		len(filters.ByIDs),
-		len(filters.ByGroupIDs),
-		len(filters.ByStatus),
-	}
-	for _, i := range where {
-		if i > 0 {
-			build.WriteString("WHERE")
-			break
-		}
-	}
-
 	if len(filters.ByIDs) > 0 {
 		numFilters++
-		build.WriteString(" ARRAY_CONTAINS(@ids, c.id)")
+		build.WriteString(" AND ARRAY_CONTAINS(@ids, c.id)")
 	}
 	if len(filters.ByGroupIDs) > 0 {
-		if numFilters > 0 {
-			build.WriteString(" AND")
-		}
 		numFilters++
-		build.WriteString(" ARRAY_CONTAINS(@group_ids, c.groupID)")
+		build.WriteString(" AND ARRAY_CONTAINS(@group_ids, c.groupID)")
 	}
 	if len(filters.ByStatus) > 0 {
-		if numFilters > 0 {
-			build.WriteString(" AND")
-		}
-		build.WriteString(" ")
+		build.WriteString(" AND ")
 		if len(filters.ByStatus) > 1 {
 			build.WriteString("(")
 		}
@@ -198,11 +182,8 @@ func (r reader) buildSearchQuery(filters storage.Filters) (string, []azcosmos.Qu
 			build.WriteString(")")
 		}
 	}
-	if numFilters > 0 {
-		build.WriteString(" ORDER BY c.submitTime DESC")
-	} else {
-		build.WriteString("ORDER BY c.submitTime DESC")
-	}
+
+	build.WriteString(" ORDER BY c.submitTime DESC")
 	query := build.String()
 
 	if len(filters.ByIDs) > 0 {
@@ -224,7 +205,9 @@ func (r reader) buildSearchQuery(filters storage.Filters) (string, []azcosmos.Qu
 // return with most recent submitted first. limit sets the maximum number of entries to return. If
 // limit == 0, there is no limit.
 func (r reader) List(ctx context.Context, limit int) (chan storage.Stream[storage.ListResult], error) {
-	parameters := []azcosmos.QueryParameter{}
+	parameters := []azcosmos.QueryParameter{
+		{Name: "@collection", Value: r.collection},
+	}
 	q := listPlans
 	if limit > 0 {
 		q += " OFFSET 0 LIMIT @limit"
