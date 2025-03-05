@@ -13,10 +13,15 @@ import (
 
 var _ storage.PlanUpdater = planUpdater{}
 
+type planPatcher interface {
+	creatorClient
+	patchItemer
+}
+
 // planUpdater implements the storage.PlanUpdater interface.
 type planUpdater struct {
 	mu           *sync.RWMutex
-	client       patchItemer
+	client       planPatcher
 	defaultIOpts *azcosmos.ItemOptions
 
 	private.Storage
@@ -32,6 +37,7 @@ func (u planUpdater) UpdatePlan(ctx context.Context, p *workflow.Plan) error {
 	patch.AppendReplace("/stateStatus", p.State.Status)
 	patch.AppendReplace("/stateStart", p.State.Start)
 	patch.AppendReplace("/stateEnd", p.State.End)
+	patch.AppendReplace("/submitTime", p.SubmitTime)
 
 	itemOpt := itemOptions(u.defaultIOpts)
 	var ifMatchEtag *azcore.ETag = nil
@@ -40,8 +46,7 @@ func (u planUpdater) UpdatePlan(ctx context.Context, p *workflow.Plan) error {
 	}
 	itemOpt.IfMatchEtag = ifMatchEtag
 
-	k := key(p.ID)
-	resp, err := patchItemWithRetry(ctx, u.client, k, p.ID.String(), patch, itemOpt)
+	resp, err := patchPlan(ctx, u.client, p, patch, itemOpt)
 	if err != nil {
 		return err
 	}

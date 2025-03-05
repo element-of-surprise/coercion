@@ -35,11 +35,11 @@ func TestBuildSearchQuery(t *testing.T) {
 		{
 			name:      "Success: empty filters",
 			filters:   storage.Filters{},
-			wantQuery: `SELECT c.id, c.groupID, c.name, c.descr, c.submitTime, c.stateStatus, c.stateStart, c.stateEnd FROM c WHERE c.type=@objectType AND ORDER BY c.submitTime DESC`,
+			wantQuery: `SELECT c.id, c.groupID, c.name, c.descr, c.submitTime, c.stateStatus, c.stateStart, c.stateEnd FROM c WHERE c.swarm=@swarm ORDER BY c.submitTime DESC`,
 			wantParams: []azcosmos.QueryParameter{
 				{
-					Name:  "@objectType",
-					Value: int64(1),
+					Name:  "@swarm",
+					Value: swarm,
 				},
 			},
 		},
@@ -50,11 +50,11 @@ func TestBuildSearchQuery(t *testing.T) {
 					id1,
 				},
 			},
-			wantQuery: `SELECT c.id, c.groupID, c.name, c.descr, c.submitTime, c.stateStatus, c.stateStart, c.stateEnd FROM c WHERE c.type=@objectType AND ARRAY_CONTAINS(@ids, c.id) ORDER BY c.submitTime DESC`,
+			wantQuery: `SELECT c.id, c.groupID, c.name, c.descr, c.submitTime, c.stateStatus, c.stateStart, c.stateEnd FROM c WHERE c.swarm=@swarm AND ARRAY_CONTAINS(@ids, c.id) ORDER BY c.submitTime DESC`,
 			wantParams: []azcosmos.QueryParameter{
 				{
-					Name:  "@objectType",
-					Value: int64(1),
+					Name:  "@swarm",
+					Value: swarm,
 				},
 				{
 					Name: "@ids",
@@ -72,11 +72,11 @@ func TestBuildSearchQuery(t *testing.T) {
 					id2,
 				},
 			},
-			wantQuery: `SELECT c.id, c.groupID, c.name, c.descr, c.submitTime, c.stateStatus, c.stateStart, c.stateEnd FROM c WHERE c.type=@objectType AND ARRAY_CONTAINS(@ids, c.id) ORDER BY c.submitTime DESC`,
+			wantQuery: `SELECT c.id, c.groupID, c.name, c.descr, c.submitTime, c.stateStatus, c.stateStart, c.stateEnd FROM c WHERE c.swarm=@swarm AND ARRAY_CONTAINS(@ids, c.id) ORDER BY c.submitTime DESC`,
 			wantParams: []azcosmos.QueryParameter{
 				{
-					Name:  "@objectType",
-					Value: int64(1),
+					Name:  "@swarm",
+					Value: swarm,
 				},
 				{
 					Name: "@ids",
@@ -94,11 +94,11 @@ func TestBuildSearchQuery(t *testing.T) {
 					id1,
 				},
 			},
-			wantQuery: `SELECT c.id, c.groupID, c.name, c.descr, c.submitTime, c.stateStatus, c.stateStart, c.stateEnd FROM c WHERE c.type=@objectType AND ARRAY_CONTAINS(@group_ids, c.groupID) ORDER BY c.submitTime DESC`,
+			wantQuery: `SELECT c.id, c.groupID, c.name, c.descr, c.submitTime, c.stateStatus, c.stateStart, c.stateEnd FROM c WHERE c.swarm=@swarm AND ARRAY_CONTAINS(@group_ids, c.groupID) ORDER BY c.submitTime DESC`,
 			wantParams: []azcosmos.QueryParameter{
 				{
-					Name:  "@objectType",
-					Value: int64(1),
+					Name:  "@swarm",
+					Value: swarm,
 				},
 				{
 					Name: "@group_ids",
@@ -116,11 +116,11 @@ func TestBuildSearchQuery(t *testing.T) {
 					id2,
 				},
 			},
-			wantQuery: `SELECT c.id, c.groupID, c.name, c.descr, c.submitTime, c.stateStatus, c.stateStart, c.stateEnd FROM c WHERE c.type=@objectType AND ARRAY_CONTAINS(@group_ids, c.groupID) ORDER BY c.submitTime DESC`,
+			wantQuery: `SELECT c.id, c.groupID, c.name, c.descr, c.submitTime, c.stateStatus, c.stateStart, c.stateEnd FROM c WHERE c.swarm=@swarm AND ARRAY_CONTAINS(@group_ids, c.groupID) ORDER BY c.submitTime DESC`,
 			wantParams: []azcosmos.QueryParameter{
 				{
-					Name:  "@objectType",
-					Value: int64(1),
+					Name:  "@swarm",
+					Value: swarm,
 				},
 				{
 					Name: "@group_ids",
@@ -138,11 +138,11 @@ func TestBuildSearchQuery(t *testing.T) {
 					workflow.Completed,
 				},
 			},
-			wantQuery: `SELECT c.id, c.groupID, c.name, c.descr, c.submitTime, c.stateStatus, c.stateStart, c.stateEnd FROM c WHERE c.type=@objectType AND c.stateStatus = @status0 ORDER BY c.submitTime DESC`,
+			wantQuery: `SELECT c.id, c.groupID, c.name, c.descr, c.submitTime, c.stateStatus, c.stateStart, c.stateEnd FROM c WHERE c.swarm=@swarm AND c.stateStatus = @status0 ORDER BY c.submitTime DESC`,
 			wantParams: []azcosmos.QueryParameter{
 				{
-					Name:  "@objectType",
-					Value: int64(1),
+					Name:  "@swarm",
+					Value: swarm,
 				},
 				{
 					Name:  "@status0",
@@ -158,11 +158,11 @@ func TestBuildSearchQuery(t *testing.T) {
 					workflow.Failed,
 				},
 			},
-			wantQuery: `SELECT c.id, c.groupID, c.name, c.descr, c.submitTime, c.stateStatus, c.stateStart, c.stateEnd FROM c WHERE c.type=@objectType AND (c.stateStatus = @status0 OR c.stateStatus = @status1) ORDER BY c.submitTime DESC`,
+			wantQuery: `SELECT c.id, c.groupID, c.name, c.descr, c.submitTime, c.stateStatus, c.stateStart, c.stateEnd FROM c WHERE c.swarm=@swarm AND (c.stateStatus = @status0 OR c.stateStatus = @status1) ORDER BY c.submitTime DESC`,
 			wantParams: []azcosmos.QueryParameter{
 				{
-					Name:  "@objectType",
-					Value: int64(1),
+					Name:  "@swarm",
+					Value: swarm,
 				},
 				{
 					Name:  "@status0",
@@ -189,11 +189,11 @@ func TestBuildSearchQuery(t *testing.T) {
 					workflow.Failed,
 				},
 			},
-			wantQuery: `SELECT c.id, c.groupID, c.name, c.descr, c.submitTime, c.stateStatus, c.stateStart, c.stateEnd FROM c WHERE c.type=@objectType AND ARRAY_CONTAINS(@ids, c.id) AND ARRAY_CONTAINS(@group_ids, c.groupID) AND (c.stateStatus = @status0 OR c.stateStatus = @status1) ORDER BY c.submitTime DESC`,
+			wantQuery: `SELECT c.id, c.groupID, c.name, c.descr, c.submitTime, c.stateStatus, c.stateStart, c.stateEnd FROM c WHERE c.swarm=@swarm AND ARRAY_CONTAINS(@ids, c.id) AND ARRAY_CONTAINS(@group_ids, c.groupID) AND (c.stateStatus = @status0 OR c.stateStatus = @status1) ORDER BY c.submitTime DESC`,
 			wantParams: []azcosmos.QueryParameter{
 				{
-					Name:  "@objectType",
-					Value: int64(1),
+					Name:  "@swarm",
+					Value: swarm,
 				},
 				{
 					Name:  "@status0",
@@ -221,6 +221,7 @@ func TestBuildSearchQuery(t *testing.T) {
 
 	for _, test := range tests {
 		r := reader{
+			swarm:     swarm,
 			container: "test",
 		}
 		query, params := r.buildSearchQuery(test.filters)

@@ -40,9 +40,9 @@ var (
 	vaultType = flag.String("vault", "sqlite", "The type of storage vault to use.")
 
 	// CosmosDB flags that are only used if vault is set to "cosmosdb".
+	swarm     = flag.String("swarm", os.Getenv("AZURE_COSMOSDB_SWARM"), "The name of the coercion swarm.")
 	db        = flag.String("db", os.Getenv("AZURE_COSMOSDB_DBNAME"), "The name of the cosmosdb database.")
 	container = flag.String("container", os.Getenv("AZURE_COSMOSDB_CNAME"), "The name of the cosmosdb container.")
-	pk        = flag.String("partition-key", os.Getenv("AZURE_COSMOSDB_PK"), "The name of the cosmosdb partition key.")
 	msi       = flag.String("msi", "", "The identity with vmss contributor role. If empty, az login is used.")
 	teardown  = flag.Bool("teardown", false, "Teardown the cosmosdb container.")
 )
@@ -188,8 +188,8 @@ func TestEtoE(t *testing.T) {
 	case "sqlite":
 		vault, err = sqlite.New(ctx, "", reg, sqlite.WithInMemory())
 	case "cosmosdb":
-		logger.Info(fmt.Sprintf("TestEtoE: Using cosmosdb: %s, %s, %s", *db, *container, *pk))
-		vault, err = cosmosdb.New(ctx, *db, *container, cred, reg)
+		logger.Info(fmt.Sprintf("TestEtoE: Using cosmosdb: %s, %s", *db, *container))
+		vault, err = cosmosdb.New(ctx, *swarm, *db, *container, cred, reg)
 	default:
 		panic(fmt.Errorf("TestEtoE: unknown storage vault type: %s", *vaultType))
 	}
@@ -404,8 +404,8 @@ func TestBypassPlan(t *testing.T) {
 	case "sqlite":
 		vault, err = sqlite.New(ctx, "", reg, sqlite.WithInMemory())
 	case "cosmosdb":
-		logger.Info(fmt.Sprintf("TestBypassPlan: Using cosmosdb: %s, %s, %s", *db, *container, *pk))
-		vault, err = cosmosdb.New(ctx, *db, *container, cred, reg)
+		logger.Info(fmt.Sprintf("TestBypassPlan: Using cosmosdb: %s, %s", *db, *container))
+		vault, err = cosmosdb.New(ctx, *swarm, *db, *container, cred, reg)
 	default:
 		panic(fmt.Errorf("TestBypassPlan: unknown storage vault type: %s", *vaultType))
 	}
@@ -587,8 +587,8 @@ func TestBypassBlock(t *testing.T) {
 	case "sqlite":
 		vault, err = sqlite.New(ctx, "", reg, sqlite.WithInMemory())
 	case "cosmosdb":
-		logger.Info(fmt.Sprintf("TestBypassBlock: Using cosmosdb: %s, %s, %s", *db, *container, *pk))
-		vault, err = cosmosdb.New(ctx, *db, *container, cred, reg)
+		logger.Info(fmt.Sprintf("TestBypassBlock: Using cosmosdb: %s, %s", *db, *container))
+		vault, err = cosmosdb.New(ctx, *swarm, *db, *container, cred, reg)
 	default:
 		panic(fmt.Errorf("TestBypassBlock: unknown storage vault type: %s", *vaultType))
 	}
@@ -671,9 +671,6 @@ func validateFlags() error {
 		}
 		if *container == "" {
 			return fmt.Errorf("missing container name")
-		}
-		if *pk == "" {
-			return fmt.Errorf("missing partition key")
 		}
 	}
 	return nil

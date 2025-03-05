@@ -24,6 +24,7 @@ import (
 
 var (
 	db        = flag.String("db-name", os.Getenv("AZURE_COSMOSDB_DBNAME"), "the name of the cosmosdb database")
+	swarm     = flag.String("swarm-name", os.Getenv("AZURE_COSMOSDB_SWARM"), "the name of the coercion swarm")
 	container = flag.String("container-name", os.Getenv("AZURE_COSMOSDB_CNAME"), "the name of the cosmosdb container")
 	msi       = flag.String("msi", "", "the identity with vmss contributor role. If empty, az login is used")
 	teardown  = flag.Bool("teardown", false, "teardown the cosmosdb container")
@@ -67,7 +68,7 @@ func main() {
 		fatalErr(logger, "Failed to create credential: %v", err)
 	}
 
-	vault, err := cosmosdb.New(ctx, *db, *container, cred, reg)
+	vault, err := cosmosdb.New(ctx, *swarm, *db, *container, cred, reg)
 	if err != nil {
 		fatalErr(logger, "Failed to create vault: %v", err)
 	}

@@ -1,0 +1,1 @@
+ go run main.go -swarm-name="whatever" -db-name="medbaydb" -container-name="doak"
