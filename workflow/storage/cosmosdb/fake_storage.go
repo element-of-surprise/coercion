@@ -27,7 +27,7 @@ import (
 
 // TODO: Improve this so that we take into account the partition key so if that doesn't match it doesn't return.
 
-const collection = "collection"
+const swarm = "swarm"
 
 // fakeStorage fakes the storage methods needed to communicate with azcosmos used in this package.
 // We have to use some unsafe methods to avoid writing unneccesary wrappers to get at data used for mocks.
@@ -313,7 +313,7 @@ func (f *fakeStorage) WritePlan(ctx context.Context, plan *workflow.Plan) error 
 	f.mu.Lock()
 	defer f.mu.Unlock()
 
-	ictx, err := planToItems(collection, plan)
+	ictx, err := planToItems(swarm, plan)
 	if err != nil {
 		panic(err)
 	}
@@ -672,7 +672,7 @@ func (f *fakeStorage) patchPlan(ctx context.Context, itemID string, op pathOps, 
 	}
 	f.patchObject(op, item.Value.(stateObject))
 
-	ictx, err := planToItems(collection, plan)
+	ictx, err := planToItems(swarm, plan)
 	if err != nil {
 		panic(err)
 	}

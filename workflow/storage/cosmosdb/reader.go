@@ -20,9 +20,9 @@ import (
 
 const (
 	// beginning of query to list plans with a filter
-	searchPlans = `SELECT c.id, c.groupID, c.name, c.descr, c.submitTime, c.stateStatus, c.stateStart, c.stateEnd FROM c WHERE c.collection=@collection`
+	searchPlans = `SELECT c.id, c.groupID, c.name, c.descr, c.submitTime, c.stateStatus, c.stateStart, c.stateEnd FROM c WHERE c.swarm=@swarm`
 	// list all plans without parameters
-	listPlans = `SELECT c.id, c.groupID, c.name, c.descr, c.submitTime, c.stateStatus, c.stateStart, c.stateEnd FROM c WHERE c.collection=@collection ORDER BY c.submitTime DESC`
+	listPlans = `SELECT c.id, c.groupID, c.name, c.descr, c.submitTime, c.stateStatus, c.stateStart, c.stateEnd FROM c WHERE c.swarm=@swarm ORDER BY c.submitTime DESC`
 )
 
 // readerClient provides abstraction for testing reader. This is implmented by *azcosmos.ContainerClient.
@@ -34,7 +34,7 @@ type readerClient interface {
 // reader implements the storage.PlanReader interface.
 type reader struct {
 	mu           *sync.RWMutex
-	collection   string
+	swarm        string
 	container    string
 	client       readerClient // *azcosmos.ContainerClient
 	defaultIOpts *azcosmos.ItemOptions
@@ -144,7 +144,7 @@ func (r reader) Search(ctx context.Context, filters storage.Filters) (chan stora
 
 func (r reader) buildSearchQuery(filters storage.Filters) (string, []azcosmos.QueryParameter) {
 	parameters := []azcosmos.QueryParameter{
-		{Name: "@collection", Value: r.collection},
+		{Name: "@swarm", Value: r.swarm},
 	}
 
 	build := strings.Builder{}
@@ -206,7 +206,7 @@ func (r reader) buildSearchQuery(filters storage.Filters) (string, []azcosmos.Qu
 // limit == 0, there is no limit.
 func (r reader) List(ctx context.Context, limit int) (chan storage.Stream[storage.ListResult], error) {
 	parameters := []azcosmos.QueryParameter{
-		{Name: "@collection", Value: r.collection},
+		{Name: "@swarm", Value: r.swarm},
 	}
 	q := listPlans
 	if limit > 0 {

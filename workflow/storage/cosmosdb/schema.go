@@ -10,7 +10,7 @@ import (
 
 type plansEntry struct {
 	PartitionKey string              `json:"partitionKey"`
-	Collection   string              `json:"collection"`
+	Swarm        string              `json:"swarm"`
 	Type         workflow.ObjectType `json:"type,omitempty"`
 	ID           uuid.UUID           `json:"id,omitempty"`
 	// PlanID is the unique identifier for the plan. This is a duplicate of ID. All other items have ID and PlanID.
@@ -38,7 +38,7 @@ type plansEntry struct {
 
 type blocksEntry struct {
 	PartitionKey      string              `json:"partitionKey"`
-	Collection        string              `json:"collection"`
+	Swarm             string              `json:"swarm"`
 	Type              workflow.ObjectType `json:"type,omitempty"`
 	ID                uuid.UUID           `json:"id,omitempty"`
 	Key               uuid.UUID           `json:"key,omitempty"`
@@ -65,7 +65,7 @@ type blocksEntry struct {
 
 type checksEntry struct {
 	PartitionKey string              `json:"partitionKey"`
-	Collection   string              `json:"collection"`
+	Swarm        string              `json:"swarm"`
 	Type         workflow.ObjectType `json:"type,omitempty"`
 	ID           uuid.UUID           `json:"id,omitempty"`
 	Key          uuid.UUID           `json:"key,omitempty"`
@@ -81,7 +81,7 @@ type checksEntry struct {
 
 type sequencesEntry struct {
 	PartitionKey string              `json:"partitionKey"`
-	Collection   string              `json:"collection"`
+	Swarm        string              `json:"swarm"`
 	Type         workflow.ObjectType `json:"type,omitempty"`
 	ID           uuid.UUID           `json:"id,omitempty"`
 	Key          uuid.UUID           `json:"key,omitempty"`
@@ -99,7 +99,7 @@ type sequencesEntry struct {
 
 type actionsEntry struct {
 	PartitionKey string              `json:"partitionKey"`
-	Collection   string              `json:"collection"`
+	Swarm        string              `json:"swarm"`
 	Type         workflow.ObjectType `json:"type,omitempty"`
 	ID           uuid.UUID           `json:"id,omitempty"`
 	Key          uuid.UUID           `json:"key,omitempty"`
@@ -125,7 +125,7 @@ type actionsEntry struct {
 // going to do 30/60/90 day retention.
 type searchEntry struct {
 	PartitionKey string          `json:"partitionKey"`
-	Collection   string          `json:"collection"`
+	Swarm        string          `json:"swarm"`
 	Name         string          `json:"name,omitempty"`
 	Descr        string          `json:"descr,omitempty"`
 	ID           uuid.UUID       `json:"id,omitempty"`
