@@ -13,8 +13,6 @@ require (
 	github.com/google/uuid v1.6.0
 	github.com/gostdlib/base v0.0.0-20250305232105-cdc29943ce86
 	github.com/kylelemons/godebug v1.1.0
-	github.com/microsoft/gocosmos v1.1.1
-	github.com/rodaine/table v1.3.0
 	github.com/spf13/afero v1.12.0
 	github.com/tidwall/pretty v1.2.1
 	go.opentelemetry.io/otel/metric v1.35.0
@@ -28,12 +26,6 @@ require (
 	github.com/AzureAD/microsoft-authentication-library-for-go v1.3.3 // indirect
 	github.com/andybalholm/brotli v1.1.1 // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
-	github.com/btnguyen2k/consu/checksum v1.1.0 // indirect
-	github.com/btnguyen2k/consu/g18 v0.1.0 // indirect
-	github.com/btnguyen2k/consu/gjrc v0.2.1 // indirect
-	github.com/btnguyen2k/consu/olaf v0.1.3 // indirect
-	github.com/btnguyen2k/consu/reddo v0.1.8 // indirect
-	github.com/btnguyen2k/consu/semita v0.1.5 // indirect
 	github.com/cenkalti/backoff/v4 v4.3.0 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc // indirect
