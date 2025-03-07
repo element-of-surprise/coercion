@@ -2,7 +2,6 @@ package actions
 
 import (
 	"fmt"
-	"log"
 	"reflect"
 	"time"
 
@@ -14,6 +13,7 @@ import (
 
 	"github.com/gostdlib/base/retry/exponential"
 	"github.com/gostdlib/base/statemachine"
+	"github.com/gostdlib/base/telemetry/log"
 )
 
 // Data is the data passed to the state machine.
@@ -48,7 +48,7 @@ func (r Runner) Start(req statemachine.Request[Data]) statemachine.Request[Data]
 	action.State.Status = workflow.Running
 
 	if err := updater.UpdateAction(req.Ctx, action); err != nil {
-		context.Log(req.Ctx).Fatalf("failed to write Action: %v", err)
+		log.Fatalf("failed to write Action: %v", err)
 	}
 
 	req.Next = r.GetPlugin
@@ -90,7 +90,7 @@ func (r Runner) Execute(req statemachine.Request[Data]) statemachine.Request[Dat
 	)
 	// This should be protected by upper level code. If it fails, we should panic.
 	if err != nil {
-		context.Log(req.Ctx).Fatalf("failed to create backoff policy: %v", err)
+		log.Fatalf("failed to create backoff policy: %v", err)
 	}
 
 	req.Data.err = backoff.Retry(
@@ -117,7 +117,7 @@ func (r Runner) End(req statemachine.Request[Data]) statemachine.Request[Data] {
 	action.State.End = r.now()
 
 	if err := updater.UpdateAction(req.Ctx, action); err != nil {
-		context.Log(req.Ctx).Fatalf("failed to write Action: %v", err)
+		log.Fatalf("failed to write Action: %v", err)
 	}
 	req.Err = req.Data.err
 	return req
