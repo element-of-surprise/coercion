@@ -15,6 +15,7 @@ import (
 	"github.com/element-of-surprise/coercion/workflow/storage"
 
 	"github.com/gostdlib/base/statemachine"
+	"github.com/gostdlib/base/telemetry/log"
 )
 
 var ErrInternalFailure = errors.New("internal failure")
@@ -121,7 +122,7 @@ func (s *States) Start(req statemachine.Request[Data]) statemachine.Request[Data
 	plan.State.Start = s.now()
 
 	if err := s.store.UpdatePlan(req.Ctx, plan); err != nil {
-		context.Log(req.Ctx).Fatalf("failed to write Plan: %v", err)
+		log.Fatalf("failed to write Plan: %v", err)
 	}
 
 	req.Next = s.PlanBypassChecks
@@ -133,7 +134,7 @@ func (s *States) Start(req statemachine.Request[Data]) statemachine.Request[Data
 func (s *States) PlanBypassChecks(req statemachine.Request[Data]) statemachine.Request[Data] {
 	defer func() {
 		if err := s.store.UpdatePlan(req.Ctx, req.Data.Plan); err != nil {
-			context.Log(req.Ctx).Fatalf("failed to write Plan: %v", err)
+			log.Fatalf("failed to write Plan: %v", err)
 		}
 	}()
 
@@ -153,7 +154,7 @@ func (s *States) PlanBypassChecks(req statemachine.Request[Data]) statemachine.R
 func (s *States) PlanPreChecks(req statemachine.Request[Data]) statemachine.Request[Data] {
 	defer func() {
 		if err := s.store.UpdatePlan(req.Ctx, req.Data.Plan); err != nil {
-			context.Log(req.Ctx).Fatalf("failed to write Plan: %v", err)
+			log.Fatalf("failed to write Plan: %v", err)
 		}
 	}()
 
@@ -198,7 +199,7 @@ func (s *States) ExecuteBlock(req statemachine.Request[Data]) statemachine.Reque
 
 	defer func() {
 		if err := s.store.UpdateBlock(req.Ctx, h.block); err != nil {
-			context.Log(req.Ctx).Fatalf("failed to write Block: %v", err)
+			log.Fatalf("failed to write Block: %v", err)
 		}
 	}()
 
@@ -403,7 +404,7 @@ func (s *States) BlockEnd(req statemachine.Request[Data]) statemachine.Request[D
 	defer func() {
 		h.block.State.End = s.now()
 		if err := s.store.UpdateBlock(req.Ctx, h.block); err != nil {
-			context.Log(req.Ctx).Fatalf("failed to write Block: %v", err)
+			log.Fatalf("failed to write Block: %v", err)
 		}
 	}()
 
@@ -506,7 +507,7 @@ func (s *States) End(req statemachine.Request[Data]) statemachine.Request[Data] 
 	defer func() {
 		plan.State.End = s.now()
 		if err := s.store.UpdatePlan(req.Ctx, plan); err != nil {
-			context.Log(req.Ctx).Fatalf("failed to write Plan: %v", err)
+			log.Fatalf("failed to write Plan: %v", err)
 		}
 	}()
 
@@ -523,7 +524,7 @@ func (s *States) End(req statemachine.Request[Data]) statemachine.Request[Data] 
 	req, err = statemachine.Run("finalStates", req)
 	if err != nil {
 		if errors.Is(err, ErrInternalFailure) {
-			context.Log(req.Ctx).Printf("Plan object did not come out in expected state: %s", err)
+			log.Printf("Plan object did not come out in expected state: %s", err)
 		}
 	}
 	req.Next = nil
@@ -620,11 +621,11 @@ func (s *States) runChecksOnce(ctx context.Context, checks *workflow.Checks) err
 	checks.State.Start = s.now()
 
 	if err := s.store.UpdateChecks(ctx, checks); err != nil {
-		context.Log(ctx).Fatalf("failed to write Checks: %v", err)
+		log.Fatalf("failed to write Checks: %v", err)
 	}
 	defer func() {
 		if err := s.store.UpdateChecks(ctx, checks); err != nil {
-			context.Log(ctx).Fatalf("failed to write Checks: %v", err)
+			log.Fatalf("failed to write Checks: %v", err)
 		}
 	}()
 	defer func() {
@@ -649,7 +650,7 @@ func (s *States) runActionsParallel(ctx context.Context, actions []*workflow.Act
 		action.State.Status = workflow.Running
 		action.State.Start = s.now()
 		if err := s.store.UpdateAction(ctx, action); err != nil {
-			context.Log(ctx).Fatalf("failed to write Action: %v", err)
+			log.Fatalf("failed to write Action: %v", err)
 		}
 	}
 
@@ -672,12 +673,12 @@ func (s *States) execSeq(ctx context.Context, seq *workflow.Sequence) error {
 	seq.State.Status = workflow.Running
 	seq.State.Start = s.now()
 	if err := s.store.UpdateSequence(ctx, seq); err != nil {
-		context.Log(ctx).Fatalf("failed to write Sequence: %v", err)
+		log.Fatalf("failed to write Sequence: %v", err)
 	}
 	defer func() {
 		seq.State.End = s.now()
 		if err := s.store.UpdateSequence(ctx, seq); err != nil {
-			context.Log(ctx).Fatalf("failed to write Sequence: %v", err)
+			log.Fatalf("failed to write Sequence: %v", err)
 		}
 	}()
 
