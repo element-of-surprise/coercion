@@ -157,3 +157,9 @@ type ActionUpdater interface {
 
 	private.Storage
 }
+
+// Recovery is a Vault that must do some recovery operation before it can be used after a failure
+// or restart. Not all Vaults implement this.
+type Recovery interface {
+	Recovery(context.Context) error
+}
