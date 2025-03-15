@@ -57,6 +57,7 @@ type Vault struct {
 	updater
 	closer
 	deleter
+	recovery
 
 	private.Storage
 }
@@ -186,6 +187,7 @@ func New(ctx context.Context, swarm, db, container string, cred azcore.TokenCred
 		reader: r.reader,
 	}
 	r.closer = closer{}
+	r.recovery = recovery{reader: r.reader, updater: r.updater}
 	return r, nil
 }
 
