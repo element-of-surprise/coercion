@@ -31,7 +31,7 @@ type readerClient interface {
 	NewQueryItemsPager(query string, partitionKey azcosmos.PartitionKey, o *azcosmos.QueryOptions) *runtime.Pager[azcosmos.QueryItemsResponse]
 }
 
-// reader implements the storage.PlanReader interface.
+// reader implements the storage.Reader interface.
 type reader struct {
 	mu           *sync.RWMutex
 	swarm        string
