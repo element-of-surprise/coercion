@@ -54,6 +54,13 @@ func New(ctx context.Context, reg *registry.Register, store storage.Vault, optio
 		return nil, fmt.Errorf("registry is required")
 	}
 
+	// Some storage systems may need to recover from a previous state after a crash.
+	if r, ok := store.(storage.Recovery); ok {
+		if err := r.Recovery(ctx); err != nil {
+			return nil, fmt.Errorf("failed to recover storage: %w", err)
+		}
+	}
+
 	ws := &Workstream{reg: reg, store: store}
 	for _, o := range options {
 		if err := o(ws); err != nil {
