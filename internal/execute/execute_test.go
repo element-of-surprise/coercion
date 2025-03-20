@@ -174,7 +174,7 @@ func TestStart(t *testing.T) {
 		{
 			name:    "plan is invalid",
 			id:      storedID,
-			plan:    &workflow.Plan{}, //  plan is invalid, has no ID
+			plan:    &workflow.Plan{SubmitTime: time.Now()}, //  plan is invalid, has no ID
 			wantErr: true,
 		},
 		{
@@ -199,11 +199,12 @@ func TestStart(t *testing.T) {
 		fr := &fakeRunner{ran: make(chan struct{})}
 
 		p := &Plans{
-			store:    fakeStore,
-			runner:   fr.Run,
-			states:   &sm.States{},
-			stoppers: map[uuid.UUID]context.CancelFunc{},
-			waiters:  map[uuid.UUID]chan struct{}{},
+			store:     fakeStore,
+			runner:    fr.Run,
+			states:    &sm.States{},
+			stoppers:  map[uuid.UUID]context.CancelFunc{},
+			waiters:   map[uuid.UUID]chan struct{}{},
+			maxSubmit: 30 * time.Minute,
 		}
 		p.addValidators()
 
@@ -211,8 +212,10 @@ func TestStart(t *testing.T) {
 		switch {
 		case test.wantErr && err == nil:
 			t.Errorf("TestStart(%s): got err == nil, want err != nil", test.name)
+			continue
 		case !test.wantErr && err != nil:
 			t.Errorf("TestStart(%s): got err == %v, want err == nil", test.name, err)
+			continue
 		case err != nil:
 			continue
 		}
@@ -251,13 +254,18 @@ func TestValidateStartState(t *testing.T) {
 			wantErr: true,
 		},
 		{
-			name: "plan is not nil",
-			plan: &workflow.Plan{ID: NewV7()},
+			name:    "Plan is too old",
+			plan:    &workflow.Plan{ID: NewV7(), SubmitTime: time.Now().Add(-time.Hour)},
+			wantErr: true,
+		},
+		{
+			name: "Success",
+			plan: &workflow.Plan{ID: NewV7(), SubmitTime: time.Now()},
 		},
 	}
 
 	for _, test := range tests {
-		p := &Plans{}
+		p := &Plans{maxSubmit: 30 * time.Minute}
 
 		err := p.validateStartState(context.Background(), test.plan)
 		switch {

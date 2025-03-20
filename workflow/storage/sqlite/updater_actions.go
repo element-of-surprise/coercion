@@ -15,8 +15,9 @@ var _ storage.ActionUpdater = actionUpdater{}
 
 // actionUpdater implements the storage.actionUpdater interface.
 type actionUpdater struct {
-	mu   *sync.Mutex
-	pool *sqlitex.Pool
+	mu      *sync.Mutex
+	pool    *sqlitex.Pool
+	capture *CaptureStmts
 
 	private.Storage
 }
@@ -32,11 +33,8 @@ func (a actionUpdater) UpdateAction(ctx context.Context, action *workflow.Action
 	}
 	defer a.pool.Put(conn)
 
-	stmt, err := conn.Prepare(updateAction)
-	if err != nil {
-		return fmt.Errorf("ActionWriter.Write: %w", err)
-	}
-
+	stmt := Stmt{}
+	stmt.Query(updateAction)
 	stmt.SetText("$id", action.ID.String())
 	stmt.SetInt64("$state_status", int64(action.State.Status))
 	stmt.SetInt64("$state_start", action.State.Start.UnixNano())
@@ -48,10 +46,16 @@ func (a actionUpdater) UpdateAction(ctx context.Context, action *workflow.Action
 	}
 	stmt.SetBytes("$attempts", b)
 
-	_, err = stmt.Step()
+	sStmt, err := stmt.Prepare(conn)
 	if err != nil {
 		return fmt.Errorf("ActionWriter.Write: %w", err)
 	}
+
+	_, err = sStmt.Step()
+	if err != nil {
+		return fmt.Errorf("ActionWriter.Write: %w", err)
+	}
+	a.capture.Capture(stmt)
 
 	return nil
 }

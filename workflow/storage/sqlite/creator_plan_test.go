@@ -184,7 +184,7 @@ func TestCommitPlan(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := commitPlan(context.Background(), conn, plan); err != nil {
+	if err := commitPlan(context.Background(), conn, plan, nil); err != nil {
 		t.Fatal(err)
 	}
 	pool.Put(conn)

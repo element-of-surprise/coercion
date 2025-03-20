@@ -18,6 +18,8 @@ type creator struct {
 	reader reader
 
 	private.Storage
+
+	capture *CaptureStmts
 }
 
 // Create writes Plan data to storage, and all underlying data.
@@ -44,5 +46,5 @@ func (u creator) Create(ctx context.Context, plan *workflow.Plan) error {
 	}
 	defer u.pool.Put(conn)
 
-	return commitPlan(ctx, conn, plan)
+	return commitPlan(ctx, conn, plan, u.capture)
 }

@@ -15,8 +15,9 @@ var _ storage.SequenceUpdater = sequenceUpdater{}
 
 // sequenceUpdater implements the storage.sequenceUpdater interface.
 type sequenceUpdater struct {
-	mu   *sync.Mutex
-	pool *sqlitex.Pool
+	mu      *sync.Mutex
+	pool    *sqlitex.Pool
+	capture *CaptureStmts
 
 	private.Storage
 }
@@ -32,20 +33,23 @@ func (s sequenceUpdater) UpdateSequence(ctx context.Context, seq *workflow.Seque
 	}
 	defer s.pool.Put(conn)
 
-	stmt, err := conn.Prepare(updateSequence)
-	if err != nil {
-		return fmt.Errorf("SequenceWriter.Write(updateAction): %w", err)
-	}
-
+	stmt := Stmt{}
+	stmt.Query(updateSequence)
 	stmt.SetText("$id", seq.ID.String())
 	stmt.SetInt64("$state_status", int64(seq.State.Status))
 	stmt.SetInt64("$state_start", seq.State.Start.UnixNano())
 	stmt.SetInt64("$state_end", seq.State.End.UnixNano())
 
-	_, err = stmt.Step()
+	sStmt, err := stmt.Prepare(conn)
+	if err != nil {
+		return fmt.Errorf("SequenceWriter.Write(updateAction): %w", err)
+	}
+
+	_, err = sStmt.Step()
 	if err != nil {
 		return fmt.Errorf("SequenceWriter.Write: %w", err)
 	}
+	s.capture.Capture(stmt)
 
 	return nil
 }

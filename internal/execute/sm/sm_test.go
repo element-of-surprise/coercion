@@ -75,13 +75,14 @@ func TestPlanBypassChecks(t *testing.T) {
 	}{
 		{
 			name:          "BypassChecks are nil",
-			plan:          &workflow.Plan{},
+			plan:          &workflow.Plan{State: &workflow.State{}},
 			wantNextState: states.PlanPreChecks,
 		},
 		{
 			name: "BypassChecks succeed",
 			plan: &workflow.Plan{
-				BypassChecks: &workflow.Checks{},
+				State:        &workflow.State{},
+				BypassChecks: &workflow.Checks{State: &workflow.State{}},
 			},
 			checksRunner: func(ctx context.Context, checks *workflow.Checks) error {
 				return nil
@@ -91,8 +92,9 @@ func TestPlanBypassChecks(t *testing.T) {
 		{
 			name: "BypassChecks fail",
 			plan: &workflow.Plan{
-				PreChecks:  &workflow.Checks{},
-				ContChecks: &workflow.Checks{},
+				State:      &workflow.State{},
+				PreChecks:  &workflow.Checks{State: &workflow.State{}},
+				ContChecks: &workflow.Checks{State: &workflow.State{}},
 			},
 			checksRunner: func(ctx context.Context, checks *workflow.Checks) error {
 				return fmt.Errorf("error")
@@ -136,7 +138,7 @@ func TestPlanPreChecks(t *testing.T) {
 		{
 			name: "PreChecks and ContChecks succeed",
 			plan: &workflow.Plan{
-				PreChecks:  &workflow.Checks{},
+				PreChecks:  &workflow.Checks{State: &workflow.State{}},
 				ContChecks: &workflow.Checks{},
 			},
 			checksRunner: func(ctx context.Context, checks *workflow.Checks) error {
@@ -147,7 +149,7 @@ func TestPlanPreChecks(t *testing.T) {
 		{
 			name: "PreChecks or ContChecks fail",
 			plan: &workflow.Plan{
-				PreChecks:  &workflow.Checks{},
+				PreChecks:  &workflow.Checks{State: &workflow.State{}},
 				ContChecks: &workflow.Checks{},
 			},
 			checksRunner: func(ctx context.Context, checks *workflow.Checks) error {
@@ -300,13 +302,14 @@ func TestBlockBypassChecks(t *testing.T) {
 	}{
 		{
 			name:          "BypassChecks are nil",
-			block:         &workflow.Block{},
+			block:         &workflow.Block{State: &workflow.State{}},
 			wantNextState: states.BlockPreChecks,
 		},
 		{
 			name: "BypassChecks succeed",
 			block: &workflow.Block{
-				BypassChecks: &workflow.Checks{},
+				State:        &workflow.State{},
+				BypassChecks: &workflow.Checks{State: &workflow.State{}},
 			},
 			checksRunner: func(ctx context.Context, checks *workflow.Checks) error {
 				return nil
@@ -317,7 +320,8 @@ func TestBlockBypassChecks(t *testing.T) {
 		{
 			name: "BypassChecks fail",
 			block: &workflow.Block{
-				BypassChecks: &workflow.Checks{},
+				State:        &workflow.State{},
+				BypassChecks: &workflow.Checks{State: &workflow.State{}},
 			},
 			checksRunner: func(ctx context.Context, checks *workflow.Checks) error {
 				return fmt.Errorf("error")
@@ -358,14 +362,14 @@ func TestBlockPreChecks(t *testing.T) {
 	}{
 		{
 			name:          "PreChecks and ContChecks are nil",
-			block:         &workflow.Block{},
+			block:         &workflow.Block{State: &workflow.State{}},
 			wantNextState: states.BlockStartContChecks,
 		},
 		{
 			name: "PreChecks and ContChecks succeed",
 			block: &workflow.Block{
-				PreChecks:  &workflow.Checks{},
-				ContChecks: &workflow.Checks{},
+				PreChecks:  &workflow.Checks{State: &workflow.State{}},
+				ContChecks: &workflow.Checks{State: &workflow.State{}},
 			},
 			checksRunner: func(ctx context.Context, checks *workflow.Checks) error {
 				return nil
@@ -375,8 +379,9 @@ func TestBlockPreChecks(t *testing.T) {
 		{
 			name: "PreChecks or ContChecks fail",
 			block: &workflow.Block{
-				PreChecks:  &workflow.Checks{},
-				ContChecks: &workflow.Checks{},
+				State:      &workflow.State{},
+				PreChecks:  &workflow.Checks{State: &workflow.State{}},
+				ContChecks: &workflow.Checks{State: &workflow.State{}},
 			},
 			checksRunner: func(ctx context.Context, checks *workflow.Checks) error {
 				return fmt.Errorf("error")
@@ -698,7 +703,10 @@ func TestBlockPostChecks(t *testing.T) {
 			name: "Error: PostChecks fail",
 			block: block{
 				block: &workflow.Block{
-					PostChecks: &workflow.Checks{Actions: []*workflow.Action{{Name: "error"}}},
+					PostChecks: &workflow.Checks{
+						State:   &workflow.State{},
+						Actions: []*workflow.Action{{Name: "error"}},
+					},
 				},
 			},
 			wantStatus: workflow.Failed,
@@ -708,7 +716,10 @@ func TestBlockPostChecks(t *testing.T) {
 			name: "Success: Post checks succeed",
 			block: block{
 				block: &workflow.Block{
-					PostChecks: &workflow.Checks{Actions: []*workflow.Action{{Name: "success"}}},
+					PostChecks: &workflow.Checks{
+						State:   &workflow.State{},
+						Actions: []*workflow.Action{{Name: "success"}},
+					},
 				},
 			},
 			wantStatus: workflow.Running,
@@ -878,7 +889,10 @@ func TestPlanPostChecks(t *testing.T) {
 		{
 			name: "Error: PostChecks fail",
 			plan: &workflow.Plan{
-				PostChecks: &workflow.Checks{Actions: []*workflow.Action{{Name: "error"}}},
+				PostChecks: &workflow.Checks{
+					State:   &workflow.State{},
+					Actions: []*workflow.Action{{Name: "error"}},
+				},
 			},
 			wantErr: true,
 		},
@@ -886,7 +900,10 @@ func TestPlanPostChecks(t *testing.T) {
 			name: "Success: Cont and Post checks succeed",
 			plan: &workflow.Plan{
 				ContChecks: &workflow.Checks{},
-				PostChecks: &workflow.Checks{Actions: []*workflow.Action{{Name: "success"}}},
+				PostChecks: &workflow.Checks{
+					State:   &workflow.State{},
+					Actions: []*workflow.Action{{Name: "success"}},
+				},
 			},
 		},
 	}
