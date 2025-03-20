@@ -5,6 +5,7 @@ package execute
 import (
 	"errors"
 	"fmt"
+	"log"
 	"time"
 
 	"github.com/element-of-surprise/coercion/internal/execute/sm"
@@ -50,16 +51,53 @@ type Plans struct {
 
 	// validators is a list of validators that are run on a Plan before it is started.
 	validators []validator
+
+	// maxLastUpdate is the maximum amount of time that can pass between updates to a Plan
+	// before it is considered stale and cannot be recovered.
+	maxLastUpdate time.Duration
+	// maxSubmitTime is the maximum amount of time that can pass between submission and start of a Plan.
+	maxSubmit time.Duration
+}
+
+// Option is an option for configuring a Plans via New.
+type Option func(*Plans) error
+
+// WithMaxLastUpdate sets the maximum amount of time that can pass between updates to a Plan.
+// If a Plan has not been updated in this amount of time, it is considered stale and cannot be recovered.
+// If this is not set, the default is 30 minutes.
+func WithMaxLastUpdate(d time.Duration) Option {
+	return func(p *Plans) error {
+		p.maxLastUpdate = d
+		return nil
+	}
+}
+
+// WithMaxSubmit sets the maximum amount of time that can pass between submission and start of a Plan.
+// If a Plan has not been started in this amount of time, it is considered stale and cannot be started.
+// If this is not set, the default is 30 minutes.
+func WithMaxSubmit(d time.Duration) Option {
+	return func(p *Plans) error {
+		p.maxSubmit = d
+		return nil
+	}
 }
 
 // New creates a new Executor. This should only be created once.
-func New(ctx context.Context, store storage.Vault, reg *registry.Register) (*Plans, error) {
+func New(ctx context.Context, store storage.Vault, reg *registry.Register, options ...Option) (*Plans, error) {
 	e := &Plans{
-		registry: reg,
-		store:    store,
-		waiters:  map[uuid.UUID]chan struct{}{},
-		stoppers: map[uuid.UUID]context.CancelFunc{},
-		runner:   statemachine.Run[sm.Data],
+		registry:      reg,
+		store:         store,
+		waiters:       map[uuid.UUID]chan struct{}{},
+		stoppers:      map[uuid.UUID]context.CancelFunc{},
+		runner:        statemachine.Run[sm.Data],
+		maxLastUpdate: 30 * time.Minute,
+		maxSubmit:     30 * time.Minute,
+	}
+
+	for _, o := range options {
+		if err := o(e); err != nil {
+			return nil, err
+		}
 	}
 
 	if err := e.initPlugins(ctx); err != nil {
@@ -73,6 +111,8 @@ func New(ctx context.Context, store storage.Vault, reg *registry.Register) (*Pla
 	}
 
 	e.addValidators()
+
+	e.recover(ctx)
 
 	return e, nil
 }
@@ -116,6 +156,39 @@ func (e *Plans) Start(ctx context.Context, id uuid.UUID) error {
 		return fmt.Errorf("invalid plan state: %w", err)
 	}
 
+	e.runPlan(ctx, plan)
+
+	return nil
+}
+
+// recover recovers a Plan that is in a Running state in storage and restarts it from where it left off.
+// This is used when the Executor starts up.
+func (e *Plans) recover(ctx context.Context) error {
+	recovery := recover{
+		maxAge: e.maxLastUpdate,
+		store:  e.store,
+	}
+	req := statemachine.Request[recoverData]{Ctx: ctx, Next: recovery.Start}
+	var err error
+	req, err = statemachine.Run[recoverData]("recover", req)
+	if err != nil {
+		return fmt.Errorf("failed to recover: %w", err)
+	}
+
+	if len(req.Data.plans) == 0 {
+		log.Println("no plans to recover")
+	}
+	for _, plan := range req.Data.plans {
+		log.Println("recovered plan: ", plan.ID)
+		log.Println(plan.State.Status)
+		e.runPlan(ctx, plan)
+	}
+
+	return nil
+}
+
+// runPlan runs a Plan through the statemachine. This is a non-blocking call.
+func (e *Plans) runPlan(ctx context.Context, plan *workflow.Plan) {
 	runCtx, cancel := context.WithCancel(context.WithoutCancel(ctx))
 
 	e.mu.Lock()
@@ -145,8 +218,6 @@ func (e *Plans) Start(ctx context.Context, id uuid.UUID) error {
 		// and doesn't actually matter. All errors are encapsulated in the Plan's state.
 		e.runner(plan.Name, req)
 	}()
-
-	return nil
 }
 
 func (e *Plans) now() time.Time {
@@ -187,6 +258,19 @@ type ider interface {
 func (p *Plans) validateStartState(ctx context.Context, plan *workflow.Plan) error {
 	if plan == nil {
 		return fmt.Errorf("plan is nil")
+	}
+	if p.maxSubmit == 0 {
+		return fmt.Errorf("maxSubmit is zero")
+	}
+	if plan.SubmitTime.IsZero() {
+		return fmt.Errorf("Plan.SubmitTime is zero")
+	}
+
+	if plan.SubmitTime.Add(p.maxSubmit).Before(time.Now()) {
+		log.Println("submitTime: ", plan.SubmitTime)
+		log.Println("maxSubmit: ", p.maxSubmit)
+		log.Println("now: ", time.Now())
+		return fmt.Errorf("plan is stale, submit time is too old")
 	}
 
 	for item := range walk.Plan(context.WithoutCancel(ctx), plan) {

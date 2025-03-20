@@ -1,6 +1,8 @@
 // Package walk provides a way to walk a workflow.Plan for all objects under it.
 package walk
 
+// NOTE: Changes here should be reflected in workflow/walk.go .
+
 import (
 	"context"
 

@@ -47,6 +47,12 @@ var (
 	teardown  = flag.Bool("teardown", false, "Teardown the cosmosdb container.")
 )
 
+// These are captured in the TestEtoE and used to test recovery scenarios.
+var (
+	capture = &sqlite.CaptureStmts{}
+	etoeID  uuid.UUID
+)
+
 func TestEtoE(t *testing.T) {
 	flag.Parse()
 	if err := validateFlags(); err != nil {
@@ -186,7 +192,7 @@ func TestEtoE(t *testing.T) {
 	var vault storage.Vault
 	switch *vaultType {
 	case "sqlite":
-		vault, err = sqlite.New(ctx, "", reg, sqlite.WithInMemory())
+		vault, err = sqlite.New(ctx, "", reg, sqlite.WithInMemory(), sqlite.WithCapture(capture))
 	case "cosmosdb":
 		logger.Info(fmt.Sprintf("TestEtoE: Using cosmosdb: %s, %s", *db, *container))
 		vault, err = cosmosdb.New(ctx, *swarm, *db, *container, cred, reg)
@@ -206,6 +212,7 @@ func TestEtoE(t *testing.T) {
 	if err != nil {
 		panic(err)
 	}
+	etoeID = id
 
 	if err := ws.Start(ctx, id); err != nil {
 		panic(err)
@@ -216,7 +223,7 @@ func TestEtoE(t *testing.T) {
 		panic(err)
 	}
 
-	pConfig.Print("Workflow result: \n", result)
+	// pConfig.Print("Workflow result: \n", result)
 
 	if result.State.Status != workflow.Completed {
 		t.Fatalf("TestEtoE: workflow did not complete successfully(%s)", result.State.Status)
@@ -432,7 +439,6 @@ func TestBypassPlan(t *testing.T) {
 		if result.Err != nil {
 			panic(result.Err)
 		}
-		fmt.Println("Workflow status: ", result.Data.State.Status)
 	}
 
 	if result.Data.State.Status != workflow.Completed {
@@ -616,7 +622,6 @@ func TestBypassBlock(t *testing.T) {
 		if result.Err != nil {
 			panic(result.Err)
 		}
-		fmt.Println("Workflow status: ", result.Data.State.Status)
 		count++
 		if count > 5 {
 			pConfig.Print("Workflow result: \n", result.Data)

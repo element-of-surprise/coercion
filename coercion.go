@@ -11,6 +11,7 @@ package coercion
 import (
 	"context"
 	"fmt"
+	"log"
 	"time"
 
 	"github.com/element-of-surprise/coercion/internal/execute"
@@ -40,10 +41,32 @@ type Workstream struct {
 	reg   *registry.Register
 	exec  *execute.Plans
 	store storage.Vault
+
+	execOptions []execute.Option
 }
 
 // Option is an optional argument for New(). For future use.
 type Option func(*Workstream) error
+
+// WithMaxLastUpdate sets the maximum amount of time that can pass between updates to a Plan.
+// If a Plan has not been updated in this amount of time, it is considered stale and cannot be recovered.
+// If this is not set, the default is 30 minutes.
+func WithMaxLastUpdate(d time.Duration) Option {
+	return func(w *Workstream) error {
+		w.execOptions = append(w.execOptions, execute.WithMaxLastUpdate(d))
+		return nil
+	}
+}
+
+// WithMaxSubmit sets the maximum amount of time that can pass between submission and start of a Plan.
+// If a Plan has not been started in this amount of time, it is considered stale and cannot be started.
+// If this is not set, the default is 30 minutes.
+func WithMaxSubmit(d time.Duration) Option {
+	return func(p *Workstream) error {
+		p.execOptions = append(p.execOptions, execute.WithMaxSubmit(d))
+		return nil
+	}
+}
 
 // New creates a new Workstream.
 func New(ctx context.Context, reg *registry.Register, store storage.Vault, options ...Option) (*Workstream, error) {
@@ -56,6 +79,7 @@ func New(ctx context.Context, reg *registry.Register, store storage.Vault, optio
 
 	// Some storage systems may need to recover from a previous state after a crash.
 	if r, ok := store.(storage.Recovery); ok {
+		log.Println("ran storage.Recovery")
 		if err := r.Recovery(ctx); err != nil {
 			return nil, fmt.Errorf("failed to recover storage: %w", err)
 		}
@@ -68,7 +92,7 @@ func New(ctx context.Context, reg *registry.Register, store storage.Vault, optio
 		}
 	}
 
-	exec, err := execute.New(ctx, store, reg)
+	exec, err := execute.New(ctx, store, reg, ws.execOptions...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create executor: %w", err)
 	}
