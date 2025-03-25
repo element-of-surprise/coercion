@@ -15,8 +15,6 @@ import (
 	"go.opentelemetry.io/otel/sdk/metric"
 	"go.opentelemetry.io/otel/sdk/resource"
 	semconv "go.opentelemetry.io/otel/semconv/v1.26.0"
-	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/watch"
 
 	"github.com/element-of-surprise/coercion/workflow"
 )
@@ -35,21 +33,15 @@ func TestWatchListMetrics(t *testing.T) {
 		expectedFile       string
 	}{
 		{
-			name:         "batching metrics",
+			name:         "workflow event metrics",
 			expectedFile: "testdata/readers_happy.txt",
 			recordMetrics: func(ctx context.Context, meter otelmetric.Meter) {
 				Init(meter)
-				events := []watch.Event{
-					{
-						Type: watch.Added,
-					},
-					{
-						Type: watch.Error,
-					},
-				}
-				for _, event := range events {
-					WorkflowEvent(ctx, workflow.OTBlock, workflow.Completed)
-				}
+				WorkflowEvent(ctx, workflow.OTAction, workflow.Completed)
+				WorkflowEvent(ctx, workflow.OTCheck, workflow.Failed)
+				WorkflowEvent(ctx, workflow.OTBlock, workflow.Failed)
+				WorkflowEvent(ctx, workflow.OTSequence, workflow.Failed)
+				WorkflowEvent(ctx, workflow.OTPlan, workflow.Failed)
 			},
 		},
 		{
