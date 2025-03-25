@@ -13,15 +13,16 @@ import (
 
 const (
 	subsystem       = "coercion"
-	objectTypeLabel  = "object_type"
-	statusLabel = "status"
+	objectTypeLabel = "object_type"
+	statusLabel     = "status"
 )
 
 var (
 	// currently running guage for started/running
-	// rename to sometheing like objectStateTransition? objectStateChange? objectStateCompletion? just objectState or
-	// objectStatus?
-	workflowEventCount metric.Int64Counter
+	// rename from workflowEventCount to sometheing like objectStateTransition? objectStateChange? objectStateCompletion? just objectState or
+	// objectStatus? executionState?
+	// is this confusing if something is retried? I guess that would only show up in attempts
+	executionStatusCount metric.Int64Counter
 )
 
 func metricName(name string) string {
@@ -31,22 +32,23 @@ func metricName(name string) string {
 // Init initializes the readers metrics. This should only be called by the tattler constructor or tests.
 func Init(meter api.Meter) error {
 	var err error
-	workflowEventCount, err = meter.Int64Counter(metricName("workflow_event_total"), api.WithDescription("total number of watch events handled by tattler"))
+	executionStatusCount, err = meter.Int64Counter(metricName("execution_status_total"), api.WithDescription("total number of watch events handled by tattler"))
 	if err != nil {
 		return err
 	}
 	return nil
 }
 
-// WorkflowEvent increases the watchEventCount metric
+// ExecutionStatus increases the watchEventCount metric
 // with event type = (added, modified, deleted, bookmark, error).
-func WorkflowEvent(ctx context.Context, t workflow.ObjectType, s workflow.Status) {
+// is it confusiong that there isn't a check type?
+func ExecutionStatus(ctx context.Context, t workflow.ObjectType, s workflow.Status) {
 	opt := api.WithAttributes(
 		// added, modified, deleted, bookmark, error
 		attribute.Key(objectTypeLabel).String(t.String()),
 		attribute.Key(statusLabel).String(s.String()),
 	)
-	if workflowEventCount != nil {
-		workflowEventCount.Add(ctx, 1, opt)
+	if executionStatusCount != nil {
+		executionStatusCount.Add(ctx, 1, opt)
 	}
 }
