@@ -8,6 +8,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	metrics "github.com/element-of-surprise/coercion/internal/execute/metrics"
 	"github.com/element-of-surprise/coercion/internal/execute/sm/actions"
 	"github.com/element-of-surprise/coercion/plugins/registry"
 	"github.com/element-of-surprise/coercion/workflow"
@@ -113,6 +114,11 @@ func New(store storage.Vault, registry *registry.Register) (*States, error) {
 func (s *States) Start(req statemachine.Request[Data]) statemachine.Request[Data] {
 	plan := req.Data.Plan
 
+	metrics.Start(req.Ctx, workflow.OTPlan)
+	defer func() {
+		metrics.Started(req.Ctx, plan)
+	}()
+
 	req.Ctx = context.SetPlanID(req.Ctx, req.Data.Plan.ID)
 
 	for _, b := range req.Data.Plan.Blocks {
@@ -212,6 +218,7 @@ func (s *States) ExecuteBlock(req statemachine.Request[Data]) statemachine.Reque
 
 	h := req.Data.blocks[0]
 
+	metrics.Start(req.Ctx, workflow.OTBlock)
 	defer func() {
 		if err := s.store.UpdateBlock(req.Ctx, h.block); err != nil {
 			log.Fatalf("failed to write Block: %v", err)
@@ -256,6 +263,7 @@ func (s *States) BlockBypassChecks(req statemachine.Request[Data]) statemachine.
 		req.Next = s.BlockPreChecks
 		return req
 	}
+
 	skip := s.runBypasses(req.Ctx, h.block.BypassChecks)
 	if skip {
 		if h.contCheckResult != nil {
@@ -465,6 +473,8 @@ func (s *States) BlockEnd(req statemachine.Request[Data]) statemachine.Request[D
 		if err := s.store.UpdateBlock(req.Ctx, h.block); err != nil {
 			log.Fatalf("failed to write Block: %v", err)
 		}
+		metrics.End(req.Ctx, workflow.OTBlock)
+		metrics.FinalStatus(req.Ctx, workflow.OTBlock, h.block.State.Status)
 	}()
 
 	// Don't use checksCompleted() here, we want to run the block if it is not completed.
@@ -607,6 +617,8 @@ func (s *States) End(req statemachine.Request[Data]) statemachine.Request[Data] 
 
 func (s *States) writeEverything(ctx context.Context, plan *workflow.Plan) {
 	ctx = context.WithoutCancel(ctx)
+	// metrics.End(ctx, workflow.OTPlan)
+	// metrics.FinalStatus(ctx, workflow.OTPlan, plan.State.Status)
 	for item := range walk.Plan(plan) {
 		switch item.Value.Type() {
 		case workflow.OTPlan:

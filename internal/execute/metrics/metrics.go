@@ -26,13 +26,8 @@ var (
 	startPlanLatency metric.Int64Histogram
 	// runningCount is a gauge for currently running coercion workflow objects.
 	runningCount metric.Int64UpDownCounter
-	// rename from workflowEventCount to sometheing like objectStateTransition? objectStateChange? objectStateCompletion? just objectState or
-	// objectStatus? executionState?
-	// is this confusing if something is retried? I guess that would only show up in attempts
-	executionStatusCount metric.Int64Counter
-	// latency from start to end of a workflow?
-	// latency from submit time to start time?
-	// number of retries/attempts?
+	// finalStatusCount is a counter for coercion workflow objects that have reached a final status.
+	finalStatusCount metric.Int64Counter
 )
 
 func metricName(name string) string {
@@ -50,11 +45,11 @@ func Init(meter api.Meter) error {
 	if err != nil {
 		return err
 	}
-	executionStatusCount, err = meter.Int64Counter(metricName("execution_status_total"), api.WithDescription("total number of coercion workflow objects executed"))
+	finalStatusCount, err = meter.Int64Counter(metricName("final_status_total"), api.WithDescription("total number of coercion workflow objects executed"))
 	if err != nil {
 		return err
 	}
-	startPlanLatency, err = meter.Int64Histogram(metricName("plan_start_ms"), api.WithDescription("total number of coercion workflow objects executed"))
+	startPlanLatency, err = meter.Int64Histogram(metricName("plan_start_ms"), api.WithDescription("time from when the plan is submitted to when it is started"))
 	// api.WithExplicitBucketBoundaries(50, 100, 200, 400, 600, 800, 1000, 1250, 1500, 2000, 3000, 4000, 5000, 10000),
 	if err != nil {
 		return err
@@ -63,10 +58,8 @@ func Init(meter api.Meter) error {
 }
 
 // NotStarted increases the submittedCount metric.
-func NotStarted(ctx context.Context, plan *workflow.Plan) {
-	opt := api.WithAttributes(
-	// attribute.Key(objectTypeLabel).String(t.String()),
-	)
+func NotStarted(ctx context.Context) {
+	opt := api.WithAttributes()
 	if submittedCount != nil {
 		submittedCount.Add(ctx, 1, opt)
 	}
@@ -74,9 +67,7 @@ func NotStarted(ctx context.Context, plan *workflow.Plan) {
 
 // Started decreases the submittedCount and records the startPlanLatency metric.
 func Started(ctx context.Context, plan *workflow.Plan) {
-	opt := api.WithAttributes(
-	// attribute.Key(objectTypeLabel).String(t.String()),
-	)
+	opt := api.WithAttributes()
 	if submittedCount != nil {
 		submittedCount.Add(ctx, -1, opt)
 	}
@@ -86,9 +77,9 @@ func Started(ctx context.Context, plan *workflow.Plan) {
 }
 
 // Start increases the runningCount metric.
-func Start(ctx context.Context, t workflow.ObjectType) {
+func Start(ctx context.Context, ot workflow.ObjectType) {
 	opt := api.WithAttributes(
-		attribute.Key(objectTypeLabel).String(t.String()),
+		attribute.Key(objectTypeLabel).String(ot.String()),
 	)
 	if runningCount != nil {
 		runningCount.Add(ctx, 1, opt)
@@ -96,24 +87,22 @@ func Start(ctx context.Context, t workflow.ObjectType) {
 }
 
 // End decreases the runningCount metric.
-func End(ctx context.Context, t workflow.ObjectType) {
+func End(ctx context.Context, ot workflow.ObjectType) {
 	opt := api.WithAttributes(
-		attribute.Key(objectTypeLabel).String(t.String()),
+		attribute.Key(objectTypeLabel).String(ot.String()),
 	)
 	if runningCount != nil {
 		runningCount.Add(ctx, -1, opt)
 	}
 }
 
-// ExecutionStatus increases the watchEventCount metric
-// with event type = (added, modified, deleted, bookmark, error).
-// is it confusiong that there isn't a check type?
-func ExecutionStatus(ctx context.Context, t workflow.ObjectType, s workflow.Status) {
+// FinalStatus increases the finalStatusCount metric.
+func FinalStatus(ctx context.Context, ot workflow.ObjectType, s workflow.Status) {
 	opt := api.WithAttributes(
-		attribute.Key(objectTypeLabel).String(t.String()),
+		attribute.Key(objectTypeLabel).String(ot.String()),
 		attribute.Key(statusLabel).String(s.String()),
 	)
-	if executionStatusCount != nil {
-		executionStatusCount.Add(ctx, 1, opt)
+	if finalStatusCount != nil {
+		finalStatusCount.Add(ctx, 1, opt)
 	}
 }
