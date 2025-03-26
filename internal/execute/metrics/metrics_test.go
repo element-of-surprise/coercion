@@ -33,23 +33,23 @@ func TestWatchListMetrics(t *testing.T) {
 		expectedFile       string
 	}{
 		{
-			name:         "workflow event metrics",
+			name:         "execution metrics",
 			expectedFile: "testdata/readers_happy.txt",
 			recordMetrics: func(ctx context.Context, meter otelmetric.Meter) {
 				Init(meter)
-				WorkflowEvent(ctx, workflow.OTAction, workflow.Completed)
-				WorkflowEvent(ctx, workflow.OTCheck, workflow.Failed)
-				WorkflowEvent(ctx, workflow.OTBlock, workflow.Failed)
-				WorkflowEvent(ctx, workflow.OTSequence, workflow.Failed)
-				WorkflowEvent(ctx, workflow.OTPlan, workflow.Failed)
+				ExecutionStatus(ctx, workflow.OTAction, workflow.Completed)
+				ExecutionStatus(ctx, workflow.OTCheck, workflow.Failed)
+				ExecutionStatus(ctx, workflow.OTBlock, workflow.Failed)
+				ExecutionStatus(ctx, workflow.OTSequence, workflow.Failed)
+				ExecutionStatus(ctx, workflow.OTPlan, workflow.Failed)
 			},
 		},
 		{
-			name:         "batching metrics not initialized",
+			name:         "execution metrics not initialized",
 			expectedFile: "testdata/readers_nometrics.txt",
 			recordMetrics: func(ctx context.Context, meter otelmetric.Meter) {
-				// WorkflowEvent(ctx, watch.Event{Type: watch.Added})
-				WorkflowEvent(ctx, workflow.OTBlock, workflow.Completed)
+				// ExecutionStatus(ctx, watch.Event{Type: watch.Added})
+				ExecutionStatus(ctx, workflow.OTBlock, workflow.Completed)
 			},
 		},
 	}
