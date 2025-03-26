@@ -83,6 +83,8 @@ func WithNoRecovery() Option {
 	}
 }
 
+// WithMeterProvider sets the meter provider with which to register coercion metrics.
+// Defaults to nil, in which case no metrics are registered.
 func WithMeterProvider(m metric.MeterProvider) Option {
 	return func(p *Workstream) error {
 		if m == nil {
