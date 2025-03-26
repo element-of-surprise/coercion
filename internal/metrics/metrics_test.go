@@ -21,6 +21,10 @@ import (
 	"github.com/element-of-surprise/coercion/workflow"
 )
 
+var (
+	testSubmitTime = time.Date(2025, 12, 18, 14, 30, 45, 100, time.UTC)
+)
+
 // Based on
 // https://github.com/open-telemetry/opentelemetry-go/blob/c609b12d9815bbad0810d67ee0bfcba0591138ce/exporters/prometheus/exporter_test.go
 func TestWatchListMetrics(t *testing.T) {
@@ -29,10 +33,10 @@ func TestWatchListMetrics(t *testing.T) {
 	startedPlan := &workflow.Plan{
 		ID: mustUUID(),
 		State: &workflow.State{
-			Start:  time.Now(),
+			Start:  testSubmitTime.Add(1 * time.Second),
 			Status: workflow.Running,
 		},
-		SubmitTime: time.Now().Add(-1 * time.Second),
+		SubmitTime: testSubmitTime,
 	}
 
 	tests := []struct {
@@ -44,8 +48,8 @@ func TestWatchListMetrics(t *testing.T) {
 		expectedFile       string
 	}{
 		{
-			name:         "execution metrics",
-			expectedFile: "testdata/execute_happy.txt",
+			name:         "coercion metrics",
+			expectedFile: "testdata/happy.txt",
 			recordMetrics: func(ctx context.Context, meter otelmetric.Meter) {
 				Init(meter)
 				NotStarted(ctx)
@@ -58,8 +62,8 @@ func TestWatchListMetrics(t *testing.T) {
 			},
 		},
 		{
-			name:         "execution metrics not initialized",
-			expectedFile: "testdata/execute_nometrics.txt",
+			name:         "coercion metrics not initialized",
+			expectedFile: "testdata/nometrics.txt",
 			recordMetrics: func(ctx context.Context, meter otelmetric.Meter) {
 				NotStarted(ctx)
 				Started(ctx, startedPlan)
@@ -68,6 +72,16 @@ func TestWatchListMetrics(t *testing.T) {
 				FinalStatus(ctx, workflow.OTBlock, workflow.Failed)
 				FinalStatus(ctx, workflow.OTPlan, workflow.Failed)
 				End(ctx, workflow.OTPlan)
+			},
+		},
+		{
+			name:         "plan not initialized",
+			expectedFile: "testdata/emptyplan.txt",
+			recordMetrics: func(ctx context.Context, meter otelmetric.Meter) {
+				Init(meter)
+				plan := &workflow.Plan{}
+				NotStarted(ctx)
+				Started(ctx, plan)
 			},
 		},
 	}
@@ -87,7 +101,7 @@ func TestWatchListMetrics(t *testing.T) {
 		} else {
 			res, err = resource.New(ctx,
 				// always specify service.name because the default depends on the running OS
-				resource.WithAttributes(semconv.ServiceName("tattler_test")),
+				resource.WithAttributes(semconv.ServiceName("coercion_test")),
 				// Overwrite the semconv.TelemetrySDKVersionKey value so we don't need to update every version
 				resource.WithAttributes(semconv.TelemetrySDKVersion("latest")),
 				resource.WithAttributes(test.customResouceAttrs...),

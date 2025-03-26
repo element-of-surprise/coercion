@@ -34,7 +34,7 @@ func metricName(name string) string {
 	return fmt.Sprintf("%s_%s", subsystem, name)
 }
 
-// Init initializes the readers metrics. This should only be called by the tattler constructor or tests.
+// Init initializes the coercion metrics. This should only be called by the coercion constructor or tests.
 func Init(meter api.Meter) error {
 	var err error
 	submittedCount, err = meter.Int64UpDownCounter(metricName("plan_submitted_total"), api.WithDescription("total number of coercion workflow objects submitted but not started"))
@@ -49,8 +49,9 @@ func Init(meter api.Meter) error {
 	if err != nil {
 		return err
 	}
-	startPlanLatency, err = meter.Int64Histogram(metricName("plan_start_ms"), api.WithDescription("time from when the plan is submitted to when it is started"))
-	// api.WithExplicitBucketBoundaries(50, 100, 200, 400, 600, 800, 1000, 1250, 1500, 2000, 3000, 4000, 5000, 10000),
+	startPlanLatency, err = meter.Int64Histogram(metricName("plan_start_ms"),
+		api.WithDescription("time from when the plan is submitted to when it is started"),
+		api.WithExplicitBucketBoundaries(50, 100, 200, 400, 600, 800, 1000, 1250, 1500, 2000, 3000, 4000, 5000, 10000))
 	if err != nil {
 		return err
 	}
@@ -71,7 +72,7 @@ func Started(ctx context.Context, plan *workflow.Plan) {
 	if submittedCount != nil {
 		submittedCount.Add(ctx, -1, opt)
 	}
-	if startPlanLatency != nil {
+	if startPlanLatency != nil && plan.State != nil {
 		startPlanLatency.Record(ctx, plan.State.Start.Sub(plan.SubmitTime).Milliseconds(), opt)
 	}
 }
