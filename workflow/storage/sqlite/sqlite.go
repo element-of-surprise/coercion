@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"testing"
 
 	"github.com/element-of-surprise/coercion/internal/private"
 	"github.com/element-of-surprise/coercion/plugins/registry"
@@ -31,8 +32,11 @@ var _ storage.Vault = &Vault{}
 type Vault struct {
 	// root is the root path for the storage.
 	root      string
+	mu        *sync.Mutex
 	pool      *sqlitex.Pool
 	openFlags []sqlite.OpenFlags
+
+	capture *CaptureStmts
 
 	reader
 	creator
@@ -54,6 +58,17 @@ func WithInMemory() Option {
 	}
 }
 
+// WithCapture is a flag to capture sqlite statements that occur. This can only be used when in a testing environment.
+func WithCapture(capture *CaptureStmts) Option {
+	return func(r *Vault) error {
+		if !testing.Testing() {
+			return fmt.Errorf("WithStatesCapture can only be used in testing")
+		}
+		r.capture = capture
+		return nil
+	}
+}
+
 // New is the constructor for *ReadWriter. root is the root path for the storage.
 // If the root path does not exist, it will be created.
 func New(ctx context.Context, root string, reg *registry.Register, options ...Option) (*Vault, error) {
@@ -61,6 +76,7 @@ func New(ctx context.Context, root string, reg *registry.Register, options ...Op
 
 	r := &Vault{
 		root:      root,
+		mu:        &sync.Mutex{},
 		openFlags: []sqlite.OpenFlags{sqlite.OpenReadWrite, sqlite.OpenCreate, sqlite.OpenWAL},
 	}
 	for _, o := range options {
@@ -113,15 +129,21 @@ func New(ctx context.Context, root string, reg *registry.Register, options ...Op
 		return nil, err
 	}
 
-	mu := &sync.Mutex{}
-
 	r.pool = pool
 	r.reader = reader{pool: pool, reg: reg}
-	r.creator = creator{mu: mu, pool: pool, reader: r.reader}
-	r.updater = newUpdater(mu, pool)
+	r.creator = creator{mu: r.mu, pool: pool, reader: r.reader, capture: r.capture}
+	r.updater = newUpdater(r.mu, pool, r.capture)
 	r.closer = closer{pool: pool}
-	r.deleter = deleter{mu: mu, pool: pool, reader: r.reader}
+	r.deleter = deleter{mu: r.mu, pool: pool, reader: r.reader}
 	return r, nil
+}
+
+// Pool returns the underlying sqlite pool. Only available in tests.
+func (v *Vault) Pool() *sqlitex.Pool {
+	if !testing.Testing() {
+		panic("Pool is only available for testing")
+	}
+	return v.pool
 }
 
 func createTables(ctx context.Context, conn *sqlite.Conn) error {

@@ -16,8 +16,9 @@ var _ storage.PlanUpdater = planUpdater{}
 
 // planUpdater implements the storage.PlanUpdater interface.
 type planUpdater struct {
-	mu   *sync.Mutex
-	pool *sqlitex.Pool
+	mu      *sync.Mutex
+	pool    *sqlitex.Pool
+	capture *CaptureStmts
 
 	private.Storage
 }
@@ -33,21 +34,24 @@ func (u planUpdater) UpdatePlan(ctx context.Context, plan *workflow.Plan) error 
 	}
 	defer u.pool.Put(conn)
 
-	stmt, err := conn.Prepare(updatePlan)
-	if err != nil {
-		return fmt.Errorf("PlanUpdater.UpdatePlan: %w", err)
-	}
-
+	stmt := Stmt{}
+	stmt.Query(updatePlan)
 	stmt.SetText("$id", plan.ID.String())
 	stmt.SetInt64("$reason", int64(plan.Reason))
 	stmt.SetInt64("$state_status", int64(plan.State.Status))
 	stmt.SetInt64("$state_start", plan.State.Start.UnixNano())
 	stmt.SetInt64("$state_end", plan.State.End.UnixNano())
 
-	_, err = stmt.Step()
+	sStmt, err := stmt.Prepare(conn)
 	if err != nil {
 		return fmt.Errorf("PlanUpdater.UpdatePlan: %w", err)
 	}
+
+	_, err = sStmt.Step()
+	if err != nil {
+		return fmt.Errorf("PlanUpdater.UpdatePlan: %w", err)
+	}
+	u.capture.Capture(stmt)
 
 	return nil
 }

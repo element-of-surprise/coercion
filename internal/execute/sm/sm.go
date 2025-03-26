@@ -107,7 +107,8 @@ func New(store storage.Vault, registry *registry.Register) (*States, error) {
 	return s, nil
 }
 
-// Start starts execution of the Plan. This is the first state of the statemachine.
+// Start starts execution of the Plan. This is the first state of the statemachine for new Plans.
+// If the Plan has been recovered after a crash, the statemachine starts with the Recover state.
 func (s *States) Start(req statemachine.Request[Data]) statemachine.Request[Data] {
 	plan := req.Data.Plan
 
@@ -138,6 +139,11 @@ func (s *States) PlanBypassChecks(req statemachine.Request[Data]) statemachine.R
 		}
 	}()
 
+	if skipRecoveredChecks(req.Data.Plan.BypassChecks) {
+		req.Next = s.PlanPreChecks
+		return req
+	}
+
 	skip := s.runBypasses(req.Ctx, req.Data.Plan.BypassChecks)
 	if skip {
 		if req.Data.contCheckResult != nil {
@@ -157,6 +163,11 @@ func (s *States) PlanPreChecks(req statemachine.Request[Data]) statemachine.Requ
 			log.Fatalf("failed to write Plan: %v", err)
 		}
 	}()
+
+	if skipRecoveredChecks(req.Data.Plan.PreChecks) {
+		req.Next = s.PlanStartContChecks
+		return req
+	}
 
 	err := s.runPreChecks(req.Ctx, req.Data.Plan.PreChecks, req.Data.Plan.ContChecks)
 	if err != nil {
@@ -203,6 +214,16 @@ func (s *States) ExecuteBlock(req statemachine.Request[Data]) statemachine.Reque
 		}
 	}()
 
+	if skipBlock(h) {
+		if len(req.Data.blocks) == 1 {
+			req.Data.blocks = nil
+		} else {
+			req.Data.blocks = req.Data.blocks[1:]
+		}
+		req.Next = s.ExecuteBlock
+		return req
+	}
+
 	if err := after(req.Ctx, h.block.EntranceDelay); err != nil {
 		h.block.State.Status = workflow.Stopped
 		req.Data.err = err
@@ -221,7 +242,7 @@ func (s *States) ExecuteBlock(req statemachine.Request[Data]) statemachine.Reque
 func (s *States) BlockBypassChecks(req statemachine.Request[Data]) statemachine.Request[Data] {
 	h := req.Data.blocks[0]
 
-	if h.block.BypassChecks == nil {
+	if h.block.BypassChecks == nil || h.block.BypassChecks.State.Status == workflow.Failed {
 		req.Next = s.BlockPreChecks
 		return req
 	}
@@ -241,7 +262,7 @@ func (s *States) BlockBypassChecks(req statemachine.Request[Data]) statemachine.
 func (s *States) BlockPreChecks(req statemachine.Request[Data]) statemachine.Request[Data] {
 	h := req.Data.blocks[0]
 
-	if h.block.PreChecks == nil {
+	if h.block.PreChecks == nil || h.block.PreChecks.State.Status == workflow.Completed {
 		req.Next = s.BlockStartContChecks
 		return req
 	}
@@ -288,6 +309,11 @@ func (s *States) BlockStartContChecks(req statemachine.Request[Data]) statemachi
 func (s *States) ExecuteSequences(req statemachine.Request[Data]) statemachine.Request[Data] {
 	h := req.Data.blocks[0]
 	failures := atomic.Int64{}
+	for _, seq := range h.block.Sequences {
+		if seq.State.Status == workflow.Failed {
+			failures.Add(1)
+		}
+	}
 
 	exceededFailures := func() bool {
 		if h.block.ToleratedFailures >= 0 && failures.Load() > int64(h.block.ToleratedFailures) {
@@ -302,15 +328,15 @@ func (s *States) ExecuteSequences(req statemachine.Request[Data]) statemachine.R
 	// still end up running the one we just queued up. So we use the limiter to block the g.Go() from even being called.
 	limiter := make(chan struct{}, h.block.Concurrency)
 
-	pool, err := context.Pool(req.Ctx).Limited(h.block.Concurrency)
-	if err != nil {
-		panic("bug: failed to create pool: " + err.Error())
-	}
+	pool := context.Pool(req.Ctx).Limited(h.block.Concurrency)
 
 	g := pool.Group()
 
 	for i := 0; i < len(h.block.Sequences); i++ {
 		seq := h.block.Sequences[i]
+		if seq.State.Status == workflow.Completed || seq.State.Status == workflow.Failed {
+			continue
+		}
 
 		if _, err := req.Data.contChecksPassing(); err != nil {
 			h.block.State.Status = workflow.Failed
@@ -365,7 +391,7 @@ func (s *States) ExecuteSequences(req statemachine.Request[Data]) statemachine.R
 func (s *States) BlockPostChecks(req statemachine.Request[Data]) statemachine.Request[Data] {
 	h := req.Data.blocks[0]
 	req.Next = s.BlockDeferredChecks
-	if h.block.PostChecks == nil {
+	if checksCompleted(h.block.PostChecks) {
 		return req
 	}
 
@@ -383,7 +409,7 @@ func (s *States) BlockDeferredChecks(req statemachine.Request[Data]) statemachin
 	h := req.Data.blocks[0]
 	req.Next = s.BlockEnd
 
-	if h.block.DeferredChecks == nil {
+	if checksCompleted(h.block.DeferredChecks) {
 		return req
 	}
 
@@ -408,6 +434,7 @@ func (s *States) BlockEnd(req statemachine.Request[Data]) statemachine.Request[D
 		}
 	}()
 
+	// Don't use checksCompleted() here, we want to run the block if it is not completed.
 	if h.block.BypassChecks != nil && h.block.BypassChecks.State.Status == workflow.Completed {
 		h.block.State.Status = workflow.Completed
 	} else {
@@ -476,7 +503,7 @@ func (s *States) PlanPostChecks(req statemachine.Request[Data]) statemachine.Req
 		}
 	}
 
-	if req.Data.Plan.PostChecks != nil {
+	if req.Data.Plan.PostChecks != nil && !isCompleted(req.Data.Plan.PostChecks) {
 		if err := s.runChecksOnce(req.Ctx, req.Data.Plan.PostChecks); err != nil {
 			req.Data.err = err
 			return req
@@ -490,7 +517,7 @@ func (s *States) PlanDeferredChecks(req statemachine.Request[Data]) statemachine
 	// No matter what the outcome here is, we go to the end state.
 	req.Next = s.End
 
-	if req.Data.Plan.DeferredChecks == nil {
+	if req.Data.Plan.DeferredChecks == nil || isCompleted(req.Data.Plan.DeferredChecks) {
 		return req
 	}
 	if err := s.runChecksOnce(req.Ctx, req.Data.Plan.DeferredChecks); err != nil {

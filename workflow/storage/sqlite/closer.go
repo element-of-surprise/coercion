@@ -2,6 +2,7 @@ package sqlite
 
 import (
 	"context"
+	"sync"
 
 	"github.com/element-of-surprise/coercion/internal/private"
 	"zombiezen.com/go/sqlite/sqlitex"
@@ -9,6 +10,7 @@ import (
 
 type closer struct {
 	pool *sqlitex.Pool
+	mu   *sync.RWMutex
 
 	private.Storage
 }
