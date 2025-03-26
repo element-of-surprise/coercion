@@ -1,4 +1,4 @@
-package execute
+package metrics
 
 import (
 	"context"
@@ -61,8 +61,13 @@ func TestWatchListMetrics(t *testing.T) {
 			name:         "execution metrics not initialized",
 			expectedFile: "testdata/execute_nometrics.txt",
 			recordMetrics: func(ctx context.Context, meter otelmetric.Meter) {
-				// FinalStatus(ctx, watch.Event{Type: watch.Added})
-				FinalStatus(ctx, workflow.OTBlock, workflow.Completed)
+				NotStarted(ctx)
+				Started(ctx, startedPlan)
+				Start(ctx, workflow.OTPlan)
+				FinalStatus(ctx, workflow.OTBlock, workflow.Stopped)
+				FinalStatus(ctx, workflow.OTBlock, workflow.Failed)
+				FinalStatus(ctx, workflow.OTPlan, workflow.Failed)
+				End(ctx, workflow.OTPlan)
 			},
 		},
 	}

@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/element-of-surprise/coercion/internal/execute"
+	"github.com/element-of-surprise/coercion/internal/metrics"
 	"github.com/element-of-surprise/coercion/plugins/registry"
 	"github.com/element-of-surprise/coercion/workflow"
 	"github.com/element-of-surprise/coercion/workflow/errors"
@@ -138,6 +139,8 @@ func (w *Workstream) Submit(ctx context.Context, plan *workflow.Plan) (uuid.UUID
 	if err := w.store.Create(ctx, plan); err != nil {
 		return uuid.Nil, err
 	}
+
+	metrics.NotStarted(ctx)
 
 	return plan.ID, nil
 }
