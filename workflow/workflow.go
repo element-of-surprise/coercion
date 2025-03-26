@@ -213,32 +213,6 @@ func (p *Plan) Defaults() {
 	}
 }
 
-type stater interface {
-	GetState() *State
-}
-
-// LastUpdate returns the last time the object was updated. If it has not been updated, this will return
-// the zero time. Only an object that has been started will have a LastUpdate time.
-func (p *Plan) LastUpdate(ctx context.Context) time.Time {
-	if p == nil {
-		return time.Time{}
-	}
-
-	last := time.Time{}
-
-	for item := range walkPlan(ctx, p) {
-		state := item.Value.(stater).GetState()
-		if state.Start.After(last) {
-			last = state.Start
-		}
-		if state.End.After(last) {
-			last = state.End
-		}
-	}
-
-	return last
-}
-
 func (p *Plan) validate(ctx context.Context) ([]validator, error) {
 	if p == nil {
 		return nil, errors.New("plan is nil")

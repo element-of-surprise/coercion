@@ -23,10 +23,10 @@ type recover struct {
 	store  storage.Vault
 }
 
-// Start starts the recovery process. It searches for running plans in the data store.
+// start starts the recovery process. It searches for running plans in the data store.
 // The recovery process DOES NOT use concurrency due to the fact that the sqlite store is flawed
 // and cannot handle concurrent reads and writes.
-func (r *recover) Start(req statemachine.Request[recoverData]) statemachine.Request[recoverData] {
+func (r *recover) start(req statemachine.Request[recoverData]) statemachine.Request[recoverData] {
 	results, err := r.store.Search(req.Ctx, storage.Filters{ByStatus: []workflow.Status{workflow.Running}})
 	if err != nil {
 		req.Err = fmt.Errorf("failed to search for running plans: %w", err)
@@ -40,12 +40,12 @@ func (r *recover) Start(req statemachine.Request[recoverData]) statemachine.Requ
 		req.Data.searchResults = append(req.Data.searchResults, result)
 	}
 
-	req.Next = r.FetchPlans
+	req.Next = r.fetchPlans
 	return req
 }
 
-// FetchPlans fetches the plans that are running from the data store in parallel.
-func (r *recover) FetchPlans(req statemachine.Request[recoverData]) statemachine.Request[recoverData] {
+// fetchPlans fetches the plans that are running from the data store in parallel.
+func (r *recover) fetchPlans(req statemachine.Request[recoverData]) statemachine.Request[recoverData] {
 	recovered := make([]*workflow.Plan, len(req.Data.searchResults))
 	for i, result := range req.Data.searchResults {
 		plan, err := r.store.Read(req.Ctx, result.Result.ID)
@@ -56,7 +56,7 @@ func (r *recover) FetchPlans(req statemachine.Request[recoverData]) statemachine
 		recovered[i] = plan
 	}
 	req.Data.plans = recovered
-	req.Next = r.FilterPlans
+	req.Next = r.filterPlans
 	return req
 }
 
@@ -112,12 +112,12 @@ func (r *recover) FetchPlans(req statemachine.Request[recoverData]) statemachine
 }
 */
 
-// FilterPlans filters out the plans that have exceeded the recovery time into a list and removes them from the list of plans.
-func (r *recover) FilterPlans(req statemachine.Request[recoverData]) statemachine.Request[recoverData] {
+// filterPlans filters out the plans that have exceeded the recovery time into a list and removes them from the list of plans.
+func (r *recover) filterPlans(req statemachine.Request[recoverData]) statemachine.Request[recoverData] {
 	now := time.Now()
 
 	for i, plan := range req.Data.plans {
-		if plan.LastUpdate(req.Ctx).Add(r.maxAge).Before(now) {
+		if lastUpdate(req.Ctx, plan).Add(r.maxAge).Before(now) {
 			req.Data.agedOut = append(req.Data.agedOut, plan)
 			req.Data.plans[i] = nil
 		}
@@ -129,12 +129,12 @@ func (r *recover) FilterPlans(req statemachine.Request[recoverData]) statemachin
 		}
 	}
 	req.Data.plans = plans
-	req.Next = r.AgedOut
+	req.Next = r.agedOut
 	return req
 }
 
-// AgedOut marks the plans that have exceeded the recovery time as failed.
-func (r *recover) AgedOut(req statemachine.Request[recoverData]) statemachine.Request[recoverData] {
+// agedOut marks the plans that have exceeded the recovery time as failed.
+func (r *recover) agedOut(req statemachine.Request[recoverData]) statemachine.Request[recoverData] {
 	for _, plan := range req.Data.agedOut {
 		plan.State.Status = workflow.Failed
 		plan.Reason = workflow.FRExceedRecovery
@@ -146,12 +146,12 @@ func (r *recover) AgedOut(req statemachine.Request[recoverData]) statemachine.Re
 			return req
 		}
 	}
-	req.Next = r.Done
+	req.Next = r.done
 	return req
 }
 
-// Done is the final state of the recovery process.
-func (r *recover) Done(req statemachine.Request[recoverData]) statemachine.Request[recoverData] {
+// done is the final state of the recovery process.
+func (r *recover) done(req statemachine.Request[recoverData]) statemachine.Request[recoverData] {
 	return req
 }
 
@@ -165,4 +165,30 @@ func runningToFailed(ctx context.Context, p *workflow.Plan) {
 			state.End = time.Now()
 		}
 	}
+}
+
+type stater interface {
+	GetState() *workflow.State
+}
+
+// lastUpdate returns the last time the object was updated. If it has not been updated, this will return
+// the zero time. Only an object that has been started will have a LastUpdate time.
+func lastUpdate(ctx context.Context, p *workflow.Plan) time.Time {
+	if p == nil {
+		return time.Time{}
+	}
+
+	last := time.Time{}
+
+	for item := range walk.Plan(ctx, p) {
+		state := item.Value.(stater).GetState()
+		if state.Start.After(last) {
+			last = state.Start
+		}
+		if state.End.After(last) {
+			last = state.End
+		}
+	}
+
+	return last
 }

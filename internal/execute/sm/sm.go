@@ -391,7 +391,7 @@ func (s *States) ExecuteSequences(req statemachine.Request[Data]) statemachine.R
 func (s *States) BlockPostChecks(req statemachine.Request[Data]) statemachine.Request[Data] {
 	h := req.Data.blocks[0]
 	req.Next = s.BlockDeferredChecks
-	if h.block.PostChecks == nil || h.block.PostChecks.State.Status == workflow.Completed {
+	if checksCompleted(h.block.PostChecks) {
 		return req
 	}
 

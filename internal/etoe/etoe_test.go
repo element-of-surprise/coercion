@@ -223,8 +223,6 @@ func TestEtoE(t *testing.T) {
 		panic(err)
 	}
 
-	// pConfig.Print("Workflow result: \n", result)
-
 	if result.State.Status != workflow.Completed {
 		t.Fatalf("TestEtoE: workflow did not complete successfully(%s)", result.State.Status)
 	}
