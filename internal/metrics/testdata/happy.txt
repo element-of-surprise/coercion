@@ -5,23 +5,22 @@ coercion_final_status_total{object_type="OTBlock",otel_scope_name="testmeter",ot
 coercion_final_status_total{object_type="OTPlan",otel_scope_name="testmeter",otel_scope_version="v0.1.0",status="Failed"} 1
 # HELP coercion_plan_start_ms time from when the plan is submitted to when it is started
 # TYPE coercion_plan_start_ms histogram
-coercion_plan_start_ms_bucket{otel_scope_name="testmeter",otel_scope_version="v0.1.0",le="0"} 0
-coercion_plan_start_ms_bucket{otel_scope_name="testmeter",otel_scope_version="v0.1.0",le="5"} 0
-coercion_plan_start_ms_bucket{otel_scope_name="testmeter",otel_scope_version="v0.1.0",le="10"} 0
-coercion_plan_start_ms_bucket{otel_scope_name="testmeter",otel_scope_version="v0.1.0",le="25"} 0
 coercion_plan_start_ms_bucket{otel_scope_name="testmeter",otel_scope_version="v0.1.0",le="50"} 0
-coercion_plan_start_ms_bucket{otel_scope_name="testmeter",otel_scope_version="v0.1.0",le="75"} 0
 coercion_plan_start_ms_bucket{otel_scope_name="testmeter",otel_scope_version="v0.1.0",le="100"} 0
-coercion_plan_start_ms_bucket{otel_scope_name="testmeter",otel_scope_version="v0.1.0",le="250"} 0
-coercion_plan_start_ms_bucket{otel_scope_name="testmeter",otel_scope_version="v0.1.0",le="500"} 0
-coercion_plan_start_ms_bucket{otel_scope_name="testmeter",otel_scope_version="v0.1.0",le="750"} 0
+coercion_plan_start_ms_bucket{otel_scope_name="testmeter",otel_scope_version="v0.1.0",le="200"} 0
+coercion_plan_start_ms_bucket{otel_scope_name="testmeter",otel_scope_version="v0.1.0",le="400"} 0
+coercion_plan_start_ms_bucket{otel_scope_name="testmeter",otel_scope_version="v0.1.0",le="600"} 0
+coercion_plan_start_ms_bucket{otel_scope_name="testmeter",otel_scope_version="v0.1.0",le="800"} 0
 coercion_plan_start_ms_bucket{otel_scope_name="testmeter",otel_scope_version="v0.1.0",le="1000"} 1
-coercion_plan_start_ms_bucket{otel_scope_name="testmeter",otel_scope_version="v0.1.0",le="2500"} 1
+coercion_plan_start_ms_bucket{otel_scope_name="testmeter",otel_scope_version="v0.1.0",le="1250"} 1
+coercion_plan_start_ms_bucket{otel_scope_name="testmeter",otel_scope_version="v0.1.0",le="1500"} 1
+coercion_plan_start_ms_bucket{otel_scope_name="testmeter",otel_scope_version="v0.1.0",le="2000"} 1
+coercion_plan_start_ms_bucket{otel_scope_name="testmeter",otel_scope_version="v0.1.0",le="3000"} 1
+coercion_plan_start_ms_bucket{otel_scope_name="testmeter",otel_scope_version="v0.1.0",le="4000"} 1
 coercion_plan_start_ms_bucket{otel_scope_name="testmeter",otel_scope_version="v0.1.0",le="5000"} 1
-coercion_plan_start_ms_bucket{otel_scope_name="testmeter",otel_scope_version="v0.1.0",le="7500"} 1
 coercion_plan_start_ms_bucket{otel_scope_name="testmeter",otel_scope_version="v0.1.0",le="10000"} 1
 coercion_plan_start_ms_bucket{otel_scope_name="testmeter",otel_scope_version="v0.1.0",le="+Inf"} 1
-coercion_plan_start_ms_sum{otel_scope_name="testmeter",otel_scope_version="v0.1.0"} 999
+coercion_plan_start_ms_sum{otel_scope_name="testmeter",otel_scope_version="v0.1.0"} 1000
 coercion_plan_start_ms_count{otel_scope_name="testmeter",otel_scope_version="v0.1.0"} 1
 # HELP coercion_plan_submitted_total total number of coercion workflow objects submitted but not started
 # TYPE coercion_plan_submitted_total gauge
@@ -34,4 +33,4 @@ coercion_running_total{object_type="OTPlan",otel_scope_name="testmeter",otel_sco
 otel_scope_info{otel_scope_name="testmeter",otel_scope_version="v0.1.0"} 1
 # HELP target_info Target metadata
 # TYPE target_info gauge
-target_info{service_name="tattler_test",telemetry_sdk_language="go",telemetry_sdk_name="opentelemetry",telemetry_sdk_version="latest"} 1
+target_info{service_name="coercion_test",telemetry_sdk_language="go",telemetry_sdk_name="opentelemetry",telemetry_sdk_version="latest"} 1
