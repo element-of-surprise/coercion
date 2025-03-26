@@ -3,7 +3,6 @@ package sqlite
 import (
 	"context"
 	"fmt"
-	"log"
 	"strings"
 	"time"
 	"unsafe"
@@ -87,21 +86,17 @@ func (r reader) Search(ctx context.Context, filters storage.Filters) (chan stora
 				Args:  args,
 				Named: named,
 				ResultFunc: func(stmt *sqlite.Stmt) error {
-					log.Println("search found something")
 					r, err := r.listResultsFunc(stmt)
 					if err != nil {
-						log.Println("problem searching plans: ", err)
 						return fmt.Errorf("problem searching plans: %w", err)
 					}
 					select {
 					case <-ctx.Done():
-						log.Println("search cancelled")
 						results <- storage.Stream[storage.ListResult]{
 							Err: ctx.Err(),
 						}
 						return ctx.Err()
 					case results <- storage.Stream[storage.ListResult]{Result: r}:
-						log.Println("searchResult: ", r.Name)
 						return nil
 					}
 				},
