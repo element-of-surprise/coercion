@@ -15,8 +15,9 @@ var _ storage.BlockUpdater = blockUpdater{}
 
 // blockUpdater implements the storage.blockUpdater interface.
 type blockUpdater struct {
-	mu   *sync.Mutex
-	pool *sqlitex.Pool
+	mu      *sync.Mutex
+	pool    *sqlitex.Pool
+	capture *CaptureStmts
 
 	private.Storage
 }
@@ -32,20 +33,23 @@ func (b blockUpdater) UpdateBlock(ctx context.Context, action *workflow.Block) e
 	}
 	defer b.pool.Put(conn)
 
-	stmt, err := conn.Prepare(updateBlock)
-	if err != nil {
-		return fmt.Errorf("BlockWriter.Write: %w", err)
-	}
-
+	stmt := Stmt{}
+	stmt.Query(updateBlock)
 	stmt.SetText("$id", action.ID.String())
 	stmt.SetInt64("$state_status", int64(action.State.Status))
 	stmt.SetInt64("$state_start", action.State.Start.UnixNano())
 	stmt.SetInt64("$state_end", action.State.End.UnixNano())
 
-	_, err = stmt.Step()
+	sStmt, err := stmt.Prepare(conn)
 	if err != nil {
 		return fmt.Errorf("BlockWriter.Write: %w", err)
 	}
+
+	_, err = sStmt.Step()
+	if err != nil {
+		return fmt.Errorf("BlockWriter.Write: %w", err)
+	}
+	b.capture.Capture(stmt)
 
 	return nil
 }

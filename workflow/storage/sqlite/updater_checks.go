@@ -15,8 +15,9 @@ var _ storage.ChecksUpdater = checksUpdater{}
 
 // checksUpdater implements the storage.checksUpdater interface.
 type checksUpdater struct {
-	mu   *sync.Mutex
-	pool *sqlitex.Pool
+	mu      *sync.Mutex
+	pool    *sqlitex.Pool
+	capture *CaptureStmts
 
 	private.Storage
 }
@@ -32,20 +33,23 @@ func (c checksUpdater) UpdateChecks(ctx context.Context, check *workflow.Checks)
 	}
 	defer c.pool.Put(conn)
 
-	stmt, err := conn.Prepare(updateChecks)
-	if err != nil {
-		return fmt.Errorf("ChecksWriter.Checks: %w", err)
-	}
-
+	stmt := Stmt{}
+	stmt.Query(updateChecks)
 	stmt.SetText("$id", check.ID.String())
 	stmt.SetInt64("$state_status", int64(check.State.Status))
 	stmt.SetInt64("$state_start", check.State.Start.UnixNano())
 	stmt.SetInt64("$state_end", check.State.End.UnixNano())
 
-	_, err = stmt.Step()
+	sStmt, err := stmt.Prepare(conn)
 	if err != nil {
 		return fmt.Errorf("ChecksWriter.Checks: %w", err)
 	}
+
+	_, err = sStmt.Step()
+	if err != nil {
+		return fmt.Errorf("ChecksWriter.Checks: %w", err)
+	}
+	c.capture.Capture(stmt)
 
 	return nil
 

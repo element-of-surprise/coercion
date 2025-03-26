@@ -58,6 +58,9 @@ const (
 	FRDeferredCheck FailureReason = 450 // DeferredCheck
 	// FRStopped represents a failure reason that occurred because the workflow was stopped.
 	FRStopped FailureReason = 500 // Stopped
+	// FRExceedRecovery represents a failure reason that occurred because the last update for
+	// a workflow was too long ago to do a recovery.
+	FRExceedRecovery FailureReason = 600 // ExceedRecovery
 )
 
 // State represents the internal state of a workflow object.

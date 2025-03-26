@@ -71,13 +71,14 @@ func (r reader) Search(ctx context.Context, filters storage.Filters) (chan stora
 	if err != nil {
 		return nil, fmt.Errorf("couldn't get a connection from the pool: %w", err)
 	}
-	defer r.pool.Put(conn)
 
 	q, args, named := r.buildSearchQuery(filters)
 
 	results := make(chan storage.Stream[storage.ListResult], 1)
 
 	go func() {
+		defer r.pool.Put(conn)
+		defer close(results)
 		err := sqlitex.Execute(
 			conn,
 			q,
@@ -112,7 +113,7 @@ func (r reader) Search(ctx context.Context, filters storage.Filters) (chan stora
 func (r reader) buildSearchQuery(filters storage.Filters) (string, []any, map[string]any) {
 	const sel = `SELECT id, group_id, name, descr, submit_time, state_status, state_start, state_end FROM plans WHERE`
 
-	var named map[string]any
+	var named = map[string]any{}
 	var args []any
 
 	build := strings.Builder{}
@@ -146,9 +147,10 @@ func (r reader) buildSearchQuery(filters storage.Filters) (string, []any, map[st
 			}
 		}
 	}
-	build.WriteString(" ORDER BY submit_time DESC;")
-	query := build.String()
 
+	build.WriteString(" ORDER BY submit_time DESC;")
+
+	query := build.String()
 	if len(filters.ByIDs) > 0 {
 		var idArgs []any
 		query, idArgs = replaceWithIDs(query, "$id", filters.ByIDs)
