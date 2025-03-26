@@ -11,7 +11,6 @@ package coercion
 import (
 	"context"
 	"fmt"
-	"log"
 	"time"
 
 	"github.com/element-of-surprise/coercion/internal/execute"
@@ -79,7 +78,6 @@ func New(ctx context.Context, reg *registry.Register, store storage.Vault, optio
 
 	// Some storage systems may need to recover from a previous state after a crash.
 	if r, ok := store.(storage.Recovery); ok {
-		log.Println("ran storage.Recovery")
 		if err := r.Recovery(ctx); err != nil {
 			return nil, fmt.Errorf("failed to recover storage: %w", err)
 		}

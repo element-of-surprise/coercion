@@ -14,17 +14,11 @@ func (s *States) Recovery(req statemachine.Request[Data]) statemachine.Request[D
 	plan := req.Data.Plan
 
 	fixPlan(plan)
-	switch {
-	case plan.State.Status == workflow.NotStarted:
+	switch plan.State.Status {
+	case workflow.NotStarted:
 		req.Next = s.Start
 		return req
-	case plan.State.Status == workflow.Completed:
-		req.Next = s.End
-		return req
-	case plan.State.Status == workflow.Failed:
-		req.Next = s.End
-		return req
-	case plan.State.Status == workflow.Stopped:
+	case workflow.Completed, workflow.Failed, workflow.Stopped:
 		req.Next = s.End
 		return req
 	}
@@ -204,7 +198,7 @@ func fixBlock(b *workflow.Block) {
 		b.State.Status = workflow.Stopped
 		return
 	}
-	if completed == 0 && running == 0 {
+	if completed == 0 && running == 0 && failed == 0 {
 		b.State.Status = workflow.NotStarted
 		b.State.Start = time.Time{}
 		b.State.End = time.Time{}

@@ -5,7 +5,6 @@ package execute
 import (
 	"errors"
 	"fmt"
-	"log"
 	"time"
 
 	"github.com/element-of-surprise/coercion/internal/execute/sm"
@@ -18,6 +17,7 @@ import (
 
 	"github.com/gostdlib/base/concurrency/sync"
 	"github.com/gostdlib/base/statemachine"
+	"github.com/gostdlib/base/telemetry/log"
 )
 
 var (
@@ -168,7 +168,7 @@ func (e *Plans) recover(ctx context.Context) error {
 		maxAge: e.maxLastUpdate,
 		store:  e.store,
 	}
-	req := statemachine.Request[recoverData]{Ctx: ctx, Next: recovery.Start}
+	req := statemachine.Request[recoverData]{Ctx: ctx, Next: recovery.start}
 	var err error
 	req, err = statemachine.Run[recoverData]("recover", req)
 	if err != nil {
@@ -179,8 +179,7 @@ func (e *Plans) recover(ctx context.Context) error {
 		log.Println("no plans to recover")
 	}
 	for _, plan := range req.Data.plans {
-		log.Println("recovered plan: ", plan.ID)
-		log.Println(plan.State.Status)
+		log.Default().Info("recovered plan", "id", plan.ID, "status", plan.State.Status)
 		e.runPlan(ctx, plan)
 	}
 
@@ -267,9 +266,6 @@ func (p *Plans) validateStartState(ctx context.Context, plan *workflow.Plan) err
 	}
 
 	if plan.SubmitTime.Add(p.maxSubmit).Before(time.Now()) {
-		log.Println("submitTime: ", plan.SubmitTime)
-		log.Println("maxSubmit: ", p.maxSubmit)
-		log.Println("now: ", time.Now())
 		return fmt.Errorf("plan is stale, submit time is too old")
 	}
 
