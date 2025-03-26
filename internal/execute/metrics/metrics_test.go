@@ -26,14 +26,6 @@ import (
 func TestWatchListMetrics(t *testing.T) {
 	t.Parallel()
 
-	plan := &workflow.Plan{
-		ID: mustUUID(),
-		State: &workflow.State{
-			Status: workflow.NotStarted,
-		},
-		SubmitTime: time.Now(),
-	}
-
 	startedPlan := &workflow.Plan{
 		ID: mustUUID(),
 		State: &workflow.State{
@@ -56,15 +48,12 @@ func TestWatchListMetrics(t *testing.T) {
 			expectedFile: "testdata/execute_happy.txt",
 			recordMetrics: func(ctx context.Context, meter otelmetric.Meter) {
 				Init(meter)
-				NotStarted(ctx, plan)
+				NotStarted(ctx)
 				Started(ctx, startedPlan)
 				Start(ctx, workflow.OTPlan)
-				ExecutionStatus(ctx, workflow.OTAction, workflow.Completed)
-				ExecutionStatus(ctx, workflow.OTCheck, workflow.Failed)
-				ExecutionStatus(ctx, workflow.OTBlock, workflow.Stopped)
-				ExecutionStatus(ctx, workflow.OTBlock, workflow.Failed)
-				ExecutionStatus(ctx, workflow.OTSequence, workflow.Failed)
-				ExecutionStatus(ctx, workflow.OTPlan, workflow.Failed)
+				FinalStatus(ctx, workflow.OTBlock, workflow.Stopped)
+				FinalStatus(ctx, workflow.OTBlock, workflow.Failed)
+				FinalStatus(ctx, workflow.OTPlan, workflow.Failed)
 				End(ctx, workflow.OTPlan)
 			},
 		},
@@ -72,8 +61,8 @@ func TestWatchListMetrics(t *testing.T) {
 			name:         "execution metrics not initialized",
 			expectedFile: "testdata/execute_nometrics.txt",
 			recordMetrics: func(ctx context.Context, meter otelmetric.Meter) {
-				// ExecutionStatus(ctx, watch.Event{Type: watch.Added})
-				ExecutionStatus(ctx, workflow.OTBlock, workflow.Completed)
+				// FinalStatus(ctx, watch.Event{Type: watch.Added})
+				FinalStatus(ctx, workflow.OTBlock, workflow.Completed)
 			},
 		},
 	}
