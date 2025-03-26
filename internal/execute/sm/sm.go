@@ -409,7 +409,7 @@ func (s *States) BlockDeferredChecks(req statemachine.Request[Data]) statemachin
 	h := req.Data.blocks[0]
 	req.Next = s.BlockEnd
 
-	if h.block.DeferredChecks == nil || h.block.DeferredChecks.State.Status == workflow.Completed {
+	if checksCompleted(h.block.DeferredChecks) {
 		return req
 	}
 
@@ -434,6 +434,7 @@ func (s *States) BlockEnd(req statemachine.Request[Data]) statemachine.Request[D
 		}
 	}()
 
+	// Don't use checksCompleted() here, we want to run the block if it is not completed.
 	if h.block.BypassChecks != nil && h.block.BypassChecks.State.Status == workflow.Completed {
 		h.block.State.Status = workflow.Completed
 	} else {
