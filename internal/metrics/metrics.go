@@ -1,4 +1,4 @@
-package execute
+package metrics
 
 import (
 	"context"

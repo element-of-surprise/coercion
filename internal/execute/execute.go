@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/element-of-surprise/coercion/internal/execute/sm"
+	"github.com/element-of-surprise/coercion/internal/metrics"
 	"github.com/element-of-surprise/coercion/plugins/registry"
 	"github.com/element-of-surprise/coercion/workflow"
 	"github.com/element-of-surprise/coercion/workflow/context"
@@ -180,6 +181,10 @@ func (e *Plans) recover(ctx context.Context) error {
 	}
 	for _, plan := range req.Data.plans {
 		log.Default().Info("recovered plan", "id", plan.ID, "status", plan.State.Status)
+		// recovered metric?
+		if plan.State.Status == workflow.NotStarted {
+			metrics.NotStarted(ctx)
+		}
 		e.runPlan(ctx, plan)
 	}
 

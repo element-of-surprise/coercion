@@ -8,8 +8,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	metrics "github.com/element-of-surprise/coercion/internal/execute/metrics"
 	"github.com/element-of-surprise/coercion/internal/execute/sm/actions"
+	"github.com/element-of-surprise/coercion/internal/metrics"
 	"github.com/element-of-surprise/coercion/plugins/registry"
 	"github.com/element-of-surprise/coercion/workflow"
 	"github.com/element-of-surprise/coercion/workflow/context"
