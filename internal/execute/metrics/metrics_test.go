@@ -1,14 +1,16 @@
-package readers
+package execute
 
 import (
 	"context"
 	"log"
 	"os"
 	"testing"
+	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/testutil"
 
+	"github.com/google/uuid"
 	"go.opentelemetry.io/otel/attribute"
 	otelprometheus "go.opentelemetry.io/otel/exporters/prometheus"
 	otelmetric "go.opentelemetry.io/otel/metric"
@@ -24,6 +26,23 @@ import (
 func TestWatchListMetrics(t *testing.T) {
 	t.Parallel()
 
+	plan := &workflow.Plan{
+		ID: mustUUID(),
+		State: &workflow.State{
+			Status: workflow.NotStarted,
+		},
+		SubmitTime: time.Now(),
+	}
+
+	startedPlan := &workflow.Plan{
+		ID: mustUUID(),
+		State: &workflow.State{
+			Start:  time.Now(),
+			Status: workflow.Running,
+		},
+		SubmitTime: time.Now().Add(-1 * time.Second),
+	}
+
 	tests := []struct {
 		name               string
 		emptyResource      bool
@@ -34,19 +53,24 @@ func TestWatchListMetrics(t *testing.T) {
 	}{
 		{
 			name:         "execution metrics",
-			expectedFile: "testdata/readers_happy.txt",
+			expectedFile: "testdata/execute_happy.txt",
 			recordMetrics: func(ctx context.Context, meter otelmetric.Meter) {
 				Init(meter)
+				NotStarted(ctx, plan)
+				Started(ctx, startedPlan)
+				Start(ctx, workflow.OTPlan)
 				ExecutionStatus(ctx, workflow.OTAction, workflow.Completed)
 				ExecutionStatus(ctx, workflow.OTCheck, workflow.Failed)
+				ExecutionStatus(ctx, workflow.OTBlock, workflow.Stopped)
 				ExecutionStatus(ctx, workflow.OTBlock, workflow.Failed)
 				ExecutionStatus(ctx, workflow.OTSequence, workflow.Failed)
 				ExecutionStatus(ctx, workflow.OTPlan, workflow.Failed)
+				End(ctx, workflow.OTPlan)
 			},
 		},
 		{
 			name:         "execution metrics not initialized",
-			expectedFile: "testdata/readers_nometrics.txt",
+			expectedFile: "testdata/execute_nometrics.txt",
 			recordMetrics: func(ctx context.Context, meter otelmetric.Meter) {
 				// ExecutionStatus(ctx, watch.Event{Type: watch.Added})
 				ExecutionStatus(ctx, workflow.OTBlock, workflow.Completed)
@@ -110,4 +134,12 @@ func TestWatchListMetrics(t *testing.T) {
 			t.Errorf("comparision with metrics file failed: %v", err)
 		}
 	}
+}
+
+func mustUUID() uuid.UUID {
+	id, err := uuid.NewV7()
+	if err != nil {
+		panic(err)
+	}
+	return id
 }
