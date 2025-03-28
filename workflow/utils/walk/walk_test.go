@@ -25,7 +25,6 @@ For example:
 package walk
 
 import (
-	"context"
 	"testing"
 
 	"github.com/element-of-surprise/coercion/workflow"
@@ -108,7 +107,7 @@ func TestPlan(t *testing.T) {
 	}
 
 	got := []Item{}
-	for item := range Plan(context.Background(), plan) {
+	for item := range Plan(plan) {
 		got = append(got, item)
 	}
 

@@ -1,8 +1,6 @@
 package cosmosdb
 
 import (
-	"fmt"
-
 	"github.com/element-of-surprise/coercion/workflow"
 	"github.com/element-of-surprise/coercion/workflow/storage"
 	"github.com/gostdlib/base/context"
@@ -27,10 +25,10 @@ func (r recovery) Recovery(ctx context.Context) error {
 		}
 		p, err := r.reader.Read(ctx, entry.Result.ID)
 		if err != nil {
-			return fmt.Errorf("failed to locate entry %v that is in the search stream", entry.Result.ID)
+			return err
 		}
 		if err := r.updater.UpdatePlan(ctx, p); err != nil {
-			return fmt.Errorf("failed to update plan %v", p.ID)
+			return err
 		}
 	}
 	return nil

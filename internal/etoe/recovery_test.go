@@ -34,22 +34,27 @@ func TestRecovery(t *testing.T) {
 	reg.Register(plugCheck)
 	reg.Register(plugAction)
 
-	g := context.Pool(ctx).Limited(20).Group()
+	g1 := context.Pool(ctx).Group()
+	g2 := context.Pool(ctx).Limited(20).Group()
 	results := make(chan testResult, 1)
-	go func() {
-		for i := 0; i < capture.Len(); i++ {
-			g.Go(
-				ctx,
-				func(ctx context.Context) error {
-					recoveryTestStage(ctx, i, reg, results)
-					return nil
-				},
-			)
-		}
-	}()
+	g1.Go(
+		ctx,
+		func(ctx context.Context) error {
+			for i := 0; i < capture.Len(); i++ {
+				g2.Go(
+					ctx,
+					func(ctx context.Context) error {
+						recoveryTestStage(ctx, i, reg, results)
+						return nil
+					},
+				)
+			}
+			return nil
+		},
+	)
 
-	g2 := context.Pool(ctx).Group()
-	g2.Go(
+	g3 := context.Pool(ctx).Group()
+	g3.Go(
 		ctx,
 		func(ctx context.Context) error {
 			for r := range results {
@@ -63,9 +68,10 @@ func TestRecovery(t *testing.T) {
 		},
 	)
 
-	g.Wait(ctx)
-	close(results)
+	g1.Wait(ctx)
 	g2.Wait(ctx)
+	close(results)
+	g3.Wait(ctx)
 }
 
 type testResult struct {

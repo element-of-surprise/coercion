@@ -2,9 +2,10 @@
 package clone
 
 import (
-	"context"
 	"reflect"
 	"strings"
+
+	"github.com/gostdlib/base/context"
 
 	"github.com/element-of-surprise/coercion/plugins"
 	"github.com/element-of-surprise/coercion/workflow"

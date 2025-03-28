@@ -1,13 +1,15 @@
 package cosmosdb
 
 import (
-	"context"
 	"fmt"
-	"sync"
+
+	"github.com/gostdlib/base/concurrency/sync"
+	"github.com/gostdlib/base/context"
 
 	"github.com/Azure/azure-sdk-for-go/sdk/data/azcosmos"
 	"github.com/element-of-surprise/coercion/internal/private"
 	"github.com/element-of-surprise/coercion/workflow"
+	"github.com/element-of-surprise/coercion/workflow/errors"
 
 	"github.com/google/uuid"
 )
@@ -37,11 +39,11 @@ type creator struct {
 // Create writes Plan data to storage, and all underlying data.
 func (c creator) Create(ctx context.Context, plan *workflow.Plan) error {
 	if plan == nil {
-		return fmt.Errorf("plan cannot be nil")
+		return errors.E(ctx, errors.CatInternal, errors.TypeParameter, errors.New("plan cannot be nil"))
 	}
 
 	if plan.ID == uuid.Nil {
-		return fmt.Errorf("plan ID cannot be nil")
+		return errors.E(ctx, errors.CatInternal, errors.TypeParameter, errors.New("plan ID cannot be nil"))
 	}
 
 	exist, err := c.reader.Exists(ctx, plan.ID)
@@ -53,7 +55,7 @@ func (c creator) Create(ctx context.Context, plan *workflow.Plan) error {
 	defer c.mu.Unlock()
 
 	if exist {
-		return fmt.Errorf("plan with ID(%s) already exists", plan.ID)
+		return errors.E(ctx, errors.CatInternal, errors.TypeParameter, fmt.Errorf("plan with ID(%s) already exists", plan.ID))
 	}
 
 	return c.commitPlan(ctx, plan)

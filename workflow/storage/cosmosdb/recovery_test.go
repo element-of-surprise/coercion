@@ -1,9 +1,10 @@
 package cosmosdb
 
 import (
-	"context"
 	"errors"
 	"testing"
+
+	"github.com/gostdlib/base/context"
 
 	"github.com/element-of-surprise/coercion/workflow"
 	"github.com/element-of-surprise/coercion/workflow/storage"
