@@ -1,13 +1,15 @@
 package cosmosdb
 
 import (
-	"context"
 	"fmt"
-	"sync"
+
+	"github.com/gostdlib/base/concurrency/sync"
+	"github.com/gostdlib/base/context"
 
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
 	"github.com/Azure/azure-sdk-for-go/sdk/data/azcosmos"
 	"github.com/element-of-surprise/coercion/workflow"
+	"github.com/element-of-surprise/coercion/workflow/errors"
 
 	"github.com/google/uuid"
 	"github.com/gostdlib/base/retry/exponential"
@@ -35,7 +37,7 @@ type deleter struct {
 func (d deleter) Delete(ctx context.Context, id uuid.UUID) error {
 	plan, err := d.reader.Read(ctx, id)
 	if err != nil {
-		return fmt.Errorf("couldn't fetch plan: %w", err)
+		return err
 	}
 
 	d.mu.Lock()
@@ -60,10 +62,10 @@ func (d deleter) Delete(ctx context.Context, id uuid.UUID) error {
 		return nil
 	}
 	if err := backoff.Retry(context.WithoutCancel(ctx), deletePlan); err != nil {
-		return fmt.Errorf("couldn't delete plan: %w", err)
+		return errors.E(ctx, errors.CatInternal, errors.TypeStorageDelete, fmt.Errorf("couldn't delete plan: %w", err))
 	}
 	if err := backoff.Retry(context.WithoutCancel(ctx), deleteSearch); err != nil {
-		return fmt.Errorf("couldn't delete plan: %w", err)
+		return errors.E(ctx, errors.CatInternal, errors.TypeStorageDelete, fmt.Errorf("couldn't delete search entry: %w", err))
 	}
 
 	return nil

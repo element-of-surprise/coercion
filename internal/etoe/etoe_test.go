@@ -159,7 +159,7 @@ func TestEtoE(t *testing.T) {
 	}
 
 	// Gives each item a unique key. We do this here because we clone the same checks.
-	for item := range walk.Plan(ctx, plan) {
+	for item := range walk.Plan(plan) {
 		switch obj := item.Value.(type) {
 		case *workflow.Action:
 			obj.Key = workflow.NewV7()

@@ -1,10 +1,12 @@
 package sm
 
 import (
-	"context"
 	"fmt"
-	"sync"
 	"sync/atomic"
+
+	"github.com/gostdlib/base/concurrency/sync"
+
+	"github.com/gostdlib/base/context"
 
 	"github.com/element-of-surprise/coercion/workflow"
 	"github.com/element-of-surprise/coercion/workflow/storage"

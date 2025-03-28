@@ -1,12 +1,15 @@
 package sqlite
 
 import (
-	"context"
 	"fmt"
-	"sync"
+
+	"github.com/gostdlib/base/concurrency/sync"
+
+	"github.com/gostdlib/base/context"
 
 	"github.com/element-of-surprise/coercion/internal/private"
 	"github.com/element-of-surprise/coercion/workflow"
+	"github.com/element-of-surprise/coercion/workflow/errors"
 	"github.com/element-of-surprise/coercion/workflow/storage"
 	"zombiezen.com/go/sqlite/sqlitex"
 )
@@ -29,7 +32,7 @@ func (c checksUpdater) UpdateChecks(ctx context.Context, check *workflow.Checks)
 
 	conn, err := c.pool.Take(context.WithoutCancel(ctx))
 	if err != nil {
-		return fmt.Errorf("couldn't get a connection from the pool: %w", err)
+		return errors.E(ctx, errors.CatInternal, errors.TypeConn, fmt.Errorf("couldn't get a connection from the pool: %w", err))
 	}
 	defer c.pool.Put(conn)
 
@@ -42,12 +45,12 @@ func (c checksUpdater) UpdateChecks(ctx context.Context, check *workflow.Checks)
 
 	sStmt, err := stmt.Prepare(conn)
 	if err != nil {
-		return fmt.Errorf("ChecksWriter.Checks: %w", err)
+		return err
 	}
 
 	_, err = sStmt.Step()
 	if err != nil {
-		return fmt.Errorf("ChecksWriter.Checks: %w", err)
+		return errors.E(ctx, errors.CatInternal, errors.TypeStorageUpdate, fmt.Errorf("ChecksWriter.Checks: %w", err))
 	}
 	c.capture.Capture(stmt)
 

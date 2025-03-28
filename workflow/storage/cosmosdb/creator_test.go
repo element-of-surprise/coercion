@@ -1,10 +1,11 @@
 package cosmosdb
 
 import (
-	"context"
-	"sync"
 	"testing"
 	"time"
+
+	"github.com/gostdlib/base/concurrency/sync"
+	"github.com/gostdlib/base/context"
 
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
 	"github.com/Azure/azure-sdk-for-go/sdk/data/azcosmos"
@@ -24,7 +25,7 @@ func TestCreate(t *testing.T) {
 	badPlan.ID = uuid.Nil
 
 	planWithETag := NewTestPlan()
-	for item := range walk.Plan(context.Background(), planWithETag) {
+	for item := range walk.Plan(planWithETag) {
 		setter := item.Value.(setters)
 		setter.SetState(
 			&workflow.State{

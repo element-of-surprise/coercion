@@ -1,9 +1,10 @@
 package sm
 
 import (
-	"context"
 	"testing"
 	"time"
+
+	"github.com/gostdlib/base/context"
 
 	"github.com/element-of-surprise/coercion/workflow"
 	"github.com/kylelemons/godebug/pretty"
@@ -51,7 +52,7 @@ func TestRunPreChecks(t *testing.T) {
 
 	for _, test := range tests {
 		states := &States{
-			checksRunner: fakeRunChecksOnce,
+			testChecksRunner: fakeRunChecksOnce,
 		}
 
 		err := states.runPreChecks(context.Background(), test.preChecks, test.contChecks)
@@ -116,9 +117,9 @@ func TestRunChecksOnce(t *testing.T) {
 	for _, test := range tests {
 		updater := &fakeUpdater{}
 		states := &States{
-			store:                 updater,
-			actionsParallelRunner: fakeParallelActionRunner,
-			nower:                 func() time.Time { return now },
+			store:                     updater,
+			testActionsParallelRunner: fakeParallelActionRunner,
+			nower:                     func() time.Time { return now },
 		}
 		test.checks.State = &workflow.State{}
 		for _, action := range test.checks.Actions {
@@ -179,9 +180,9 @@ func TestParallelActionsRunner(t *testing.T) {
 	for _, test := range tests {
 		updater := &fakeUpdater{}
 		states := &States{
-			store:        updater,
-			actionRunner: fakeActionRunner,
-			nower:        func() time.Time { return now },
+			store:            updater,
+			testActionRunner: fakeActionRunner,
+			nower:            func() time.Time { return now },
 		}
 		for _, action := range test.actions {
 			action.State = &workflow.State{}
@@ -294,8 +295,8 @@ func TestExecSeq(t *testing.T) {
 		updater := &fakeUpdater{}
 		callNum := 0
 		states := &States{
-			store:        updater,
-			actionRunner: fakeActionRunner,
+			store:            updater,
+			testActionRunner: fakeActionRunner,
 			nower: func() time.Time {
 				defer func() { callNum++ }()
 				if callNum == 0 {

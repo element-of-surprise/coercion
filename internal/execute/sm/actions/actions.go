@@ -210,14 +210,17 @@ type plugResp struct {
 
 // run executes the plugin in a goroutine and returns the response or an error if the context is done.
 func run(ctx context.Context, plugin plugins.Plugin, req any) plugResp {
-	ch := make(chan plugResp, 1)
-	go func() {
-		defer close(ch)
+	ch := make(chan plugResp, 1) // TODO(jdoak): Could be reused
+	context.Pool(ctx).Submit(
+		ctx,
+		func() {
+			defer close(ch)
 
-		plugResp := plugResp{}
-		plugResp.Resp, plugResp.Err = plugin.Execute(ctx, req)
-		ch <- plugResp
-	}()
+			plugResp := plugResp{}
+			plugResp.Resp, plugResp.Err = plugin.Execute(ctx, req)
+			ch <- plugResp
+		},
+	)
 
 	select {
 	case <-ctx.Done():

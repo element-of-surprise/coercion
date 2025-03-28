@@ -1,8 +1,9 @@
 package sqlite
 
 import (
-	"context"
 	"fmt"
+
+	"github.com/gostdlib/base/context"
 
 	"github.com/element-of-surprise/coercion/workflow"
 	"github.com/google/uuid"

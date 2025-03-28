@@ -1,12 +1,14 @@
 package sqlite
 
 import (
-	"context"
 	"fmt"
 	"time"
 
+	"github.com/gostdlib/base/context"
+
 	"github.com/element-of-surprise/coercion/plugins"
 	"github.com/element-of-surprise/coercion/workflow"
+	"github.com/element-of-surprise/coercion/workflow/errors"
 
 	"github.com/go-json-experiment/json"
 	"github.com/google/uuid"
@@ -40,7 +42,7 @@ var zeroTime = time.Unix(0, 0)
 // commitPlan commits a plan to the database. This commits the entire plan and all sub-objects.
 func commitPlan(ctx context.Context, conn *sqlite.Conn, p *workflow.Plan, capture *CaptureStmts) (err error) {
 	if p == nil {
-		return fmt.Errorf("planToSQL: plan cannot be nil")
+		return errors.E(ctx, errors.CatInternal, errors.TypeBug, fmt.Errorf("planToSQL: plan cannot be nil"))
 	}
 
 	defer sqlitex.Transaction(conn)(&err)
@@ -69,7 +71,7 @@ func commitPlan(ctx context.Context, conn *sqlite.Conn, p *workflow.Plan, captur
 	}
 	blocks, err := idsToJSON(p.Blocks)
 	if err != nil {
-		return fmt.Errorf("planToSQL(idsToJSON(blocks)): %w", err)
+		return errors.E(ctx, errors.CatInternal, errors.TypeBug, fmt.Errorf("planToSQL(idsToJSON(blocks)): %w", err))
 	}
 	stmt.SetBytes("$blocks", blocks)
 	stmt.SetInt64("$state_status", int64(p.State.Status))
@@ -84,33 +86,33 @@ func commitPlan(ctx context.Context, conn *sqlite.Conn, p *workflow.Plan, captur
 
 	sStmt, err := stmt.Prepare(conn)
 	if err != nil {
-		return fmt.Errorf("planToSQL(insertPlan): %w", err)
+		return errors.E(ctx, errors.CatInternal, errors.TypeBug, fmt.Errorf("planToSQL(insertPlan): %w", err))
 	}
 
 	_, err = sStmt.Step()
 	if err != nil {
-		return fmt.Errorf("planToSQL(plan): %w", err)
+		return errors.E(ctx, errors.CatInternal, errors.TypeStoragePut, fmt.Errorf("planToSQL: %w", err))
 	}
 	capture.Capture(stmt)
 
 	if err := commitChecks(ctx, conn, p.ID, p.BypassChecks, capture); err != nil {
-		return fmt.Errorf("planToSQL(commitChecks(bypasschecks)): %w", err)
+		return errors.E(ctx, errors.CatInternal, errors.TypeStoragePut, fmt.Errorf("planToSQL(commitChecks(bypasschecks)): %w", err))
 	}
 	if err := commitChecks(ctx, conn, p.ID, p.PreChecks, capture); err != nil {
-		return fmt.Errorf("planToSQL(commitChecks(prechecks)): %w", err)
+		return errors.E(ctx, errors.CatInternal, errors.TypeStoragePut, fmt.Errorf("planToSQL(commitChecks(prechecks)): %w", err))
 	}
 	if err := commitChecks(ctx, conn, p.ID, p.PostChecks, capture); err != nil {
-		return fmt.Errorf("planToSQL(commitChecks(postchecks)): %w", err)
+		return errors.E(ctx, errors.CatInternal, errors.TypeStoragePut, fmt.Errorf("planToSQL(commitChecks(postchecks)): %w", err))
 	}
 	if err := commitChecks(ctx, conn, p.ID, p.ContChecks, capture); err != nil {
-		return fmt.Errorf("planToSQL(commitChecks(contchecks)): %w", err)
+		return errors.E(ctx, errors.CatInternal, errors.TypeStoragePut, fmt.Errorf("planToSQL(commitChecks(contchecks)): %w", err))
 	}
 	if err := commitChecks(ctx, conn, p.ID, p.DeferredChecks, capture); err != nil {
-		return fmt.Errorf("planToSQL(commitChecks(deferredchecks)): %w", err)
+		return errors.E(ctx, errors.CatInternal, errors.TypeStoragePut, fmt.Errorf("planToSQL(commitChecks(deferredchecks)): %w", err))
 	}
 	for i, b := range p.Blocks {
 		if err := commitBlock(ctx, conn, p.ID, i, b, capture); err != nil {
-			return fmt.Errorf("planToSQL(commitBlocks): %w", err)
+			return errors.E(ctx, errors.CatInternal, errors.TypeStoragePut, fmt.Errorf("planToSQL(commitBlock): %w", err))
 		}
 	}
 
@@ -139,7 +141,7 @@ func commitChecks(ctx context.Context, conn *sqlite.Conn, planID uuid.UUID, chec
 	stmt.Query(insertChecks)
 	actions, err := idsToJSON(checks.Actions)
 	if err != nil {
-		return fmt.Errorf("idsToJSON(checks.Actions): %w", err)
+		return err
 	}
 	stmt.SetText("$id", checks.ID.String())
 	stmt.SetText("$key", checks.Key.String())
@@ -152,18 +154,18 @@ func commitChecks(ctx context.Context, conn *sqlite.Conn, planID uuid.UUID, chec
 
 	sStmt, err := stmt.Prepare(conn)
 	if err != nil {
-		return fmt.Errorf("conn.Prepare(insertCheck): %w", err)
+		return fmt.Errorf("commitCheck: %w", err)
 	}
 
 	_, err = sStmt.Step()
 	if err != nil {
-		return fmt.Errorf("commitChecks: %w", err)
+		return fmt.Errorf("commitCheck: %w", err)
 	}
 	capture.Capture(stmt)
 
 	for i, a := range checks.Actions {
 		if err := commitAction(ctx, conn, planID, i, a, capture); err != nil {
-			return fmt.Errorf("commitAction: %w", err)
+			fmt.Errorf("commitCheck: %w", err)
 		}
 	}
 
@@ -200,13 +202,13 @@ func commitBlock(ctx context.Context, conn *sqlite.Conn, planID uuid.UUID, pos i
 
 	for _, c := range [5]*workflow.Checks{block.BypassChecks, block.PreChecks, block.PostChecks, block.ContChecks, block.DeferredChecks} {
 		if err := commitChecks(ctx, conn, planID, c, capture); err != nil {
-			return fmt.Errorf("commitBlock(commitChecks): %w", err)
+			return fmt.Errorf("commitBlock: %w", err)
 		}
 	}
 
 	sequences, err := idsToJSON(block.Sequences)
 	if err != nil {
-		return fmt.Errorf("idsToJSON(sequences): %w", err)
+		return fmt.Errorf("commitBlock: %w", err)
 	}
 
 	stmt.SetText("$id", block.ID.String())
@@ -243,13 +245,13 @@ func commitBlock(ctx context.Context, conn *sqlite.Conn, planID uuid.UUID, pos i
 
 	_, err = sStmt.Step()
 	if err != nil {
-		return err
+		return fmt.Errorf("commitBlock: %w", err)
 	}
 	capture.Capture(stmt)
 
 	for i, seq := range block.Sequences {
 		if err := commitSequence(ctx, conn, planID, i, seq, capture); err != nil {
-			return fmt.Errorf("(commitSequence: %w", err)
+			return fmt.Errorf("commitBlock: %w", err)
 		}
 	}
 	return nil
@@ -275,7 +277,7 @@ func commitSequence(ctx context.Context, conn *sqlite.Conn, planID uuid.UUID, po
 
 	actions, err := idsToJSON(seq.Actions)
 	if err != nil {
-		return fmt.Errorf("idsToJSON(actions): %w", err)
+		return fmt.Errorf("commitSequence: %w", err)
 	}
 
 	stmt.SetText("$id", seq.ID.String())
@@ -291,7 +293,7 @@ func commitSequence(ctx context.Context, conn *sqlite.Conn, planID uuid.UUID, po
 
 	sStmt, err := stmt.Prepare(conn)
 	if err != nil {
-		return fmt.Errorf("conn.Prepare(insertSequence): %w", err)
+		return fmt.Errorf("commitSequence: %w", err)
 	}
 
 	_, err = sStmt.Step()
@@ -302,7 +304,7 @@ func commitSequence(ctx context.Context, conn *sqlite.Conn, planID uuid.UUID, po
 
 	for i, a := range seq.Actions {
 		if err := commitAction(ctx, conn, planID, i, a, capture); err != nil {
-			return fmt.Errorf("planToSQL(commitAction): %w", err)
+			return fmt.Errorf("commitSequence: %w", err)
 		}
 	}
 	return nil
@@ -333,12 +335,12 @@ func commitAction(ctx context.Context, conn *sqlite.Conn, planID uuid.UUID, pos 
 
 	req, err := json.Marshal(action.Req)
 	if err != nil {
-		return fmt.Errorf("json.Marshal(req): %w", err)
+		return fmt.Errorf("commitAction: %w", err)
 	}
 
 	attempts, err := encodeAttempts(action.Attempts)
 	if err != nil {
-		return fmt.Errorf("can't encode action.Attempts: %w", err)
+		return fmt.Errorf("commitAction: %w", err)
 	}
 
 	stmt.SetText("$id", action.ID.String())
@@ -360,12 +362,12 @@ func commitAction(ctx context.Context, conn *sqlite.Conn, planID uuid.UUID, pos 
 
 	sStmt, err := stmt.Prepare(conn)
 	if err != nil {
-		return err
+		return fmt.Errorf("commitAction: %w", err)
 	}
 
 	_, err = sStmt.Step()
 	if err != nil {
-		return err
+		return fmt.Errorf("commitAction: %w", err)
 	}
 	capture.Capture(stmt)
 	return nil
@@ -382,7 +384,7 @@ func encodeAttempts(attempts []*workflow.Attempt) ([]byte, error) {
 		for _, a := range attempts {
 			b, err := json.Marshal(a)
 			if err != nil {
-				return nil, fmt.Errorf("json.Marshal(attempt): %w", err)
+				return nil, fmt.Errorf("encodeAttempts: %w", err)
 			}
 			out = append(out, b)
 		}
@@ -394,14 +396,14 @@ func encodeAttempts(attempts []*workflow.Attempt) ([]byte, error) {
 func decodeAttempts(rawAttempts []byte, plug plugins.Plugin) ([]*workflow.Attempt, error) {
 	rawList := make([][]byte, 0)
 	if err := json.Unmarshal(rawAttempts, &rawList); err != nil {
-		return nil, fmt.Errorf("json.Unmarshal(rawAttempts): %w", err)
+		return nil, fmt.Errorf("decodeAttempts: %w", err)
 	}
 
 	attempts := make([]*workflow.Attempt, 0, len(rawList))
 	for _, raw := range rawList {
 		var a = &workflow.Attempt{Resp: plug.Response()}
 		if err := json.Unmarshal(raw, a); err != nil {
-			return nil, fmt.Errorf("json.Unmarshal(raw): %w", err)
+			return nil, fmt.Errorf("decodeAttempts: %w", err)
 		}
 		attempts = append(attempts, a)
 	}

@@ -1,7 +1,7 @@
 package cosmosdb
 
 import (
-	"context"
+	"github.com/gostdlib/base/context"
 
 	"github.com/element-of-surprise/coercion/internal/private"
 )

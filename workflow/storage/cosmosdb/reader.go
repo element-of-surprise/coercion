@@ -1,10 +1,11 @@
 package cosmosdb
 
 import (
-	"context"
 	"fmt"
 	"strings"
-	"sync"
+
+	"github.com/gostdlib/base/concurrency/sync"
+	"github.com/gostdlib/base/context"
 
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore/runtime"
 	"github.com/Azure/azure-sdk-for-go/sdk/data/azcosmos"
@@ -15,6 +16,7 @@ import (
 	"github.com/element-of-surprise/coercion/internal/private"
 	"github.com/element-of-surprise/coercion/plugins/registry"
 	"github.com/element-of-surprise/coercion/workflow"
+	"github.com/element-of-surprise/coercion/workflow/errors"
 	"github.com/element-of-surprise/coercion/workflow/storage"
 )
 
@@ -48,7 +50,7 @@ type reader struct {
 func sender[T any](ctx context.Context, ch chan T, v T) error {
 	select {
 	case <-ctx.Done():
-		return context.Cause(ctx)
+		return errors.E(ctx, errors.CatInternal, errors.TypeTimeout, context.Cause(ctx))
 	case ch <- v:
 		return nil
 	}
@@ -66,7 +68,7 @@ func (r reader) Exists(ctx context.Context, id uuid.UUID) (bool, error) {
 		if isNotFound(err) {
 			return false, nil
 		}
-		return false, fmt.Errorf("couldn't fetch plan by id: %w", err)
+		return false, errors.E(ctx, errors.CatInternal, errors.TypeStorageGet, fmt.Errorf("couldn't fetch plan by id: %w", err))
 	}
 	return true, nil
 }
@@ -89,7 +91,7 @@ func (r reader) Read(ctx context.Context, id uuid.UUID) (*workflow.Plan, error) 
 		return nil
 	}
 	if err := backoff.Retry(context.WithoutCancel(ctx), fetchPlan); err != nil {
-		return nil, fmt.Errorf("failed to fetch plan: %w", err)
+		return nil, errors.E(ctx, errors.CatInternal, errors.TypeStorageGet, fmt.Errorf("failed to fetch plan: %w", err))
 	}
 	return plan, nil
 }
@@ -111,34 +113,32 @@ func (r reader) Search(ctx context.Context, filters storage.Filters) (chan stora
 
 	pager := r.client.NewQueryItemsPager(q, searchKey, &azcosmos.QueryOptions{QueryParameters: parameters})
 	results := make(chan storage.Stream[storage.ListResult], 1)
-	go func() {
-		defer close(results)
-		for pager.More() {
-			res, err := pager.NextPage(ctx)
-			if err != nil {
-				sendErr := sender[storage.Stream[storage.ListResult]](ctx, results, storage.Stream[storage.ListResult]{Err: fmt.Errorf("problem listing plans: %w", err)})
-				if sendErr != nil {
-					results <- storage.Stream[storage.ListResult]{Err: sendErr}
-				}
-				return
-			}
-			for _, item := range res.Items {
-				result, err := r.listResultsFunc(item)
+
+	context.Pool(ctx).Submit(
+		ctx,
+		func() {
+			defer close(results)
+			for pager.More() {
+				res, err := pager.NextPage(ctx)
 				if err != nil {
-					sendErr := sender[storage.Stream[storage.ListResult]](ctx, results, storage.Stream[storage.ListResult]{Err: fmt.Errorf("problem listing items in plans: %w", err)})
-					if sendErr != nil {
-						results <- storage.Stream[storage.ListResult]{Err: sendErr}
-					}
+					err := errors.E(ctx, errors.CatInternal, errors.TypeStorageGet, fmt.Errorf("problem listing plans: %w", err))
+					sender[storage.Stream[storage.ListResult]](ctx, results, storage.Stream[storage.ListResult]{Err: err})
 					return
 				}
-				if sendErr := sender[storage.Stream[storage.ListResult]](ctx, results, storage.Stream[storage.ListResult]{Result: result}); sendErr != nil {
-					results <- storage.Stream[storage.ListResult]{Err: sendErr}
-					return
+				for _, item := range res.Items {
+					result, err := r.listResultsFunc(item)
+					if err != nil {
+						err := errors.E(ctx, errors.CatInternal, errors.TypeStorageGet, fmt.Errorf("problem listing items in plans: %w", err))
+						sender[storage.Stream[storage.ListResult]](ctx, results, storage.Stream[storage.ListResult]{Err: err})
+						return
+					}
+					if err := sender[storage.Stream[storage.ListResult]](ctx, results, storage.Stream[storage.ListResult]{Result: result}); err != nil {
+						return
+					}
 				}
 			}
-		}
-		return
-	}()
+		},
+	)
 	return results, nil
 }
 
@@ -219,33 +219,30 @@ func (r reader) List(ctx context.Context, limit int) (chan storage.Stream[storag
 
 	pager := r.client.NewQueryItemsPager(q, searchKey, &azcosmos.QueryOptions{QueryParameters: parameters})
 	results := make(chan storage.Stream[storage.ListResult], 1)
-	go func() {
-		defer close(results)
-		for pager.More() {
-			res, err := pager.NextPage(ctx)
-			if err != nil {
-				sendErr := sender[storage.Stream[storage.ListResult]](ctx, results, storage.Stream[storage.ListResult]{Err: fmt.Errorf("problem listing plans: %w", err)})
-				if sendErr != nil {
-					results <- storage.Stream[storage.ListResult]{Err: sendErr}
-				}
-				return
-			}
-			for _, item := range res.Items {
-				result, err := r.listResultsFunc(item)
+
+	context.Pool(ctx).Submit(
+		ctx,
+		func() {
+			defer close(results)
+			for pager.More() {
+				res, err := pager.NextPage(ctx)
 				if err != nil {
-					sendErr := sender[storage.Stream[storage.ListResult]](ctx, results, storage.Stream[storage.ListResult]{Err: fmt.Errorf("problem listing items in plans: %w", err)})
-					if sendErr != nil {
-						results <- storage.Stream[storage.ListResult]{Err: sendErr}
-					}
+					sender[storage.Stream[storage.ListResult]](ctx, results, storage.Stream[storage.ListResult]{Err: fmt.Errorf("problem listing plans: %w", err)})
 					return
 				}
-				if sendErr := sender[storage.Stream[storage.ListResult]](ctx, results, storage.Stream[storage.ListResult]{Result: result}); sendErr != nil {
-					results <- storage.Stream[storage.ListResult]{Err: sendErr}
-					return
+				for _, item := range res.Items {
+					result, err := r.listResultsFunc(item)
+					if err != nil {
+						sender[storage.Stream[storage.ListResult]](ctx, results, storage.Stream[storage.ListResult]{Err: fmt.Errorf("problem listing items in plans: %w", err)})
+						return
+					}
+					if err := sender[storage.Stream[storage.ListResult]](ctx, results, storage.Stream[storage.ListResult]{Result: result}); err != nil {
+						return
+					}
 				}
 			}
-		}
-	}()
+		},
+	)
 	return results, nil
 }
 

@@ -1,12 +1,12 @@
 package cosmosdb
 
 import (
-	"errors"
 	"net"
 	"net/http"
 	"strings"
 
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
+	"github.com/element-of-surprise/coercion/workflow/errors"
 )
 
 // isNotFound checks if the error that Azure returned is 404.
