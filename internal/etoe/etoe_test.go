@@ -41,6 +41,7 @@ var (
 
 	// CosmosDB flags that are only used if vault is set to "cosmosdb".
 	swarm     = flag.String("swarm", os.Getenv("AZURE_COSMOSDB_SWARM"), "The name of the coercion swarm.")
+	account   = flag.String("account", os.Getenv("AZURE_COSMOSDB_ACCOUNT"), "The name of the cosmosdb account.")
 	db        = flag.String("db", os.Getenv("AZURE_COSMOSDB_DBNAME"), "The name of the cosmosdb database.")
 	container = flag.String("container", os.Getenv("AZURE_COSMOSDB_CNAME"), "The name of the cosmosdb container.")
 	msi       = flag.String("msi", "", "The identity with vmss contributor role. If empty, az login is used.")
@@ -182,7 +183,7 @@ func TestEtoE(t *testing.T) {
 		defer func() {
 			if *vaultType == "cosmosdb" {
 				// Teardown the cosmosdb container
-				if err := cosmosdb.Teardown(ctx, *db, *container, cred, nil); err != nil {
+				if err := cosmosdb.Teardown(ctx, *account, *db, *container, cred, nil); err != nil {
 					panic(err)
 				}
 			}
@@ -194,8 +195,8 @@ func TestEtoE(t *testing.T) {
 	case "sqlite":
 		vault, err = sqlite.New(ctx, "", reg, sqlite.WithInMemory(), sqlite.WithCapture(capture))
 	case "cosmosdb":
-		logger.Info(fmt.Sprintf("TestEtoE: Using cosmosdb: %s, %s", *db, *container))
-		vault, err = cosmosdb.New(ctx, *swarm, *db, *container, cred, reg)
+		logger.Info(fmt.Sprintf("TestEtoE: Using cosmosdb: %s, %s, %s", *account, *db, *container))
+		vault, err = cosmosdb.New(ctx, *swarm, *account, *db, *container, cred, reg)
 	default:
 		panic(fmt.Errorf("TestEtoE: unknown storage vault type: %s", *vaultType))
 	}
@@ -397,7 +398,7 @@ func TestBypassPlan(t *testing.T) {
 		defer func() {
 			if *vaultType == "cosmosdb" {
 				// Teardown the cosmosdb container
-				if err := cosmosdb.Teardown(ctx, *db, *container, cred, nil); err != nil {
+				if err := cosmosdb.Teardown(ctx, *account, *db, *container, cred, nil); err != nil {
 					panic(err)
 				}
 			}
@@ -409,8 +410,8 @@ func TestBypassPlan(t *testing.T) {
 	case "sqlite":
 		vault, err = sqlite.New(ctx, "", reg, sqlite.WithInMemory())
 	case "cosmosdb":
-		logger.Info(fmt.Sprintf("TestBypassPlan: Using cosmosdb: %s, %s", *db, *container))
-		vault, err = cosmosdb.New(ctx, *swarm, *db, *container, cred, reg)
+		logger.Info(fmt.Sprintf("TestBypassPlan: Using cosmosdb: %s, %s, %s", *account, *db, *container))
+		vault, err = cosmosdb.New(ctx, *swarm, *account, *db, *container, cred, reg)
 	default:
 		panic(fmt.Errorf("TestBypassPlan: unknown storage vault type: %s", *vaultType))
 	}
@@ -579,7 +580,7 @@ func TestBypassBlock(t *testing.T) {
 		defer func() {
 			if *vaultType == "cosmosdb" {
 				// Teardown the cosmosdb container
-				if err := cosmosdb.Teardown(ctx, *db, *container, cred, nil); err != nil {
+				if err := cosmosdb.Teardown(ctx, *account, *db, *container, cred, nil); err != nil {
 					panic(err)
 				}
 			}
@@ -591,8 +592,8 @@ func TestBypassBlock(t *testing.T) {
 	case "sqlite":
 		vault, err = sqlite.New(ctx, "", reg, sqlite.WithInMemory())
 	case "cosmosdb":
-		logger.Info(fmt.Sprintf("TestBypassBlock: Using cosmosdb: %s, %s", *db, *container))
-		vault, err = cosmosdb.New(ctx, *swarm, *db, *container, cred, reg)
+		logger.Info(fmt.Sprintf("TestBypassBlock: Using cosmosdb: %s, %s, %s", *account, *db, *container))
+		vault, err = cosmosdb.New(ctx, *swarm, *account, *db, *container, cred, reg)
 	default:
 		panic(fmt.Errorf("TestBypassBlock: unknown storage vault type: %s", *vaultType))
 	}

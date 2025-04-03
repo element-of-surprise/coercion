@@ -23,6 +23,7 @@ import (
 //+gocover:ignore:file No need to test fake store.
 
 var (
+	account   = flag.String("account-name", os.Getenv("AZURE_COSMOSDB_ACCOUNT"), "the name of the cosmosdb account")
 	db        = flag.String("db-name", os.Getenv("AZURE_COSMOSDB_DBNAME"), "the name of the cosmosdb database")
 	swarm     = flag.String("swarm-name", os.Getenv("AZURE_COSMOSDB_SWARM"), "the name of the coercion swarm")
 	container = flag.String("container-name", os.Getenv("AZURE_COSMOSDB_CNAME"), "the name of the cosmosdb container")
@@ -68,7 +69,7 @@ func main() {
 		fatalErr(logger, "Failed to create credential: %v", err)
 	}
 
-	vault, err := cosmosdb.New(ctx, *swarm, *db, *container, cred, reg)
+	vault, err := cosmosdb.New(ctx, *swarm, *account, *db, *container, cred, reg)
 	if err != nil {
 		fatalErr(logger, "Failed to create vault: %v", err)
 	}
@@ -80,7 +81,7 @@ func main() {
 	if *teardown == true {
 		defer func() {
 			// Teardown the cosmosdb container
-			if err := cosmosdb.Teardown(ctx, *db, *container, cred, nil); err != nil {
+			if err := cosmosdb.Teardown(ctx, *account, *db, *container, cred, nil); err != nil {
 				fatalErr(logger, "Failed to teardown: %v", err)
 			}
 		}()

@@ -74,9 +74,10 @@ This populates our `Resp` field with the correct type. The normal `encoding/json
 To run integration tests with an existing cosmosdb database instance, you need to set the following environment variables:
 
 ```
+export AZURE_COSMOSDB_ACCOUNT="accountname"
 export AZURE_COSMOSDB_DBNAME="dbname"
-export AZURE_COSMOSDB_CNAME="underlaycx1"
-export AZURE_COSMOSDB_PK="resourceid"
+export AZURE_COSMOSDB_SWARM="swarmname"
+export AZURE_COSMOSDB_CNAME="containername"
 ```
 
 ```
