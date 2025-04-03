@@ -181,7 +181,6 @@ func (e *Plans) recover(ctx context.Context) error {
 	}
 	for _, plan := range req.Data.plans {
 		log.Default().Info("recovered plan", "id", plan.ID, "status", plan.State.Status)
-		// recovered metric?
 		if plan.State.Status == workflow.NotStarted {
 			metrics.NotStarted(ctx)
 		}
