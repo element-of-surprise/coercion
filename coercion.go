@@ -14,11 +14,14 @@ import (
 	"time"
 
 	"github.com/element-of-surprise/coercion/internal/execute"
+	"github.com/element-of-surprise/coercion/internal/metrics"
 	"github.com/element-of-surprise/coercion/plugins/registry"
 	"github.com/element-of-surprise/coercion/workflow"
 	"github.com/element-of-surprise/coercion/workflow/storage"
 	"github.com/element-of-surprise/coercion/workflow/utils/walk"
+
 	"github.com/google/uuid"
+	"go.opentelemetry.io/otel/metric"
 )
 
 // This makes UUID generation much faster.
@@ -40,6 +43,8 @@ type Workstream struct {
 	reg   *registry.Register
 	exec  *execute.Plans
 	store storage.Vault
+
+	meterProvider metric.MeterProvider
 
 	execOptions []execute.Option
 }
@@ -67,6 +72,18 @@ func WithMaxSubmit(d time.Duration) Option {
 	}
 }
 
+// WithMeterProvider sets the meter provider with which to register coercion metrics.
+// Defaults to nil, in which case no metrics are registered.
+func WithMeterProvider(m metric.MeterProvider) Option {
+	return func(p *Workstream) error {
+		if m == nil {
+			return fmt.Errorf("meter provider cannot be nil")
+		}
+		p.meterProvider = m
+		return nil
+	}
+}
+
 // New creates a new Workstream.
 func New(ctx context.Context, reg *registry.Register, store storage.Vault, options ...Option) (*Workstream, error) {
 	if store == nil {
@@ -87,6 +104,12 @@ func New(ctx context.Context, reg *registry.Register, store storage.Vault, optio
 	for _, o := range options {
 		if err := o(ws); err != nil {
 			return nil, err
+		}
+	}
+
+	if ws.meterProvider != nil {
+		if err := metrics.Init(ws.meterProvider.Meter("coercion")); err != nil {
+			return nil, fmt.Errorf("failed to initialize metrics: %w", err)
 		}
 	}
 
@@ -127,6 +150,8 @@ func (w *Workstream) Submit(ctx context.Context, plan *workflow.Plan) (uuid.UUID
 	if err := w.store.Create(ctx, plan); err != nil {
 		return uuid.Nil, fmt.Errorf("Failed to write plan to storage: %w", err)
 	}
+
+	metrics.NotStarted(ctx)
 
 	return plan.ID, nil
 }

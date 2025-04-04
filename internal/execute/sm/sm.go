@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/element-of-surprise/coercion/internal/execute/sm/actions"
+	"github.com/element-of-surprise/coercion/internal/metrics"
 	"github.com/element-of-surprise/coercion/plugins/registry"
 	"github.com/element-of-surprise/coercion/workflow"
 	"github.com/element-of-surprise/coercion/workflow/context"
@@ -112,6 +113,11 @@ func New(store storage.Vault, registry *registry.Register) (*States, error) {
 func (s *States) Start(req statemachine.Request[Data]) statemachine.Request[Data] {
 	plan := req.Data.Plan
 
+	metrics.Start(req.Ctx, workflow.OTPlan)
+	defer func() {
+		metrics.Started(req.Ctx, plan)
+	}()
+
 	req.Ctx = context.SetPlanID(req.Ctx, req.Data.Plan.ID)
 
 	for _, b := range req.Data.Plan.Blocks {
@@ -208,6 +214,7 @@ func (s *States) ExecuteBlock(req statemachine.Request[Data]) statemachine.Reque
 
 	h := req.Data.blocks[0]
 
+	metrics.Start(req.Ctx, workflow.OTBlock)
 	defer func() {
 		if err := s.store.UpdateBlock(req.Ctx, h.block); err != nil {
 			log.Fatalf("failed to write Block: %v", err)
@@ -246,6 +253,7 @@ func (s *States) BlockBypassChecks(req statemachine.Request[Data]) statemachine.
 		req.Next = s.BlockPreChecks
 		return req
 	}
+
 	skip := s.runBypasses(req.Ctx, h.block.BypassChecks)
 	if skip {
 		if h.contCheckResult != nil {
@@ -432,6 +440,8 @@ func (s *States) BlockEnd(req statemachine.Request[Data]) statemachine.Request[D
 		if err := s.store.UpdateBlock(req.Ctx, h.block); err != nil {
 			log.Fatalf("failed to write Block: %v", err)
 		}
+		metrics.End(req.Ctx, workflow.OTBlock)
+		metrics.FinalStatus(req.Ctx, workflow.OTBlock, h.block.State.Status)
 	}()
 
 	// Don't use checksCompleted() here, we want to run the block if it is not completed.
@@ -536,6 +546,8 @@ func (s *States) End(req statemachine.Request[Data]) statemachine.Request[Data] 
 		if err := s.store.UpdatePlan(req.Ctx, plan); err != nil {
 			log.Fatalf("failed to write Plan: %v", err)
 		}
+		metrics.End(req.Ctx, workflow.OTPlan)
+		metrics.FinalStatus(req.Ctx, workflow.OTPlan, plan.State.Status)
 	}()
 
 	// Extra cancel, defense in depth.

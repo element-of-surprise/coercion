@@ -1,0 +1,10 @@
+# HELP coercion_plan_submitted_total total number of coercion workflow objects submitted but not started
+# TYPE coercion_plan_submitted_total gauge
+coercion_plan_submitted_total{otel_scope_name="testmeter",otel_scope_version="v0.1.0"} 0
+# HELP otel_scope_info Instrumentation Scope metadata
+# TYPE otel_scope_info gauge
+otel_scope_info{otel_scope_name="testmeter",otel_scope_version="v0.1.0"} 1
+# HELP target_info Target metadata
+# TYPE target_info gauge
+target_info{service_name="coercion_test",telemetry_sdk_language="go",telemetry_sdk_name="opentelemetry",telemetry_sdk_version="latest"} 1
+
