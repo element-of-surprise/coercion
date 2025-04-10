@@ -4,6 +4,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/element-of-surprise/coercion/plugins"
 	"github.com/element-of-surprise/coercion/workflow"
 	"github.com/kylelemons/godebug/pretty"
 )
@@ -46,7 +47,19 @@ func TestFixAction(t *testing.T) {
 			},
 		},
 		{
-			name: "running action with attempts, no reset",
+			name: "running action with attempts that didn't finish, reset",
+			action: &workflow.Action{
+				State: &workflow.State{Status: workflow.Running, Start: now},
+				Attempts: []*workflow.Attempt{
+					{Start: now},
+				},
+			},
+			want: &workflow.Action{
+				State: &workflow.State{Status: workflow.NotStarted},
+			},
+		},
+		{
+			name: "running action with attempts that have been completed, no reset",
 			action: &workflow.Action{
 				State: &workflow.State{Status: workflow.Running, Start: now},
 				Attempts: []*workflow.Attempt{
@@ -54,9 +67,24 @@ func TestFixAction(t *testing.T) {
 				},
 			},
 			want: &workflow.Action{
-				State: &workflow.State{Status: workflow.Running, Start: now},
+				State: &workflow.State{Status: workflow.Completed, Start: now, End: now.Add(1)},
 				Attempts: []*workflow.Attempt{
 					{Start: now, End: now.Add(1)},
+				},
+			},
+		},
+		{
+			name: "running action with attempts that have been failed, no reset",
+			action: &workflow.Action{
+				State: &workflow.State{Status: workflow.Running, Start: now},
+				Attempts: []*workflow.Attempt{
+					{Err: &plugins.Error{}, Start: now, End: now.Add(1)},
+				},
+			},
+			want: &workflow.Action{
+				State: &workflow.State{Status: workflow.Failed, Start: now, End: now.Add(1)},
+				Attempts: []*workflow.Attempt{
+					{Err: &plugins.Error{}, Start: now, End: now.Add(1)},
 				},
 			},
 		},
