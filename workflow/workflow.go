@@ -2,13 +2,16 @@
 package workflow
 
 import (
-	"context"
-	"errors"
 	"fmt"
 	"reflect"
 	"strings"
-	"sync"
 	"time"
+
+	"github.com/element-of-surprise/coercion/workflow/errors"
+	"github.com/gostdlib/base/concurrency/sync"
+	"github.com/gostdlib/base/values/generics/sets"
+
+	"github.com/gostdlib/base/context"
 
 	"github.com/element-of-surprise/coercion/plugins"
 	"github.com/element-of-surprise/coercion/plugins/registry"
@@ -218,26 +221,26 @@ func (p *Plan) validate(ctx context.Context) ([]validator, error) {
 		return nil, errors.New("plan is nil")
 	}
 	if p.ID != uuid.Nil {
-		return nil, fmt.Errorf("id should not be set by the user")
+		return nil, errors.New("id should not be set by the user")
 	}
 	if p.State != nil {
-		return nil, fmt.Errorf("state should not be set by the user")
+		return nil, errors.New("state should not be set by the user")
 	}
 
 	if strings.TrimSpace(p.Name) == "" {
 		return nil, fmt.Errorf("name is required")
 	}
 	if strings.TrimSpace(p.Descr) == "" {
-		return nil, fmt.Errorf("description is required")
+		return nil, errors.New("description is required")
 	}
 	if len(p.Blocks) == 0 {
-		return nil, fmt.Errorf("at least one block is required")
+		return nil, errors.New("at least one block is required")
 	}
 	if p.Reason != FRUnknown {
-		return nil, fmt.Errorf("reason should not be set by the user")
+		return nil, errors.New("reason should not be set by the user")
 	}
 	if !p.SubmitTime.IsZero() {
-		return nil, fmt.Errorf("submit time should not be set by the user")
+		return nil, errors.New("submit time should not be set by the user")
 	}
 
 	vals := []validator{p.BypassChecks, p.PreChecks, p.ContChecks, p.PostChecks, p.DeferredChecks}
@@ -329,7 +332,9 @@ func (c *Checks) validate(ctx context.Context) ([]validator, error) {
 	if c.ID != uuid.Nil {
 		return nil, fmt.Errorf("id should not be set by the user")
 	}
-	if err := addOrErrKey(ctx, c.Key); err != nil {
+	var err error
+	ctx, err = addOrErrKey(ctx, c.Key)
+	if err != nil {
 		return nil, fmt.Errorf("Checks object: %w", err)
 	}
 	if len(c.Actions) == 0 {
@@ -463,7 +468,9 @@ func (b *Block) validate(ctx context.Context) ([]validator, error) {
 	if b.ID != uuid.Nil {
 		return nil, fmt.Errorf("id should not be set by the user")
 	}
-	if err := addOrErrKey(ctx, b.Key); err != nil {
+	var err error
+	ctx, err = addOrErrKey(ctx, b.Key)
+	if err != nil {
 		return nil, fmt.Errorf("Block object(%s): %w", b.Name, err)
 	}
 	if strings.TrimSpace(b.Name) == "" {
@@ -569,7 +576,9 @@ func (s *Sequence) validate(ctx context.Context) ([]validator, error) {
 	if s.ID != uuid.Nil {
 		return nil, fmt.Errorf("id should not be set by the user")
 	}
-	if err := addOrErrKey(ctx, s.Key); err != nil {
+	var err error
+	ctx, err = addOrErrKey(ctx, s.Key)
+	if err != nil {
 		return nil, fmt.Errorf("Sequence object(%s): %w", s.Name, err)
 	}
 
@@ -710,7 +719,9 @@ func (a *Action) validate(ctx context.Context) ([]validator, error) {
 	if a.ID != uuid.Nil {
 		return nil, fmt.Errorf("id should not be set by the user")
 	}
-	if err := addOrErrKey(ctx, a.Key); err != nil {
+	var err error
+	ctx, err = addOrErrKey(ctx, a.Key)
+	if err != nil {
 		return nil, fmt.Errorf("Action object(%s): %w", a.Name, err)
 	}
 
@@ -792,53 +803,59 @@ func (q *queue[T]) pop() T {
 	return item
 }
 
-type keysMap struct{}
+// keySet is a context key for a set of keys.
+type keysSet struct{}
 
-func getKeyMap(ctx context.Context) map[string]bool {
-	m, ok := ctx.Value(keysMap{}).(map[string]bool)
-	if !ok {
-		return nil
+// getKeySet gets the set of keys from the context.
+func getKeySet(ctx context.Context) sets.Set[string] {
+	v := ctx.Value(keysSet{})
+	if v == nil {
+		return sets.Set[string]{}
 	}
-	return m
+	set, ok := v.(sets.Set[string])
+	if !ok {
+		panic(fmt.Sprintf("bug: keysSet should be a set of strings, was %T", v))
+	}
+	return set
 }
 
-// addOrErrKey grabs the map of object.Key elements found and checks to see if k
-// is already in the map. If it is, it returns an error. If it is not, it adds it.
+// addOrErrKey grabs the set of object.Key elements found and checks to see if k
+// is already in the set. If it is, it returns an error. If it is not, it adds it.
 // If k is uuid.Nil, it does nothing. If the key is not a version 7 UUID, it returns an error.
-func addOrErrKey(ctx context.Context, k uuid.UUID) error {
+// It returns a context with the new set if there was no set attached.
+func addOrErrKey(ctx context.Context, k uuid.UUID) (context.Context, error) {
 	const v7 = uuid.Version(byte(7))
 
 	if k != uuid.Nil {
 		if k.Version() != v7 {
-			return fmt.Errorf("had a .Key value(%s) with an invalid version(got %s, want %s)", k.String(), string(k.Version()), string(v7))
+			return ctx, fmt.Errorf("had a .Key value(%s) with an invalid version(got %s, want %s)", k.String(), string(k.Version()), string(v7))
 		}
 		s := k.String()
-		m := getKeyMap(ctx)
-		if m[s] {
-			return fmt.Errorf("Object.Key %q already exists on another object", s)
+		set := getKeySet(ctx)
+		if set.Contains(s) {
+			return ctx, fmt.Errorf("Object.Key %q already exists on another object", s)
 		}
-		m[s] = true
+		set.Add(s)
+		ctx = context.WithValue(ctx, keysSet{}, set)
 	}
-	return nil
+	return ctx, nil
 }
 
 // Validate validates the Plan. This is automatically called by workstream.Submit.
 func Validate(p *Plan) error {
 	if p == nil {
-		return fmt.Errorf("cannot have a nil Plan")
+		return errors.E(context.Background(), errors.CatInternal, errors.TypeBug, errors.New("cannot have a nil Plan"))
 	}
 
 	q := &queue[validator]{}
 	q.push(p)
 
 	ctx := context.Background()
-	m := map[string]bool{}
-	ctx = context.WithValue(ctx, keysMap{}, m)
 
 	for val := q.pop(); val != nil; val = q.pop() {
 		vals, err := val.validate(ctx)
 		if err != nil {
-			return err
+			return errors.E(context.Background(), errors.CatUser, errors.TypeParameter, fmt.Errorf("Plan validation: %w", err))
 		}
 		if len(vals) != 0 {
 			q.push(vals...)

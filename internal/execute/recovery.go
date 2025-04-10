@@ -1,7 +1,6 @@
 package execute
 
 import (
-	"fmt"
 	"time"
 
 	"github.com/element-of-surprise/coercion/workflow"
@@ -29,12 +28,12 @@ type recover struct {
 func (r *recover) start(req statemachine.Request[recoverData]) statemachine.Request[recoverData] {
 	results, err := r.store.Search(req.Ctx, storage.Filters{ByStatus: []workflow.Status{workflow.Running}})
 	if err != nil {
-		req.Err = fmt.Errorf("failed to search for running plans: %w", err)
+		req.Err = err
 		return req
 	}
 	for result := range results {
 		if result.Err != nil {
-			req.Err = fmt.Errorf("failed mid search for running plans: %w", result.Err)
+			req.Err = result.Err
 			return req
 		}
 		req.Data.searchResults = append(req.Data.searchResults, result)
@@ -50,7 +49,7 @@ func (r *recover) fetchPlans(req statemachine.Request[recoverData]) statemachine
 	for i, result := range req.Data.searchResults {
 		plan, err := r.store.Read(req.Ctx, result.Result.ID)
 		if err != nil {
-			req.Err = fmt.Errorf("failed to read Plan(%s): %w", result.Result.ID, err)
+			req.Err = err
 			return req
 		}
 		recovered[i] = plan
@@ -142,7 +141,7 @@ func (r *recover) agedOut(req statemachine.Request[recoverData]) statemachine.Re
 		runningToFailed(req.Ctx, plan)
 
 		if err := r.store.UpdatePlan(req.Ctx, plan); err != nil {
-			req.Err = fmt.Errorf("failed to update Plan(%s): %w", plan.ID, err)
+			req.Err = err
 			return req
 		}
 	}
@@ -158,7 +157,7 @@ func (r *recover) done(req statemachine.Request[recoverData]) statemachine.Reque
 // runningToFailed marks all objects in running states in the plan as failed.
 func runningToFailed(ctx context.Context, p *workflow.Plan) {
 	p.State.End = time.Now()
-	for item := range walk.Plan(ctx, p) {
+	for item := range walk.Plan(p) {
 		state := item.Value.(getStater).GetState()
 		if state.Status == workflow.Running {
 			state.Status = workflow.Failed
@@ -180,7 +179,7 @@ func lastUpdate(ctx context.Context, p *workflow.Plan) time.Time {
 
 	last := time.Time{}
 
-	for item := range walk.Plan(ctx, p) {
+	for item := range walk.Plan(p) {
 		state := item.Value.(stater).GetState()
 		if state.Start.After(last) {
 			last = state.Start

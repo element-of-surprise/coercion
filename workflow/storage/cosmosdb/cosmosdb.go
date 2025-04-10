@@ -10,15 +10,17 @@ DO NOT USE THIS PACKAGE!!!! SERIOUSLY, DO NOT USE THIS PACKAGE!!!!! See notes in
 package cosmosdb
 
 import (
-	"context"
 	"fmt"
 	"log/slog"
 	"os"
-	"sync"
+
+	"github.com/gostdlib/base/concurrency/sync"
+	"github.com/gostdlib/base/context"
 
 	"github.com/element-of-surprise/coercion/internal/private"
 	"github.com/element-of-surprise/coercion/plugins"
 	"github.com/element-of-surprise/coercion/plugins/registry"
+	"github.com/element-of-surprise/coercion/workflow/errors"
 	"github.com/element-of-surprise/coercion/workflow/storage"
 
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
@@ -126,22 +128,22 @@ func New(ctx context.Context, swarm, account, db, container string, cred azcore.
 	ctx = context.WithoutCancel(ctx)
 
 	if swarm == "" {
-		return nil, fmt.Errorf("swarm name cannot be empty")
+		return nil, errors.E(ctx, errors.CatInternal, errors.TypeBug, errors.New("swarm name cannot be empty"))
 	}
 	if account == "" {
 		return nil, fmt.Errorf("account name cannot be empty")
 	}
 	if db == "" {
-		return nil, fmt.Errorf("db name cannot be empty")
+		return nil, errors.E(ctx, errors.CatInternal, errors.TypeBug, errors.New("db name cannot be empty"))
 	}
 	if container == "" {
-		return nil, fmt.Errorf("container name cannot be empty")
+		return nil, errors.E(ctx, errors.CatInternal, errors.TypeBug, errors.New("container name cannot be empty"))
 	}
 	if cred == nil {
-		return nil, fmt.Errorf("credential cannot be nil")
+		return nil, errors.E(ctx, errors.CatInternal, errors.TypeBug, errors.New("credential cannot be nil"))
 	}
 	if reg == nil {
-		return nil, fmt.Errorf("registry cannot be nil")
+		return nil, errors.E(ctx, errors.CatInternal, errors.TypeBug, errors.New("registry cannot be nil"))
 	}
 
 	r := &Vault{
@@ -153,7 +155,7 @@ func New(ctx context.Context, swarm, account, db, container string, cred azcore.
 	}
 	for _, o := range options {
 		if err := o(r); err != nil {
-			return nil, err
+			return nil, errors.E(ctx, errors.CatInternal, errors.TypeBug, err)
 		}
 	}
 
@@ -162,12 +164,12 @@ func New(ctx context.Context, swarm, account, db, container string, cred azcore.
 
 	client, err := azcosmos.NewClient(r.endpoint, cred, r.clientOpts)
 	if err != nil {
-		return nil, err
+		return nil, errors.E(ctx, errors.CatInternal, errors.TypeConn, err)
 	}
 	r.client = client
 	r.contClient, err = r.createContainerClient(ctx)
 	if err != nil {
-		return nil, err
+		return nil, errors.E(ctx, errors.CatInternal, errors.TypeStorageCreate, err)
 	}
 
 	mu := &sync.RWMutex{}
@@ -270,21 +272,23 @@ func Teardown(ctx context.Context, account, db, container string, cred azcore.To
 
 	client, err := azcosmos.NewClient(endpoint, cred, clientOpts)
 	if err != nil {
-		return err
+		return errors.E(ctx, errors.CatInternal, errors.TypeConn, err)
 	}
 
 	cc, err := client.NewContainer(db, container)
 	if err != nil {
-		return fmt.Errorf(
-			"failed to connect to Cosmos DB container: endpoint=%q, container=%q. %w",
-			endpoint,
-			container,
-			err,
+		return errors.E(ctx, errors.CatInternal, errors.TypeConn,
+			fmt.Errorf(
+				"failed to connect to Cosmos DB container: endpoint=%q, container=%q. %w",
+				endpoint,
+				container,
+				err,
+			),
 		)
 	}
 
 	if _, err := deleteContainer(ctx, cc); err != nil {
-		return fmt.Errorf("failed to delete Cosmos DB container: container=%s. %w", container, err)
+		return errors.E(ctx, errors.CatInternal, errors.TypeStorageDelete, fmt.Errorf("failed to delete Cosmos DB container: container=%s. %w", container, err))
 	}
 	return nil
 }

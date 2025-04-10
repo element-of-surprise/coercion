@@ -1,9 +1,10 @@
 package cosmosdb
 
 import (
-	"context"
-	"sync"
 	"testing"
+
+	"github.com/gostdlib/base/concurrency/sync"
+	"github.com/gostdlib/base/context"
 
 	"github.com/Azure/azure-sdk-for-go/sdk/data/azcosmos"
 	"github.com/google/uuid"
@@ -132,7 +133,7 @@ func TestStorageItemCRUD(t *testing.T) {
 
 	// Walk every item and change the state.Status to Stopped.
 	// We can then update all the objects and then test that the updates occurred.
-	for item := range walk.Plan(context.Background(), plan0) {
+	for item := range walk.Plan(plan0) {
 		if so, ok := item.Value.(stateObject); ok {
 			state := so.GetState()
 			state.Status = workflow.Stopped
@@ -156,7 +157,7 @@ func TestStorageItemCRUD(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	for item := range walk.Plan(context.Background(), plan0) {
+	for item := range walk.Plan(plan0) {
 		id := item.Value.(getIDer).GetID()
 		if _, err := v.Read(ctx, id); err == nil {
 			t.Errorf("TestStorageItemCRUD(delete): %s value in deleted plan still in storage", item.Value.Type())

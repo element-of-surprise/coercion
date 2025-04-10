@@ -145,10 +145,10 @@ github.com/google/pprof v0.0.0-20241029153458-d1b30febd7db h1:097atOisP2aRj7vFgY
 github.com/google/pprof v0.0.0-20241029153458-d1b30febd7db/go.mod h1:vavhavw2zAxS5dIdcRluK6cSGGPlZynqzFM8NdvU144=
 github.com/google/uuid v1.6.0 h1:NIvaJDMOsjHA8n1jAhLSgzrAzy1Hgr+hNrb57e+94F0=
 github.com/google/uuid v1.6.0/go.mod h1:TIyPZe4MgqvfeYDBFedMoGGpEw/LqOeaOT+nhxU+yHo=
-github.com/gostdlib/base v0.0.0-20250305232105-cdc29943ce86 h1:er3pQHhirqaiRIk5WkyipXI7i610US6VggUaB8lbZJI=
-github.com/gostdlib/base v0.0.0-20250305232105-cdc29943ce86/go.mod h1:8t0h1OtnFcrbqOfJrJR544prAWshooAM139Tq7+MHmo=
-github.com/gostdlib/base v0.0.0-20250312154044-c158e13ed0d2 h1:eLW12ZKu3UDb9BEQ+ko9+5D63DLnZ4+fqBGYCOxp0IU=
-github.com/gostdlib/base v0.0.0-20250312154044-c158e13ed0d2/go.mod h1:8t0h1OtnFcrbqOfJrJR544prAWshooAM139Tq7+MHmo=
+github.com/gostdlib/base v0.0.0-20250327232811-298eecb78631 h1:GzmtVNDJQgO8K56A2NxBaVyzNyqB4xRalnNItDQ4NCY=
+github.com/gostdlib/base v0.0.0-20250327232811-298eecb78631/go.mod h1:8t0h1OtnFcrbqOfJrJR544prAWshooAM139Tq7+MHmo=
+github.com/gostdlib/base v0.0.0-20250328165134-6931dc0137f3 h1:IZu9DWyUrLhZa5qb8hhb/NunEOjh7bBHXgtZQcYRj6I=
+github.com/gostdlib/base v0.0.0-20250328165134-6931dc0137f3/go.mod h1:8t0h1OtnFcrbqOfJrJR544prAWshooAM139Tq7+MHmo=
 github.com/grpc-ecosystem/grpc-gateway/v2 v2.26.3 h1:5ZPtiqj0JL5oKWmcsq4VMaAW5ukBEgSGXEN89zeH1Jo=
 github.com/grpc-ecosystem/grpc-gateway/v2 v2.26.3/go.mod h1:ndYquD05frm2vACXE1nsccT4oJzjhw2arTS2cpUD1PI=
 github.com/inancgumus/screen v0.0.0-20190314163918-06e984b86ed3 h1:fO9A67/izFYFYky7l1pDP5Dr0BTCRkaQJUG6Jm5ehsk=

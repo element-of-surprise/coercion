@@ -1,13 +1,14 @@
 package main
 
 import (
-	"context"
 	"flag"
 	"fmt"
 	"log"
 	"log/slog"
 	"os"
 	"time"
+
+	"github.com/gostdlib/base/context"
 
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
 	"github.com/Azure/azure-sdk-for-go/sdk/azidentity"

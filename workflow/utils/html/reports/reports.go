@@ -7,12 +7,14 @@ import (
 	"archive/tar"
 	"bytes"
 	"compress/gzip"
-	"context"
 	"fmt"
 	"io/fs"
 	"path/filepath"
 	"runtime"
-	"sync"
+
+	"github.com/gostdlib/base/concurrency/sync"
+
+	"github.com/gostdlib/base/context"
 
 	"github.com/element-of-surprise/coercion/workflow"
 	"github.com/element-of-surprise/coercion/workflow/utils/html/internal/embedded"
@@ -23,37 +25,20 @@ import (
 	_ "embed"
 )
 
-// bufPool is a pool of *bytes.Buffer objects. You may use this to loweer
-// the number of allocations when rendering Plans
-type bufPool struct {
-	pool sync.Pool
-}
-
-// Get returns a *bytes.Buffer from the pool. The buffer will be reset.
-func (bp *bufPool) Get() *bytes.Buffer {
-	return bp.pool.Get().(*bytes.Buffer)
-}
-
-// Put returns a *bytes.Buffer to the pool. The buffer is reset.
-func (bp *bufPool) Put(b *bytes.Buffer) {
-	b.Reset()
-
-	bp.pool.Put(b)
-}
-
 type renderOptions struct {
 }
 
 // RenderOption is an optional argument for Render.
 type RenderOption func(renderOptions) (renderOptions, error)
 
-var bufferPool = &bufPool{
-	pool: sync.Pool{
-		New: func() any {
-			return &bytes.Buffer{}
-		},
+var bufferPool = sync.NewPool[*bytes.Buffer](
+	context.Background(),
+	"bytes.Buffer",
+	func() *bytes.Buffer {
+		return &bytes.Buffer{}
 	},
-}
+	sync.WithBuffer(10),
+)
 
 // Render renders a workflow.Plan to an HTML document. This may alter the Plan object to
 // eliminate Request and Response fields that have fields marked with the `coerce:"secure"` tag.
@@ -67,8 +52,8 @@ func Render(ctx context.Context, plan *workflow.Plan, options ...RenderOption) (
 		}
 	}
 
-	var b = bufferPool.Get()
-	defer bufferPool.Put(b)
+	var b = bufferPool.Get(ctx)
+	defer bufferPool.Put(ctx, b)
 
 	// Remove any secrets from the plan.
 	workflow.Secure(plan)
@@ -83,31 +68,37 @@ func Render(ctx context.Context, plan *workflow.Plan, options ...RenderOption) (
 		return nil, err
 	}
 
-	for item := range walk.Plan(ctx, plan) {
-		var b = bufferPool.Get()
-		defer bufferPool.Put(b)
+	for item := range walk.Plan(plan) {
+		err := func() error {
+			var b = bufferPool.Get(ctx)
+			defer bufferPool.Put(ctx, b)
 
-		switch item.Value.Type() {
-		case workflow.OTSequence:
-			seq := item.Sequence()
-			if err := embedded.Tmpls.ExecuteTemplate(b, "sequence.tmpl", seq); err != nil {
-				return nil, err
+			switch item.Value.Type() {
+			case workflow.OTSequence:
+				seq := item.Sequence()
+				if err := embedded.Tmpls.ExecuteTemplate(b, "sequence.tmpl", seq); err != nil {
+					return err
+				}
+				fs.Mkdir("sequences", 0755)
+				if err := afero.WriteFile(fs, fmt.Sprintf("sequences/%s.html", seq.ID), b.Bytes(), 0644); err != nil {
+					return err
+				}
+			case workflow.OTAction:
+				act := item.Action()
+				if err := embedded.Tmpls.ExecuteTemplate(b, "action.tmpl", act); err != nil {
+					return err
+				}
+				fs.Mkdir("actions", 0755)
+				if err := afero.WriteFile(fs, fmt.Sprintf("actions/%s.html", act.ID), b.Bytes(), 0644); err != nil {
+					return err
+				}
 			}
-			fs.Mkdir("sequences", 0755)
-			if err := afero.WriteFile(fs, fmt.Sprintf("sequences/%s.html", seq.ID), b.Bytes(), 0644); err != nil {
-				return nil, err
-			}
-		case workflow.OTAction:
-			act := item.Action()
-			if err := embedded.Tmpls.ExecuteTemplate(b, "action.tmpl", act); err != nil {
-				return nil, err
-			}
-			fs.Mkdir("actions", 0755)
-			if err := afero.WriteFile(fs, fmt.Sprintf("actions/%s.html", act.ID), b.Bytes(), 0644); err != nil {
-				return nil, err
-			}
+			// Skip all other types.
+			return nil
+		}()
+		if err != nil {
+			return nil, err
 		}
-		// Skip all other types.
 	}
 
 	return FS{fs}, nil

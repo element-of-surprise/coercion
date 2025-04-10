@@ -1,14 +1,15 @@
 package cosmosdb
 
 import (
-	"context"
-	"errors"
 	"fmt"
 	"net/http"
 	"time"
 
+	"github.com/gostdlib/base/context"
+
 	"github.com/element-of-surprise/coercion/plugins"
 	"github.com/element-of-surprise/coercion/workflow"
+	"github.com/element-of-surprise/coercion/workflow/errors"
 	"github.com/gostdlib/base/retry/exponential"
 
 	"github.com/Azure/azure-sdk-for-go/sdk/data/azcosmos"
@@ -25,17 +26,17 @@ var emptyBatchOptions = &azcosmos.TransactionalBatchOptions{}
 // commitPlan commits a plan to the database. This commits the entire plan and all sub-objects.
 func (c creator) commitPlan(ctx context.Context, p *workflow.Plan) (err error) {
 	if p == nil {
-		return fmt.Errorf("commitPlan: plan cannot be nil")
+		return errors.E(ctx, errors.CatInternal, errors.TypeParameter, fmt.Errorf("commitPlan: plan cannot be nil"))
 	}
 
 	itemContext, err := planToItems(c.swarm, p)
 	if err != nil {
-		return err
+		return errors.E(ctx, errors.CatUser, errors.TypeParameter, err)
 	}
 
 	se, err := planToSearchEntry(c.swarm, p)
 	if err != nil {
-		return fmt.Errorf("failed to create search entry: %w", err)
+		return errors.E(ctx, errors.CatUser, errors.TypeParameter, err)
 	}
 
 	// Commit to our plan collection.
@@ -45,13 +46,14 @@ func (c creator) commitPlan(ctx context.Context, p *workflow.Plan) (err error) {
 	}
 
 	if err := backoff.Retry(ctx, batchRetryer(batch, c.client)); err != nil {
-		return fmt.Errorf("failed to commit plan: %w", err)
+		return errors.E(ctx, errors.CatInternal, errors.TypeStoragePut, fmt.Errorf("failed to commit plan: %w", err))
+
 	}
 
 	// need to re-read plan, because batch response does not contain ETag for each item.
 	result, err := c.reader.fetchPlan(ctx, p.ID)
 	if err != nil {
-		return fmt.Errorf("failed to fetch plan: %w", err)
+		return errors.E(ctx, errors.CatInternal, errors.TypeStorageGet, fmt.Errorf("failed to fetch plan: %w", err))
 	}
 	*p = *result
 
@@ -59,11 +61,11 @@ func (c creator) commitPlan(ctx context.Context, p *workflow.Plan) (err error) {
 	batch = c.client.NewTransactionalBatch(searchKey)
 	b, err := json.Marshal(se)
 	if err != nil {
-		return fmt.Errorf("failed to marshal search record: %w", err)
+		return errors.E(ctx, errors.CatInternal, errors.TypeStoragePut, fmt.Errorf("failed to marshal search record: %w", err))
 	}
 	batch.CreateItem(b, emptyItemOptions)
 	if err := backoff.Retry(ctx, batchRetryer(batch, c.client)); err != nil {
-		return fmt.Errorf("failed to commit plan to search records: %w", err)
+		return errors.E(ctx, errors.CatInternal, errors.TypeStoragePut, fmt.Errorf("failed to commit plan to search records: %w", err))
 	}
 
 	return nil

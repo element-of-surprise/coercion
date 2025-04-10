@@ -1,12 +1,15 @@
 package sqlite
 
 import (
-	"context"
 	"fmt"
-	"sync"
+
+	"github.com/gostdlib/base/concurrency/sync"
+
+	"github.com/gostdlib/base/context"
 
 	"github.com/element-of-surprise/coercion/internal/private"
 	"github.com/element-of-surprise/coercion/workflow"
+	"github.com/element-of-surprise/coercion/workflow/errors"
 	"github.com/element-of-surprise/coercion/workflow/storage"
 	"zombiezen.com/go/sqlite/sqlitex"
 )
@@ -29,7 +32,7 @@ func (a actionUpdater) UpdateAction(ctx context.Context, action *workflow.Action
 
 	conn, err := a.pool.Take(context.WithoutCancel(ctx))
 	if err != nil {
-		return fmt.Errorf("couldn't get a connection from the pool: %w", err)
+		return errors.E(ctx, errors.CatInternal, errors.TypeConn, fmt.Errorf("couldn't get a connection from the pool: %w", err))
 	}
 	defer a.pool.Put(conn)
 
@@ -42,18 +45,18 @@ func (a actionUpdater) UpdateAction(ctx context.Context, action *workflow.Action
 
 	b, err := encodeAttempts(action.Attempts)
 	if err != nil {
-		return fmt.Errorf("ActionWriter.Write: %w", err)
+		return errors.E(ctx, errors.CatInternal, errors.TypeBug, fmt.Errorf("ActionWriter.Write: %w", err))
 	}
 	stmt.SetBytes("$attempts", b)
 
 	sStmt, err := stmt.Prepare(conn)
 	if err != nil {
-		return fmt.Errorf("ActionWriter.Write: %w", err)
+		return err
 	}
 
 	_, err = sStmt.Step()
 	if err != nil {
-		return fmt.Errorf("ActionWriter.Write: %w", err)
+		return errors.E(ctx, errors.CatInternal, errors.TypeStorageUpdate, fmt.Errorf("ActionWriter.Write: %w", err))
 	}
 	a.capture.Capture(stmt)
 

@@ -1,8 +1,9 @@
 package context
 
 import (
-	"context"
 	"testing"
+
+	"github.com/gostdlib/base/context"
 
 	"github.com/google/uuid"
 )

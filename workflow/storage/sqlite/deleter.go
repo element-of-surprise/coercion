@@ -1,11 +1,14 @@
 package sqlite
 
 import (
-	"context"
 	"fmt"
-	"sync"
+
+	"github.com/gostdlib/base/concurrency/sync"
+
+	"github.com/gostdlib/base/context"
 
 	"github.com/element-of-surprise/coercion/workflow"
+	"github.com/element-of-surprise/coercion/workflow/errors"
 	"github.com/google/uuid"
 	"zombiezen.com/go/sqlite"
 	"zombiezen.com/go/sqlite/sqlitex"
@@ -22,7 +25,7 @@ type deleter struct {
 func (d deleter) Delete(ctx context.Context, id uuid.UUID) error {
 	plan, err := d.reader.Read(ctx, id)
 	if err != nil {
-		return fmt.Errorf("couldn't fetch plan: %w", err)
+		return err
 	}
 
 	d.mu.Lock()
@@ -30,14 +33,14 @@ func (d deleter) Delete(ctx context.Context, id uuid.UUID) error {
 
 	conn, err := d.pool.Take(ctx)
 	if err != nil {
-		return fmt.Errorf("couldn't get a connection from the pool: %w", err)
+		return errors.E(ctx, errors.CatInternal, errors.TypeConn, fmt.Errorf("couldn't get a connection from the pool: %w", err))
 	}
 	defer d.pool.Put(conn)
 
 	defer sqlitex.Transaction(conn)(&err)
 
 	if err = d.deletePlan(ctx, conn, plan); err != nil {
-		return fmt.Errorf("couldn't delete plan: %w", err)
+		return errors.E(ctx, errors.CatInternal, errors.TypeStorageDelete, fmt.Errorf("couldn't delete plan: %w", err))
 	}
 	return nil
 }

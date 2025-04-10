@@ -1,14 +1,15 @@
 package cosmosdb
 
 import (
-	"context"
-	"fmt"
-	"sync"
+	"github.com/gostdlib/base/concurrency/sync"
+
+	"github.com/gostdlib/base/context"
 
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
 	"github.com/Azure/azure-sdk-for-go/sdk/data/azcosmos"
 	"github.com/element-of-surprise/coercion/internal/private"
 	"github.com/element-of-surprise/coercion/workflow"
+	"github.com/element-of-surprise/coercion/workflow/errors"
 	"github.com/element-of-surprise/coercion/workflow/storage"
 )
 
@@ -35,7 +36,7 @@ func (u actionUpdater) UpdateAction(ctx context.Context, action *workflow.Action
 	patch.AppendReplace("/stateEnd", action.State.End)
 	attempts, err := encodeAttempts(action.Attempts)
 	if err != nil {
-		return fmt.Errorf("can't encode action.Attempts: %w", err)
+		return errors.E(ctx, errors.CatInternal, errors.TypeBug, err)
 	}
 	patch.AppendSet("/attempts", attempts)
 
@@ -50,7 +51,7 @@ func (u actionUpdater) UpdateAction(ctx context.Context, action *workflow.Action
 
 	resp, err := patchItemWithRetry(ctx, u.client, k, action.ID.String(), patch, itemOpt)
 	if err != nil {
-		return err
+		return errors.E(ctx, errors.CatUser, errors.TypeStorageUpdate, err)
 	}
 
 	action.State.ETag = string(resp.ETag)

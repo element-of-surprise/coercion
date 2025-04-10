@@ -28,3 +28,7 @@ execute/
 Both the `sm` and `actions` state machines do not use the standard statemachine.Request.Err to return an error. Instead they define a `.err` on the `Data` type they define. This way they can always go to an `End` state and then the `error` is promoted to a `Request.Err` after that final catch all state is run.
 
 This allows us to always do a cleanup that needs to be handled regardless of an error or not.
+
+## Errors in the statemachine
+
+We don't use errors.E() in the statemachine. All the errors are recorded as part of the Plan record, so we only do this in upper levels like New() and such where we have errors that are related to bugs and such.

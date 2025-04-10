@@ -1,8 +1,9 @@
 package context
 
 import (
-	"context"
 	"time"
+
+	"github.com/gostdlib/base/context"
 )
 
 var (

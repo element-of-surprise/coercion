@@ -1,13 +1,15 @@
 package sqlite
 
 import (
-	"context"
 	"fmt"
 	"os"
 	"path/filepath"
-	"sync"
 	"testing"
 	"time"
+
+	"github.com/gostdlib/base/concurrency/sync"
+
+	"github.com/gostdlib/base/context"
 
 	pluglib "github.com/element-of-surprise/coercion/plugins"
 	"github.com/element-of-surprise/coercion/plugins/registry"
@@ -106,7 +108,7 @@ func init() {
 		panic(err)
 	}
 
-	for item := range walk.Plan(context.Background(), plan) {
+	for item := range walk.Plan(plan) {
 		setter := item.Value.(setters)
 		setter.SetID(mustUUID())
 		if item.Value.Type() != workflow.OTPlan {

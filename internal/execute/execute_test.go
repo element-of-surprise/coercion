@@ -1,13 +1,15 @@
 package execute
 
 import (
-	"context"
 	"fmt"
 	"reflect"
 	"runtime"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/gostdlib/base/concurrency/sync"
+	"github.com/gostdlib/base/context"
 
 	"github.com/element-of-surprise/coercion/internal/execute/sm"
 	testplugins "github.com/element-of-surprise/coercion/internal/execute/sm/testing/plugins"
@@ -202,8 +204,8 @@ func TestStart(t *testing.T) {
 			store:     fakeStore,
 			runner:    fr.Run,
 			states:    &sm.States{},
-			stoppers:  map[uuid.UUID]context.CancelFunc{},
-			waiters:   map[uuid.UUID]chan struct{}{},
+			stoppers:  sync.ShardedMap[uuid.UUID, context.CancelFunc]{},
+			waiters:   sync.ShardedMap[uuid.UUID, chan struct{}]{},
 			maxSubmit: 30 * time.Minute,
 		}
 		p.addValidators()
@@ -232,10 +234,8 @@ func TestStart(t *testing.T) {
 		if methodName(fr.req.Next) != methodName(p.states.Start) {
 			t.Errorf("TestStart(%s): Next method in Request is not the expected Start method", test.name)
 		}
-		p.mu.Lock()
-		stopperLen := len(p.stoppers)
-		p.mu.Unlock()
-		if stopperLen > 0 {
+
+		if p.stoppers.Len() > 0 {
 			t.Errorf("TestStart(%s): did not delete the stopper entry", test.name)
 		}
 	}

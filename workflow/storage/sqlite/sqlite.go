@@ -8,15 +8,18 @@ supported.
 package sqlite
 
 import (
-	"context"
 	"fmt"
 	"os"
 	"path/filepath"
-	"sync"
 	"testing"
+
+	"github.com/gostdlib/base/concurrency/sync"
+
+	"github.com/gostdlib/base/context"
 
 	"github.com/element-of-surprise/coercion/internal/private"
 	"github.com/element-of-surprise/coercion/plugins/registry"
+	"github.com/element-of-surprise/coercion/workflow/errors"
 	"github.com/element-of-surprise/coercion/workflow/storage"
 
 	"zombiezen.com/go/sqlite"
@@ -97,10 +100,10 @@ func New(ctx context.Context, root string, reg *registry.Register, options ...Op
 		if err != nil {
 			if os.IsNotExist(err) {
 				if err := os.MkdirAll(root, 0700); err != nil {
-					return nil, fmt.Errorf("storage path(%s) did not exist and could not be created: %w", root, err)
+					return nil, errors.E(ctx, errors.CatInternal, errors.TypeFS, fmt.Errorf("storage path(%s) did not exist and could not be created: %w", root, err))
 				}
 			} else {
-				return nil, fmt.Errorf("storage path(%s) could not be accessed: %w", root, err)
+				return nil, errors.E(ctx, errors.CatInternal, errors.TypeFS, fmt.Errorf("storage path(%s) could not be accessed: %w", root, err))
 			}
 		}
 	}
@@ -115,18 +118,18 @@ func New(ctx context.Context, root string, reg *registry.Register, options ...Op
 	// Such as even Pool creation. Not sure what is wrong. PoolSize 1 is a workaround for the moment.
 	pool, err := sqlitex.NewPool(path, sqlitex.PoolOptions{Flags: flags, PoolSize: 1})
 	if err != nil {
-		return nil, err
+		return nil, errors.E(ctx, errors.CatInternal, errors.TypeStorageCreate, fmt.Errorf("couldn't create sqlite pool: %w", err))
 	}
 
 	conn, err := pool.Take(ctx)
 	if err != nil {
-		return nil, err
+		return nil, errors.E(ctx, errors.CatInternal, errors.TypeConn, fmt.Errorf("couldn't get a connection from the pool: %w", err))
 	}
 	defer pool.Put(conn)
 
 	if err = createTables(ctx, conn); err != nil {
 		conn.Close()
-		return nil, err
+		return nil, errors.E(ctx, errors.CatInternal, errors.TypeStorageCreate, fmt.Errorf("couldn't create tables: %w", err))
 	}
 
 	r.pool = pool

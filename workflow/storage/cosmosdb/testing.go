@@ -1,8 +1,9 @@
 package cosmosdb
 
 import (
-	"context"
 	"time"
+
+	"github.com/gostdlib/base/context"
 
 	"github.com/Azure/azure-sdk-for-go/sdk/data/azcosmos"
 	"github.com/go-json-experiment/json"
@@ -136,7 +137,7 @@ func NewTestPlan() *workflow.Plan {
 	}
 
 	plan.SubmitTime = time.Now().UTC()
-	for item := range walk.Plan(context.Background(), plan) {
+	for item := range walk.Plan(plan) {
 		setter := item.Value.(setters)
 		setter.SetID(mustUUID())
 		if item.Value.Type() != workflow.OTPlan {

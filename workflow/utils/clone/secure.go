@@ -1,9 +1,12 @@
 package clone
 
 import (
+	"context"
 	"fmt"
 	"reflect"
 	"time"
+
+	"github.com/element-of-surprise/coercion/workflow/errors"
 )
 
 // SecureStr is the string that is used to replace sensitive information.
@@ -19,7 +22,7 @@ const SecureStr = "[secret hidden]"
 func Secure(v any) error {
 	val := reflect.ValueOf(v)
 	if val.Kind() != reflect.Ptr {
-		return fmt.Errorf("value must be a pointer to a struct")
+		return errors.E(context.Background(), errors.CatInternal, errors.TypeParameter, errors.New("value must be a pointer to a struct"))
 	}
 
 	if val.IsNil() {
@@ -27,7 +30,7 @@ func Secure(v any) error {
 	}
 
 	if val.Elem().Kind() != reflect.Struct {
-		return fmt.Errorf("value must be a pointer to a struct")
+		return errors.E(context.Background(), errors.CatInternal, errors.TypeParameter, errors.New("value must be a pointer to a struct"))
 	}
 	secureStruct(val)
 	return nil
