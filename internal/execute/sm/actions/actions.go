@@ -44,6 +44,26 @@ func (r Runner) Start(req statemachine.Request[Data]) statemachine.Request[Data]
 	action := req.Data.Action
 	updater := req.Data.Updater
 
+	// This means that it is a recovered action.
+	if action.State.Status != workflow.NotStarted {
+		switch action.State.Status {
+		case workflow.Running:
+			req.Next = r.GetPlugin
+			return req
+		case workflow.Completed, workflow.Failed:
+			// This should already be recorded in the DB with no updates needed. We just exit.
+			req.Next = nil
+			return req
+		default:
+			// This is a bug. We should never be in this state. The most likely would be Stopped.
+			// But this workflow should have never gotten here.
+			req.Err = fmt.Errorf("action is in an unsupported state: %v", action.State.Status)
+			req.Next = nil
+			return req
+		}
+
+	}
+
 	action.State.Start = r.now()
 	action.State.Status = workflow.Running
 
@@ -62,6 +82,7 @@ func pluginNotFoundErr(name string) error {
 	return fmt.Errorf("plugin %s not found", name)
 }
 
+// GetPlugin gets the plugin from the registry and sets it in the Data object.
 func (r Runner) GetPlugin(req statemachine.Request[Data]) statemachine.Request[Data] {
 	action := req.Data.Action
 

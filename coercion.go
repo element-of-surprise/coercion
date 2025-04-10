@@ -69,6 +69,15 @@ func WithMaxSubmit(d time.Duration) Option {
 	}
 }
 
+// WithNoRecovery disables the recovery of plans. This does not prevent future turnups without this flag
+// from recovering plans. This is useful for testing and debugging.
+func WithNoRecovery() Option {
+	return func(w *Workstream) error {
+		w.execOptions = append(w.execOptions, execute.WithNoRecovery())
+		return nil
+	}
+}
+
 // New creates a new Workstream.
 func New(ctx context.Context, reg *registry.Register, store storage.Vault, options ...Option) (*Workstream, error) {
 	if store == nil {

@@ -81,6 +81,10 @@ type testResult struct {
 }
 
 func recoveryTestStage(ctx context.Context, stage int, reg *registry.Register, ch chan testResult) {
+	if stage != 78 {
+		return
+	}
+
 	vault, err := sqlite.New(ctx, "", reg, sqlite.WithInMemory())
 	if err != nil {
 		panic(fmt.Sprintf("TestEtoE: failed to create vault: %v", err))
@@ -119,7 +123,13 @@ func recoveryTestStage(ctx context.Context, stage int, reg *registry.Register, c
 		}
 	}()
 
-	ws, err := workstream.New(ctx, reg, vault)
+	// Used to get the etoeID without replaying the entire workflow.
+	ws, err := workstream.New(ctx, reg, vault, workstream.WithNoRecovery())
+	if err != nil {
+		panic(err)
+	}
+
+	ws, err = workstream.New(ctx, reg, vault)
 	if err != nil {
 		panic(err)
 	}
@@ -135,7 +145,6 @@ func recoveryTestStage(ctx context.Context, stage int, reg *registry.Register, c
 	}
 	defer func() {
 		ch <- tr
-		log.Println("returned result")
 	}()
 
 	if result.State.Status != workflow.Completed {
