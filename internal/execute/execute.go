@@ -55,6 +55,8 @@ type Plans struct {
 	maxLastUpdate time.Duration
 	// maxSubmitTime is the maximum amount of time that can pass between submission and start of a Plan.
 	maxSubmit time.Duration
+	// recovery is true if recovery is allowed.
+	recovery bool
 }
 
 // Option is an option for configuring a Plans via New.
@@ -80,6 +82,14 @@ func WithMaxSubmit(d time.Duration) Option {
 	}
 }
 
+// WithNoRecovery disables recovery of Plans that are in a Running state.
+func WithNoRecovery() Option {
+	return func(p *Plans) error {
+		p.recovery = false
+		return nil
+	}
+}
+
 // New creates a new Executor. This should only be created once.
 func New(ctx context.Context, store storage.Vault, reg *registry.Register, options ...Option) (*Plans, error) {
 	e := &Plans{
@@ -90,6 +100,7 @@ func New(ctx context.Context, store storage.Vault, reg *registry.Register, optio
 		runner:        statemachine.Run[sm.Data],
 		maxLastUpdate: 30 * time.Minute,
 		maxSubmit:     30 * time.Minute,
+		recovery:      true,
 	}
 
 	for _, o := range options {
@@ -110,7 +121,9 @@ func New(ctx context.Context, store storage.Vault, reg *registry.Register, optio
 
 	e.addValidators()
 
-	e.recover(ctx)
+	if e.recovery {
+		e.recover(ctx)
+	}
 
 	return e, nil
 }
@@ -202,12 +215,17 @@ func (e *Plans) runPlan(ctx context.Context, plan *workflow.Plan) {
 				e.waiters.Del(plan.ID)
 			}()
 
+			next := e.states.Start
+			if plan.State.Status == workflow.Running {
+				next = e.states.Recovery
+			}
+
 			req := statemachine.Request[sm.Data]{
 				Ctx: runCtx,
 				Data: sm.Data{
 					Plan: plan,
 				},
-				Next: e.states.Start,
+				Next: next,
 			}
 
 			// NOTE: We are not handling the error here, as we are not returning it to the caller
