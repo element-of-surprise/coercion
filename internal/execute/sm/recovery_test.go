@@ -1,11 +1,14 @@
 package sm
 
 import (
+	"context"
 	"testing"
 	"time"
 
 	"github.com/element-of-surprise/coercion/plugins"
+	"github.com/element-of-surprise/coercion/plugins/registry"
 	"github.com/element-of-surprise/coercion/workflow"
+	"github.com/element-of-surprise/coercion/workflow/storage/sqlite"
 	"github.com/kylelemons/godebug/pretty"
 )
 
@@ -402,7 +405,12 @@ func TestFixBlock(t *testing.T) {
 	}
 
 	for _, test := range tests {
-		fixBlock(test.b)
+		reg := registry.New()
+		vault, err := sqlite.New(context.Background(), "", reg, sqlite.WithInMemory())
+		if err != nil {
+			t.Fatalf("TestFixBlock(%s): failed to create vault: %v", test.name, err)
+		}
+		(&States{store: vault}).fixBlock(test.b)
 		if test.want.State.Status != test.b.State.Status {
 			t.Errorf("TestFixBlock(%s): got state %v, want %v", test.name, test.b.State.Status, test.want.State.Status)
 		}
@@ -506,7 +514,12 @@ func TestFixPlan(t *testing.T) {
 	}
 
 	for _, test := range tests {
-		fixPlan(test.plan)
+		reg := registry.New()
+		vault, err := sqlite.New(context.Background(), "", reg, sqlite.WithInMemory())
+		if err != nil {
+			t.Fatalf("TestFixPlan(%s): failed to create vault: %v", test.name, err)
+		}
+		(&States{store: vault}).fixPlan(test.plan)
 		if test.plan.State.Status != test.want.State.Status {
 			t.Errorf("TestFixPlan(%s): got status %v, want %v", test.name, test.plan.State.Status, test.want.State.Status)
 		}

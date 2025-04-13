@@ -1,6 +1,7 @@
 package sm
 
 import (
+	"sync/atomic"
 	"time"
 
 	"github.com/element-of-surprise/coercion/workflow"
@@ -13,7 +14,7 @@ import (
 func (s *States) Recovery(req statemachine.Request[Data]) statemachine.Request[Data] {
 	plan := req.Data.Plan
 
-	fixPlan(plan)
+	s.fixPlan(plan)
 	switch plan.State.Status {
 	case workflow.NotStarted:
 		req.Next = s.Start
@@ -152,7 +153,7 @@ func fixSeq(s *workflow.Sequence) {
 	}
 }
 
-func fixBlock(b *workflow.Block) {
+func (s *States) fixBlock(b *workflow.Block) {
 	if b.State.Status != workflow.Running {
 		return
 	}
@@ -185,23 +186,36 @@ func fixBlock(b *workflow.Block) {
 		fixChecks(b.PostChecks)
 	}
 
-	running := 0
+	g := context.Pool(context.Background()).Group()
 	completed := 0
-	failed := 0
+	var failed atomic.Int32
 	stopped := 0
-	for _, s := range b.Sequences {
-		fixSeq(s)
-		switch s.State.Status {
+	seqs := make([]*workflow.Sequence, 0)
+	for _, seq := range b.Sequences {
+		fixSeq(seq)
+		switch seq.State.Status {
 		case workflow.Completed:
 			completed++
 		case workflow.Failed:
-			failed++
+			failed.Add(1)
 		case workflow.Stopped:
 			stopped++
 		case workflow.Running:
-			running++
+			seqs = append(seqs, seq)
+			g.Go(
+				context.Background(),
+				func(ctx context.Context) error {
+					err := s.execSeq(ctx, seq)
+					if err != nil {
+						failed.Add(1)
+					}
+					return err
+				},
+			)
 		}
 	}
+	g.Wait(context.Background())
+
 	if stopped > 0 {
 		for _, s := range b.Sequences {
 			if s.State.Status == workflow.Running {
@@ -213,25 +227,14 @@ func fixBlock(b *workflow.Block) {
 	}
 
 	switch {
-	case completed == 0 && running == 0 && failed == 0:
+	case completed == 0 && failed.Load() == 0:
 		b.State.Status = workflow.NotStarted
 		b.State.Start = time.Time{}
 		b.State.End = time.Time{}
-	case completed == len(b.Sequences) && b.PostChecks == nil || b.PostChecks.State.Status == workflow.Completed:
-		b.State.Status = workflow.Completed
-		b.State.End = time.Now()
-	case running == 0 && completed+failed == len(b.Sequences):
-		if failed <= b.ToleratedFailures {
-			b.State.Status = workflow.Completed
-			b.State.End = time.Now()
-			return
-		}
-		b.State.Status = workflow.Failed
-		b.State.End = time.Now()
 	}
 }
 
-func fixPlan(p *workflow.Plan) {
+func (s *States) fixPlan(p *workflow.Plan) {
 	if p.State.Status != workflow.Running {
 		return
 	}
@@ -267,7 +270,7 @@ func fixPlan(p *workflow.Plan) {
 	completed := 0
 	failed := 0
 	for _, b := range p.Blocks {
-		fixBlock(b)
+		s.fixBlock(b)
 		if b.State.Status == workflow.Stopped {
 			p.State.Status = workflow.Stopped
 			return

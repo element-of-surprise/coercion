@@ -15,6 +15,8 @@ import (
 	"github.com/google/uuid"
 )
 
+// SEE recoveryTestStage for a way to do a single stage.
+
 func TestRecovery(t *testing.T) {
 	log.Println("TestRecovery")
 
@@ -62,6 +64,7 @@ func TestRecovery(t *testing.T) {
 					log.Printf("TestRecovery(stage %d): success", r.Stage)
 				} else {
 					t.Errorf("TestRecovery(stage %d): %v", r.Stage, r.Err)
+					//t.Errorf("plan final:\n%s", pConfig.Sprint(r.Result))
 				}
 			}
 			return nil
@@ -81,9 +84,12 @@ type testResult struct {
 }
 
 func recoveryTestStage(ctx context.Context, stage int, reg *registry.Register, ch chan testResult) {
-	if stage != 78 {
-		return
-	}
+	// Uncomment and put in the stage number you wish to debug.
+	/*
+		if stage != 70 {
+			return
+		}
+	*/
 
 	vault, err := sqlite.New(ctx, "", reg, sqlite.WithInMemory())
 	if err != nil {
@@ -215,7 +221,7 @@ func recoveryTestStage(ctx context.Context, stage int, reg *registry.Register, c
 
 		for _, seq := range block.Sequences {
 			if seq.State.Status != workflow.Completed {
-				tr.Err = fmt.Errorf("sequence did not complete successfully(%s)", seq.State.Status)
+				tr.Err = fmt.Errorf("sequence did not complete successfully(%s)(%s)", seq.ID, seq.State.Status)
 				return
 			}
 			if err := testPlugResp(seq.Actions[1], "actionID"); err != nil {
