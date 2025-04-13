@@ -14,6 +14,8 @@ import (
 	"github.com/element-of-surprise/coercion/plugins/registry"
 	"github.com/element-of-surprise/coercion/workflow"
 	"github.com/element-of-surprise/coercion/workflow/builder"
+	"github.com/element-of-surprise/coercion/workflow/storage/noop"
+	"github.com/element-of-surprise/coercion/workflow/storage/sqlite"
 	"github.com/element-of-surprise/coercion/workflow/utils/clone"
 	"github.com/gostdlib/base/statemachine"
 )
@@ -728,8 +730,15 @@ func TestBlockPostChecks(t *testing.T) {
 	}
 
 	for _, test := range tests {
+		ctx := context.Background()
+		reg := registry.New()
+		store, err := sqlite.New(ctx, "", reg, sqlite.WithInMemory())
+		if err != nil {
+			panic(err)
+		}
 		states := &States{
 			testChecksRunner: fakeRunChecksOnce,
+			store:            store,
 		}
 		test.block.block.State = &workflow.State{Status: workflow.Running}
 
@@ -910,8 +919,12 @@ func TestPlanPostChecks(t *testing.T) {
 	}
 
 	for _, test := range tests {
+		ctx := context.Background()
+		store := &noop.Vault{}
+
 		states := &States{
 			testChecksRunner: fakeRunChecksOnce,
+			store:            store,
 		}
 		// We cancel a context for continuous checks that are running. This
 		// is used to simulate that we signal the continuous checks to stop.
