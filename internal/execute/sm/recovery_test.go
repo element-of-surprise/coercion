@@ -328,7 +328,7 @@ func TestFixBlock(t *testing.T) {
 			},
 		},
 		{
-			name: "running block, all sequences completed, no postchecks, completes block",
+			name: "running block, all sequences completed, no postchecks, leaves running",
 			b: &workflow.Block{
 				State: &workflow.State{Status: workflow.Running},
 				Sequences: []*workflow.Sequence{
@@ -337,7 +337,7 @@ func TestFixBlock(t *testing.T) {
 				},
 			},
 			want: &workflow.Block{
-				State: &workflow.State{Status: workflow.Completed},
+				State: &workflow.State{Status: workflow.Running},
 				Sequences: []*workflow.Sequence{
 					{State: &workflow.State{Status: workflow.Completed}},
 					{State: &workflow.State{Status: workflow.Completed}},
@@ -345,7 +345,7 @@ func TestFixBlock(t *testing.T) {
 			},
 		},
 		{
-			name: "running block, all sequences completed, postcheck completed, completes block",
+			name: "running block, all sequences completed, postcheck completed, leaves running",
 			b: &workflow.Block{
 				State:      &workflow.State{Status: workflow.Running},
 				PostChecks: &workflow.Checks{State: &workflow.State{Status: workflow.Completed}},
@@ -355,7 +355,7 @@ func TestFixBlock(t *testing.T) {
 				},
 			},
 			want: &workflow.Block{
-				State:      &workflow.State{Status: workflow.Completed},
+				State:      &workflow.State{Status: workflow.Running},
 				PostChecks: &workflow.Checks{State: &workflow.State{Status: workflow.Completed}},
 				Sequences: []*workflow.Sequence{
 					{State: &workflow.State{Status: workflow.Completed}},
