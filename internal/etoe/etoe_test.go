@@ -6,6 +6,7 @@ import (
 	"log"
 	"log/slog"
 	"os"
+	"strconv"
 	"testing"
 	"time"
 
@@ -52,6 +53,18 @@ var (
 	capture = &sqlite.CaptureStmts{}
 	etoeID  uuid.UUID
 )
+
+type cloner struct {
+	seqs int
+}
+
+func (c *cloner) seq(ctx context.Context, seq *workflow.Sequence, opts ...clone.Option) *workflow.Sequence {
+	s := clone.Sequence(ctx, seq, opts...)
+	s.Name = "seq" + strconv.Itoa(c.seqs)
+	s.Descr = "seq" + strconv.Itoa(c.seqs)
+	c.seqs++
+	return s
+}
 
 func TestEtoE(t *testing.T) {
 	flag.Parse()
@@ -122,6 +135,8 @@ func TestEtoE(t *testing.T) {
 		},
 	}
 
+	cloner := &cloner{}
+
 	build, err := builder.New("end to end test", "tests that things work etoe in a basic way")
 	if err != nil {
 		panic(err)
@@ -148,10 +163,10 @@ func TestEtoE(t *testing.T) {
 	build.AddChecks(builder.PostChecks, clone.Checks(ctx, checks, cloneOpts...)).Up()
 	build.AddChecks(builder.ContChecks, clone.Checks(ctx, checks, cloneOpts...)).Up()
 	build.AddChecks(builder.DeferredChecks, clone.Checks(ctx, checks, cloneOpts...)).Up()
-	build.AddSequence(clone.Sequence(ctx, seqs, cloneOpts...)).Up()
-	build.AddSequence(clone.Sequence(ctx, seqs, cloneOpts...)).Up()
-	build.AddSequence(clone.Sequence(ctx, seqs, cloneOpts...)).Up()
-	build.AddSequence(clone.Sequence(ctx, seqs, cloneOpts...)).Up()
+	build.AddSequence(cloner.seq(ctx, seqs, cloneOpts...)).Up()
+	build.AddSequence(cloner.seq(ctx, seqs, cloneOpts...)).Up()
+	build.AddSequence(cloner.seq(ctx, seqs, cloneOpts...)).Up()
+	build.AddSequence(cloner.seq(ctx, seqs, cloneOpts...)).Up()
 
 	plan, err := build.Plan()
 	if err != nil {

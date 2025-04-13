@@ -179,6 +179,8 @@ func (e *Plans) recover(ctx context.Context) error {
 		maxAge: e.maxLastUpdate,
 		store:  e.store,
 	}
+
+	// Get a list of all Plans that need to be recovered.
 	req := statemachine.Request[recoverData]{Ctx: ctx, Next: recovery.start}
 	var err error
 	req, err = statemachine.Run[recoverData]("recover", req)
@@ -189,6 +191,7 @@ func (e *Plans) recover(ctx context.Context) error {
 	if len(req.Data.plans) == 0 {
 		context.Log(ctx).Info("no plans to recover")
 	}
+
 	for _, plan := range req.Data.plans {
 		context.Log(ctx).Info("recovered plan", "id", plan.ID, "status", plan.State.Status)
 		e.runPlan(ctx, plan)
