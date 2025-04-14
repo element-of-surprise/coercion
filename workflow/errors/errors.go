@@ -62,7 +62,7 @@ const (
 	TypeStorageUpdate Type = Type(1004) // StorageUpdate
 	// TypeStoragePut represents an error with putting something in storage.
 	TypeStoragePut Type = Type(1005) // StoragePut
-	// TypeStorageclose represents an error with closing storage.
+	// TypeStorageClose represents an error with closing storage.
 	TypeStorageClose Type = Type(1006) // StorageClose
 
 )
@@ -74,6 +74,7 @@ type LogAttrer = errors.LogAttrer
 // Error is the error type for this service. Error implements github.com/gostdlib/base/errors.E .
 type Error = errors.Error
 
+// EOption is an optional argument for E().
 type EOption = errors.EOption
 
 // WithSuppressTraceErr will prevent the trace as being recorded with an error status.
