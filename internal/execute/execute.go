@@ -93,9 +93,10 @@ func WithNoRecovery() Option {
 // New creates a new Executor. This should only be created once.
 func New(ctx context.Context, store storage.Vault, reg *registry.Register, options ...Option) (*Plans, error) {
 	e := &Plans{
-		registry:      reg,
-		store:         store,
-		waiters:       sync.ShardedMap[uuid.UUID, chan struct{}]{},
+		registry: reg,
+		store:    store,
+		waiters:  sync.ShardedMap[uuid.UUID, chan struct{}]{},
+		// Note: stoppers isn't currently utilized, this is for when we need to expose a Stop function.
 		stoppers:      sync.ShardedMap[uuid.UUID, context.CancelFunc]{},
 		runner:        statemachine.Run[sm.Data],
 		maxLastUpdate: 30 * time.Minute,
