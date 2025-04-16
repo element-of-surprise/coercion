@@ -1,13 +1,15 @@
 package cosmosdb
 
 import (
-	"context"
-	"sync"
+	"github.com/gostdlib/base/concurrency/sync"
+
+	"github.com/gostdlib/base/context"
 
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
 	"github.com/Azure/azure-sdk-for-go/sdk/data/azcosmos"
 	"github.com/element-of-surprise/coercion/internal/private"
 	"github.com/element-of-surprise/coercion/workflow"
+	"github.com/element-of-surprise/coercion/workflow/errors"
 	"github.com/element-of-surprise/coercion/workflow/storage"
 )
 
@@ -48,7 +50,7 @@ func (u planUpdater) UpdatePlan(ctx context.Context, p *workflow.Plan) error {
 
 	resp, err := patchPlan(ctx, u.client, p, patch, itemOpt)
 	if err != nil {
-		return err
+		return errors.E(ctx, errors.CatUser, errors.TypeStorageUpdate, err)
 	}
 
 	p.State.ETag = string(resp.ETag)

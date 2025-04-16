@@ -1,7 +1,6 @@
 package cosmosdb
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"log"
@@ -9,9 +8,11 @@ import (
 	"net/http"
 	"reflect"
 	"strings"
-	"sync"
 	"time"
 	"unsafe"
+
+	"github.com/gostdlib/base/concurrency/sync"
+	"github.com/gostdlib/base/context"
 
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore/runtime"
@@ -658,7 +659,7 @@ func (f *fakeStorage) patchPlan(ctx context.Context, itemID string, op pathOps, 
 
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	items := walk.Plan(ctx, plan)
+	items := walk.Plan(plan)
 	var item walk.Item
 	for item = range items {
 		id := item.Value.(getIDer).GetID()

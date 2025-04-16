@@ -1,9 +1,10 @@
 package workflow
 
 import (
-	"context"
 	"errors"
 	"testing"
+
+	"github.com/gostdlib/base/context"
 
 	"github.com/element-of-surprise/coercion/plugins"
 	"github.com/element-of-surprise/coercion/plugins/registry"
@@ -107,8 +108,6 @@ func TestPlanValidate(t *testing.T) {
 
 	for _, test := range tests {
 		ctx := context.Background()
-		m := map[string]bool{}
-		ctx = context.WithValue(ctx, keysMap{}, m)
 
 		p := test.plan()
 		gotValidators, err := p.validate(ctx)
@@ -194,11 +193,9 @@ func TestPreCheckValidate(t *testing.T) {
 
 	for _, test := range tests {
 		ctx := context.Background()
-		m := map[string]bool{}
-		for _, k := range test.mapKeys {
-			m[k] = true
-		}
-		ctx = context.WithValue(ctx, keysMap{}, m)
+		set := getKeySet(ctx)
+		set.Add(test.mapKeys...)
+		ctx = context.WithValue(ctx, keysSet{}, set)
 		p := test.preCheck()
 		gotValidators, err := p.validate(ctx)
 		switch {
@@ -284,11 +281,9 @@ func TestPostCheckValidate(t *testing.T) {
 
 	for _, test := range tests {
 		ctx := context.Background()
-		m := map[string]bool{}
-		for _, k := range test.mapKeys {
-			m[k] = true
-		}
-		ctx = context.WithValue(ctx, keysMap{}, m)
+		set := getKeySet(ctx)
+		set.Add(test.mapKeys...)
+		ctx = context.WithValue(ctx, keysSet{}, set)
 		p := test.postCheck()
 		gotValidators, err := p.validate(ctx)
 		switch {
@@ -373,11 +368,9 @@ func TestDeferredCheckValidate(t *testing.T) {
 
 	for _, test := range tests {
 		ctx := context.Background()
-		m := map[string]bool{}
-		for _, k := range test.mapKeys {
-			m[k] = true
-		}
-		ctx = context.WithValue(ctx, keysMap{}, m)
+		set := getKeySet(ctx)
+		set.Add(test.mapKeys...)
+		ctx = context.WithValue(ctx, keysSet{}, set)
 		p := test.deferCheck()
 		gotValidators, err := p.validate(ctx)
 		switch {
@@ -462,11 +455,9 @@ func TestContCheckValidate(t *testing.T) {
 
 	for _, test := range tests {
 		ctx := context.Background()
-		m := map[string]bool{}
-		for _, k := range test.mapKeys {
-			m[k] = true
-		}
-		ctx = context.WithValue(ctx, keysMap{}, m)
+		set := getKeySet(ctx)
+		set.Add(test.mapKeys...)
+		ctx = context.WithValue(ctx, keysSet{}, set)
 		p := test.contCheck()
 		gotValidators, err := p.validate(ctx)
 		switch {
@@ -595,11 +586,9 @@ func TestBlockValidate(t *testing.T) {
 
 	for _, test := range tests {
 		ctx := context.Background()
-		m := map[string]bool{}
-		for _, k := range test.mapKeys {
-			m[k] = true
-		}
-		ctx = context.WithValue(ctx, keysMap{}, m)
+		set := getKeySet(ctx)
+		set.Add(test.mapKeys...)
+		ctx = context.WithValue(ctx, keysSet{}, set)
 		b := test.block()
 		gotValidators, err := b.validate(ctx)
 		switch {
@@ -705,11 +694,9 @@ func TestSequenceValidate(t *testing.T) {
 
 	for _, test := range tests {
 		ctx := context.Background()
-		m := map[string]bool{}
-		for _, k := range test.mapKeys {
-			m[k] = true
-		}
-		ctx = context.WithValue(ctx, keysMap{}, m)
+		set := getKeySet(ctx)
+		set.Add(test.mapKeys...)
+		ctx = context.WithValue(ctx, keysSet{}, set)
 		s := test.sequence()
 		gotValidators, err := s.validate(ctx)
 		switch {
@@ -858,11 +845,9 @@ func TestActionValidate(t *testing.T) {
 
 	for _, test := range tests {
 		ctx := context.Background()
-		m := map[string]bool{}
-		for _, k := range test.mapKeys {
-			m[k] = true
-		}
-		ctx = context.WithValue(ctx, keysMap{}, m)
+		set := getKeySet(ctx)
+		set.Add(test.mapKeys...)
+		ctx = context.WithValue(ctx, keysSet{}, set)
 		a := test.action()
 		gotValidator, err := a.validate(ctx)
 		switch {

@@ -1,13 +1,15 @@
 package sqlite
 
 import (
-	"context"
 	"fmt"
-	"sync"
 
 	"github.com/element-of-surprise/coercion/internal/private"
 	"github.com/element-of-surprise/coercion/workflow"
+	"github.com/element-of-surprise/coercion/workflow/errors"
+
 	"github.com/google/uuid"
+	"github.com/gostdlib/base/concurrency/sync"
+	"github.com/gostdlib/base/context"
 	"zombiezen.com/go/sqlite/sqlitex"
 )
 
@@ -28,7 +30,7 @@ func (u creator) Create(ctx context.Context, plan *workflow.Plan) error {
 	defer u.mu.Unlock()
 
 	if plan.ID == uuid.Nil {
-		return fmt.Errorf("plan ID cannot be nil")
+		return errors.E(ctx, errors.CatUser, errors.TypeParameter, fmt.Errorf("plan ID cannot be nil"))
 	}
 
 	exist, err := u.reader.Exists(ctx, plan.ID)
@@ -42,7 +44,7 @@ func (u creator) Create(ctx context.Context, plan *workflow.Plan) error {
 
 	conn, err := u.pool.Take(ctx)
 	if err != nil {
-		return fmt.Errorf("couldn't get a connection from the pool: %w", err)
+		return errors.E(ctx, errors.CatInternal, errors.TypeConn, fmt.Errorf("couldn't get a connection from the pool: %w", err))
 	}
 	defer u.pool.Put(conn)
 

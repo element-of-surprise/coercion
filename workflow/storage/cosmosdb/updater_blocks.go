@@ -1,13 +1,15 @@
 package cosmosdb
 
 import (
-	"context"
-	"sync"
+	"github.com/gostdlib/base/concurrency/sync"
+
+	"github.com/gostdlib/base/context"
 
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
 	"github.com/Azure/azure-sdk-for-go/sdk/data/azcosmos"
 	"github.com/element-of-surprise/coercion/internal/private"
 	"github.com/element-of-surprise/coercion/workflow"
+	"github.com/element-of-surprise/coercion/workflow/errors"
 	"github.com/element-of-surprise/coercion/workflow/storage"
 )
 
@@ -44,7 +46,7 @@ func (u blockUpdater) UpdateBlock(ctx context.Context, block *workflow.Block) er
 
 	resp, err := patchItemWithRetry(ctx, u.client, k, block.ID.String(), patch, itemOpt)
 	if err != nil {
-		return err
+		return errors.E(ctx, errors.CatUser, errors.TypeStorageUpdate, err)
 	}
 
 	block.State.ETag = string(resp.ETag)

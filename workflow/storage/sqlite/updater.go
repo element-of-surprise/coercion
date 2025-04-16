@@ -1,11 +1,14 @@
 package sqlite
 
 import (
+	"context"
 	"fmt"
 	"strings"
-	"sync"
+
+	"github.com/gostdlib/base/concurrency/sync"
 
 	"github.com/element-of-surprise/coercion/internal/private"
+	"github.com/element-of-surprise/coercion/workflow/errors"
 	"github.com/element-of-surprise/coercion/workflow/storage"
 	"zombiezen.com/go/sqlite"
 	"zombiezen.com/go/sqlite/sqlitex"
@@ -61,7 +64,7 @@ type Stmt struct {
 func (s *Stmt) Prepare(c *sqlite.Conn) (*sqlite.Stmt, error) {
 	stmt, err := c.Prepare(s.q)
 	if err != nil {
-		return nil, err
+		return nil, errors.E(context.Background(), errors.CatInternal, errors.TypeStorageCreate, fmt.Errorf("problem preparing statement: %w", err))
 	}
 	for _, kv := range s.text {
 		stmt.SetText(kv.k, kv.v)

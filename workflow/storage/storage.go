@@ -3,9 +3,10 @@
 package storage
 
 import (
-	"context"
 	"fmt"
 	"time"
+
+	"github.com/gostdlib/base/context"
 
 	"github.com/element-of-surprise/coercion/internal/private"
 	"github.com/element-of-surprise/coercion/workflow"
@@ -98,9 +99,11 @@ type Reader interface {
 	// Read returns a Plan from the storage.
 	Read(ctx context.Context, id uuid.UUID) (*workflow.Plan, error)
 	// Search returns a list of Plan IDs that match the filter.
+	// TODO(jdoak): Consider changing this to return an iterator.
 	Search(ctx context.Context, filters Filters) (chan Stream[ListResult], error)
 	// ListPlans returns a list of all Plan IDs in the storage. This should
 	// return with most recent submiited first.
+	// TODO(jdoak): Consider changing this to return an iterator.
 	List(ctx context.Context, limit int) (chan Stream[ListResult], error)
 
 	private.Storage
