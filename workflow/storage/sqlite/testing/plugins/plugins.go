@@ -1,8 +1,9 @@
 package plugins
 
 import (
-	"context"
 	"fmt"
+
+	"github.com/gostdlib/base/context"
 
 	"github.com/element-of-surprise/coercion/plugins"
 	"github.com/gostdlib/base/retry/exponential"

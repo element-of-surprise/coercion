@@ -3,7 +3,6 @@
 package execute
 
 import (
-	"errors"
 	"fmt"
 	"time"
 
@@ -11,13 +10,13 @@ import (
 	"github.com/element-of-surprise/coercion/plugins/registry"
 	"github.com/element-of-surprise/coercion/workflow"
 	"github.com/element-of-surprise/coercion/workflow/context"
+	"github.com/element-of-surprise/coercion/workflow/errors"
 	"github.com/element-of-surprise/coercion/workflow/storage"
 	"github.com/element-of-surprise/coercion/workflow/utils/walk"
 	"github.com/google/uuid"
 
 	"github.com/gostdlib/base/concurrency/sync"
 	"github.com/gostdlib/base/statemachine"
-	"github.com/gostdlib/base/telemetry/log"
 )
 
 var (
@@ -41,9 +40,8 @@ type Plans struct {
 	// states is the statemachine that runs the Plans.
 	states *sm.States
 
-	mu       sync.Mutex // protects stoppers
-	waiters  map[uuid.UUID]chan struct{}
-	stoppers map[uuid.UUID]context.CancelFunc
+	waiters  sync.ShardedMap[uuid.UUID, chan struct{}]
+	stoppers sync.ShardedMap[uuid.UUID, context.CancelFunc]
 
 	// runner is the function that runs the statemachine.
 	// In production this is the statemachine.Run function.
@@ -57,6 +55,8 @@ type Plans struct {
 	maxLastUpdate time.Duration
 	// maxSubmitTime is the maximum amount of time that can pass between submission and start of a Plan.
 	maxSubmit time.Duration
+	// recovery is true if recovery is allowed.
+	recovery bool
 }
 
 // Option is an option for configuring a Plans via New.
@@ -82,26 +82,36 @@ func WithMaxSubmit(d time.Duration) Option {
 	}
 }
 
+// WithNoRecovery disables recovery of Plans that are in a Running state.
+func WithNoRecovery() Option {
+	return func(p *Plans) error {
+		p.recovery = false
+		return nil
+	}
+}
+
 // New creates a new Executor. This should only be created once.
 func New(ctx context.Context, store storage.Vault, reg *registry.Register, options ...Option) (*Plans, error) {
 	e := &Plans{
-		registry:      reg,
-		store:         store,
-		waiters:       map[uuid.UUID]chan struct{}{},
-		stoppers:      map[uuid.UUID]context.CancelFunc{},
+		registry: reg,
+		store:    store,
+		waiters:  sync.ShardedMap[uuid.UUID, chan struct{}]{},
+		// Note: stoppers isn't currently utilized, this is for when we need to expose a Stop function.
+		stoppers:      sync.ShardedMap[uuid.UUID, context.CancelFunc]{},
 		runner:        statemachine.Run[sm.Data],
 		maxLastUpdate: 30 * time.Minute,
 		maxSubmit:     30 * time.Minute,
+		recovery:      true,
 	}
 
 	for _, o := range options {
 		if err := o(e); err != nil {
-			return nil, err
+			return nil, errors.E(ctx, errors.CatUser, errors.TypeParameter, err)
 		}
 	}
 
 	if err := e.initPlugins(ctx); err != nil {
-		return nil, fmt.Errorf("failed to initialize plugins: %w", err)
+		return nil, errors.E(ctx, errors.CatInternal, errors.TypeBug, err)
 	}
 
 	var err error
@@ -112,7 +122,9 @@ func New(ctx context.Context, store storage.Vault, reg *registry.Register, optio
 
 	e.addValidators()
 
-	e.recover(ctx)
+	if e.recovery {
+		e.recover(ctx)
+	}
 
 	return e, nil
 }
@@ -153,7 +165,7 @@ func (e *Plans) Start(ctx context.Context, id uuid.UUID) error {
 	}
 
 	if err := e.validateStartState(ctx, plan); err != nil {
-		return fmt.Errorf("invalid plan state: %w", err)
+		return errors.E(ctx, errors.CatInternal, errors.TypeBug, err)
 	}
 
 	e.runPlan(ctx, plan)
@@ -168,18 +180,21 @@ func (e *Plans) recover(ctx context.Context) error {
 		maxAge: e.maxLastUpdate,
 		store:  e.store,
 	}
+
+	// Get a list of all Plans that need to be recovered.
 	req := statemachine.Request[recoverData]{Ctx: ctx, Next: recovery.start}
 	var err error
 	req, err = statemachine.Run[recoverData]("recover", req)
 	if err != nil {
-		return fmt.Errorf("failed to recover: %w", err)
+		return err
 	}
 
 	if len(req.Data.plans) == 0 {
-		log.Println("no plans to recover")
+		context.Log(ctx).Info("no plans to recover")
 	}
+
 	for _, plan := range req.Data.plans {
-		log.Default().Info("recovered plan", "id", plan.ID, "status", plan.State.Status)
+		context.Log(ctx).Info("recovered plan", "id", plan.ID, "status", plan.State.Status)
 		e.runPlan(ctx, plan)
 	}
 
@@ -190,33 +205,38 @@ func (e *Plans) recover(ctx context.Context) error {
 func (e *Plans) runPlan(ctx context.Context, plan *workflow.Plan) {
 	runCtx, cancel := context.WithCancel(context.WithoutCancel(ctx))
 
-	e.mu.Lock()
-	e.stoppers[plan.ID] = cancel
-	e.waiters[plan.ID] = make(chan struct{})
-	e.mu.Unlock()
+	e.stoppers.Set(plan.ID, cancel)
+	e.waiters.Set(plan.ID, make(chan struct{}))
 
-	go func() {
-		defer func() {
-			cancel()
-			e.mu.Lock()
-			delete(e.stoppers, plan.ID)
-			close(e.waiters[plan.ID])
-			delete(e.waiters, plan.ID)
-			e.mu.Unlock()
-		}()
+	context.Pool(ctx).Submit(
+		ctx,
+		func() {
+			defer func() {
+				cancel()
+				e.stoppers.Del(plan.ID)
+				waiter, _ := e.waiters.Get(plan.ID)
+				close(waiter)
+				e.waiters.Del(plan.ID)
+			}()
 
-		req := statemachine.Request[sm.Data]{
-			Ctx: runCtx,
-			Data: sm.Data{
-				Plan: plan,
-			},
-			Next: e.states.Start,
-		}
+			next := e.states.Start
+			if plan.State.Status == workflow.Running {
+				next = e.states.Recovery
+			}
 
-		// NOTE: We are not handling the error here, as we are not returning it to the caller
-		// and doesn't actually matter. All errors are encapsulated in the Plan's state.
-		e.runner(plan.Name, req)
-	}()
+			req := statemachine.Request[sm.Data]{
+				Ctx: runCtx,
+				Data: sm.Data{
+					Plan: plan,
+				},
+				Next: next,
+			}
+
+			// NOTE: We are not handling the error here, as we are not returning it to the caller
+			// and doesn't actually matter. All errors are encapsulated in the Plan's state.
+			e.runner(plan.Name, req)
+		},
+	)
 }
 
 func (e *Plans) now() time.Time {
@@ -226,10 +246,7 @@ func (e *Plans) now() time.Time {
 // Wait waits for a Plan to finish execution. Cancelling the Context will stop waiting and
 // return context.Canceled. If the Plan is not found, this will return ErrNotFound.
 func (e *Plans) Wait(ctx context.Context, id uuid.UUID) error {
-	e.mu.Lock()
-	waiter, ok := e.waiters[id]
-	e.mu.Unlock()
-
+	waiter, ok := e.waiters.Get(id)
 	if !ok {
 		return ErrNotFound
 	}
@@ -269,7 +286,7 @@ func (p *Plans) validateStartState(ctx context.Context, plan *workflow.Plan) err
 		return fmt.Errorf("plan is stale, submit time is too old")
 	}
 
-	for item := range walk.Plan(context.WithoutCancel(ctx), plan) {
+	for item := range walk.Plan(plan) {
 		for _, v := range p.validators {
 			if err := v(item); err != nil {
 				return err

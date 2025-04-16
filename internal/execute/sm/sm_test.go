@@ -1,7 +1,6 @@
 package sm
 
 import (
-	"context"
 	"fmt"
 	"reflect"
 	"runtime"
@@ -9,10 +8,14 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gostdlib/base/context"
+
 	"github.com/element-of-surprise/coercion/internal/execute/sm/testing/plugins"
 	"github.com/element-of-surprise/coercion/plugins/registry"
 	"github.com/element-of-surprise/coercion/workflow"
 	"github.com/element-of-surprise/coercion/workflow/builder"
+	"github.com/element-of-surprise/coercion/workflow/storage/noop"
+	"github.com/element-of-surprise/coercion/workflow/storage/sqlite"
 	"github.com/element-of-surprise/coercion/workflow/utils/clone"
 	"github.com/gostdlib/base/statemachine"
 )
@@ -111,7 +114,7 @@ func TestPlanBypassChecks(t *testing.T) {
 			},
 		}
 
-		states := &States{store: &fakeUpdater{}, checksRunner: test.checksRunner}
+		states := &States{store: &fakeUpdater{}, testChecksRunner: test.checksRunner}
 		req = states.PlanBypassChecks(req)
 		if methodName(req.Next) != methodName(test.wantNextState) {
 			t.Errorf("TestBlockBypassChecks(%s): got next state = %v, want %v", test.name, methodName(req.Next), methodName(test.wantNextState))
@@ -167,7 +170,7 @@ func TestPlanPreChecks(t *testing.T) {
 			},
 		}
 
-		states := &States{store: &fakeUpdater{}, checksRunner: test.checksRunner}
+		states := &States{store: &fakeUpdater{}, testChecksRunner: test.checksRunner}
 		req = states.PlanPreChecks(req)
 		if methodName(test.wantNextState) == methodName(states.End) {
 			if req.Data.err == nil {
@@ -340,7 +343,7 @@ func TestBlockBypassChecks(t *testing.T) {
 		}
 		test.block.State = &workflow.State{}
 
-		states := &States{store: &fakeUpdater{}, checksRunner: test.checksRunner}
+		states := &States{store: &fakeUpdater{}, testChecksRunner: test.checksRunner}
 		req = states.BlockBypassChecks(req)
 		if methodName(req.Next) != methodName(test.wantNextState) {
 			t.Errorf("TestBlockBypassChecks(%s): got next state = %v, want %v", test.name, methodName(req.Next), methodName(test.wantNextState))
@@ -400,7 +403,7 @@ func TestBlockPreChecks(t *testing.T) {
 		}
 		test.block.State = &workflow.State{}
 
-		states := &States{store: &fakeUpdater{}, checksRunner: test.checksRunner}
+		states := &States{store: &fakeUpdater{}, testChecksRunner: test.checksRunner}
 		req = states.BlockPreChecks(req)
 		if test.wantBlockStatus != workflow.NotStarted {
 			if req.Data.err == nil {
@@ -727,8 +730,15 @@ func TestBlockPostChecks(t *testing.T) {
 	}
 
 	for _, test := range tests {
+		ctx := context.Background()
+		reg := registry.New()
+		store, err := sqlite.New(ctx, "", reg, sqlite.WithInMemory())
+		if err != nil {
+			panic(err)
+		}
 		states := &States{
-			checksRunner: fakeRunChecksOnce,
+			testChecksRunner: fakeRunChecksOnce,
+			store:            store,
 		}
 		test.block.block.State = &workflow.State{Status: workflow.Running}
 
@@ -909,8 +919,12 @@ func TestPlanPostChecks(t *testing.T) {
 	}
 
 	for _, test := range tests {
+		ctx := context.Background()
+		store := &noop.Vault{}
+
 		states := &States{
-			checksRunner: fakeRunChecksOnce,
+			testChecksRunner: fakeRunChecksOnce,
+			store:            store,
 		}
 		// We cancel a context for continuous checks that are running. This
 		// is used to simulate that we signal the continuous checks to stop.

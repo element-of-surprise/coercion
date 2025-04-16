@@ -6,7 +6,6 @@ require (
 	github.com/Azure/azure-sdk-for-go/sdk/azcore v1.17.0
 	github.com/Azure/azure-sdk-for-go/sdk/azidentity v1.8.1
 	github.com/Azure/azure-sdk-for-go/sdk/data/azcosmos v1.2.0
-	github.com/Azure/retry v0.0.0-20250221010952-92c9290cea0f
 	github.com/brunoga/deep v1.2.4
 	github.com/fatih/color v1.18.0
 	github.com/go-git/go-git/v5 v5.14.0
@@ -16,7 +15,7 @@ require (
 	github.com/google/go-github/v61 v61.0.0
 	github.com/google/goexpect v0.0.0-20210430020637-ab937bf7fd6f
 	github.com/google/uuid v1.6.0
-	github.com/gostdlib/base v0.0.0-20250312154044-c158e13ed0d2
+	github.com/gostdlib/base v0.0.0-20250328165134-6931dc0137f3
 	github.com/inancgumus/screen v0.0.0-20190314163918-06e984b86ed3
 	github.com/kylelemons/godebug v1.1.0
 	github.com/rodaine/table v1.3.0
@@ -24,8 +23,6 @@ require (
 	github.com/spf13/viper v1.20.0
 	github.com/tidwall/pretty v1.2.1
 	go.opentelemetry.io/otel/metric v1.35.0
-	k8s.io/apimachinery v0.32.1
-	k8s.io/client-go v0.32.1
 	zombiezen.com/go/sqlite v1.4.0
 )
 
@@ -33,6 +30,7 @@ require (
 	dario.cat/mergo v1.0.0 // indirect
 	github.com/Azure/azure-sdk-for-go v68.0.0+incompatible // indirect
 	github.com/Azure/azure-sdk-for-go/sdk/internal v1.10.0 // indirect
+	github.com/Azure/retry v0.0.0-20250221010952-92c9290cea0f // indirect
 	github.com/AzureAD/microsoft-authentication-library-for-go v1.3.3 // indirect
 	github.com/Microsoft/go-winio v0.6.2 // indirect
 	github.com/ProtonMail/go-crypto v1.1.5 // indirect
@@ -143,6 +141,8 @@ require (
 	gopkg.in/warnings.v0 v0.1.2 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 	k8s.io/api v0.32.1 // indirect
+	k8s.io/apimachinery v0.32.1 // indirect
+	k8s.io/client-go v0.32.1 // indirect
 	k8s.io/klog/v2 v2.130.1 // indirect
 	k8s.io/kube-openapi v0.0.0-20241212222426-2c72e554b1e7 // indirect
 	k8s.io/utils v0.0.0-20241210054802-24370beab758 // indirect

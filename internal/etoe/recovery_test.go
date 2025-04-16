@@ -15,6 +15,8 @@ import (
 	"github.com/google/uuid"
 )
 
+// SEE recoveryTestStage for a way to do a single stage.
+
 func TestRecovery(t *testing.T) {
 	log.Println("TestRecovery")
 
@@ -34,22 +36,27 @@ func TestRecovery(t *testing.T) {
 	reg.Register(plugCheck)
 	reg.Register(plugAction)
 
-	g := context.Pool(ctx).Limited(20).Group()
+	g1 := context.Pool(ctx).Group()
+	g2 := context.Pool(ctx).Limited(20).Group()
 	results := make(chan testResult, 1)
-	go func() {
-		for i := 0; i < capture.Len(); i++ {
-			g.Go(
-				ctx,
-				func(ctx context.Context) error {
-					recoveryTestStage(ctx, i, reg, results)
-					return nil
-				},
-			)
-		}
-	}()
+	g1.Go(
+		ctx,
+		func(ctx context.Context) error {
+			for i := 0; i < capture.Len(); i++ {
+				g2.Go(
+					ctx,
+					func(ctx context.Context) error {
+						recoveryTestStage(ctx, i, reg, results)
+						return nil
+					},
+				)
+			}
+			return nil
+		},
+	)
 
-	g2 := context.Pool(ctx).Group()
-	g2.Go(
+	g3 := context.Pool(ctx).Group()
+	g3.Go(
 		ctx,
 		func(ctx context.Context) error {
 			for r := range results {
@@ -57,15 +64,17 @@ func TestRecovery(t *testing.T) {
 					log.Printf("TestRecovery(stage %d): success", r.Stage)
 				} else {
 					t.Errorf("TestRecovery(stage %d): %v", r.Stage, r.Err)
+					//t.Errorf("plan final:\n%s", pConfig.Sprint(r.Result))
 				}
 			}
 			return nil
 		},
 	)
 
-	g.Wait(ctx)
-	close(results)
+	g1.Wait(ctx)
 	g2.Wait(ctx)
+	close(results)
+	g3.Wait(ctx)
 }
 
 type testResult struct {
@@ -75,6 +84,13 @@ type testResult struct {
 }
 
 func recoveryTestStage(ctx context.Context, stage int, reg *registry.Register, ch chan testResult) {
+	// Uncomment and put in the stage number you wish to debug.
+	/*
+		if stage != 70 {
+			return
+		}
+	*/
+
 	vault, err := sqlite.New(ctx, "", reg, sqlite.WithInMemory())
 	if err != nil {
 		panic(fmt.Sprintf("TestEtoE: failed to create vault: %v", err))
@@ -113,7 +129,13 @@ func recoveryTestStage(ctx context.Context, stage int, reg *registry.Register, c
 		}
 	}()
 
-	ws, err := workstream.New(ctx, reg, vault)
+	// Used to get the etoeID without replaying the entire workflow.
+	ws, err := workstream.New(ctx, reg, vault, workstream.WithNoRecovery())
+	if err != nil {
+		panic(err)
+	}
+
+	ws, err = workstream.New(ctx, reg, vault)
 	if err != nil {
 		panic(err)
 	}
@@ -129,7 +151,6 @@ func recoveryTestStage(ctx context.Context, stage int, reg *registry.Register, c
 	}
 	defer func() {
 		ch <- tr
-		log.Println("returned result")
 	}()
 
 	if result.State.Status != workflow.Completed {
@@ -200,7 +221,7 @@ func recoveryTestStage(ctx context.Context, stage int, reg *registry.Register, c
 
 		for _, seq := range block.Sequences {
 			if seq.State.Status != workflow.Completed {
-				tr.Err = fmt.Errorf("sequence did not complete successfully(%s)", seq.State.Status)
+				tr.Err = fmt.Errorf("sequence did not complete successfully(%s)(%s)", seq.ID, seq.State.Status)
 				return
 			}
 			if err := testPlugResp(seq.Actions[1], "actionID"); err != nil {

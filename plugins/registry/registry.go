@@ -24,6 +24,7 @@ package registry
 import (
 	"errors"
 	"fmt"
+	"iter"
 	"reflect"
 	"regexp"
 	"strings"
@@ -91,15 +92,14 @@ func (r *Register) MustRegister(p plugins.Plugin) {
 }
 
 // Plugins returns a channel of all the plugins in the registry.
-func (r *Register) Plugins() chan plugins.Plugin {
-	ch := make(chan plugins.Plugin, 1)
-	go func() {
+func (r *Register) Plugins() iter.Seq[plugins.Plugin] {
+	return func(yield func(plugins.Plugin) bool) {
 		for _, p := range r.m {
-			ch <- p
+			if !yield(p) {
+				break
+			}
 		}
-		close(ch)
-	}()
-	return ch
+	}
 }
 
 // Plugin returns a plugin by name. It returns nil if the plugin is not found.

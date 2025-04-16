@@ -4,21 +4,23 @@ reusable plugins. This is designed for localized workflows and not workflows on 
 Aka, there are no policy engines, emergency stop systems or centralization mechanisms that keep
 teams from running over each other.
 
-[TBD: Add more details]
+Use of this package encourages using github.com/gostdlib/base/init.Service() in your main after your flag parsing.
 */
 package coercion
 
 import (
-	"context"
 	"fmt"
+	"iter"
 	"time"
 
 	"github.com/element-of-surprise/coercion/internal/execute"
 	"github.com/element-of-surprise/coercion/plugins/registry"
 	"github.com/element-of-surprise/coercion/workflow"
+	"github.com/element-of-surprise/coercion/workflow/errors"
 	"github.com/element-of-surprise/coercion/workflow/storage"
 	"github.com/element-of-surprise/coercion/workflow/utils/walk"
 	"github.com/google/uuid"
+	"github.com/gostdlib/base/context"
 )
 
 // This makes UUID generation much faster.
@@ -67,19 +69,28 @@ func WithMaxSubmit(d time.Duration) Option {
 	}
 }
 
+// WithNoRecovery disables the recovery of plans. This does not prevent future turnups without this flag
+// from recovering plans. This is useful for testing and debugging.
+func WithNoRecovery() Option {
+	return func(w *Workstream) error {
+		w.execOptions = append(w.execOptions, execute.WithNoRecovery())
+		return nil
+	}
+}
+
 // New creates a new Workstream.
 func New(ctx context.Context, reg *registry.Register, store storage.Vault, options ...Option) (*Workstream, error) {
 	if store == nil {
-		return nil, fmt.Errorf("storage is required")
+		return nil, errors.E(ctx, errors.CatInternal, errors.TypeBug, errors.New("storage is required"))
 	}
 	if reg == nil {
-		return nil, fmt.Errorf("registry is required")
+		return nil, errors.E(ctx, errors.CatInternal, errors.TypeBug, errors.New("registry is required"))
 	}
 
 	// Some storage systems may need to recover from a previous state after a crash.
 	if r, ok := store.(storage.Recovery); ok {
 		if err := r.Recovery(ctx); err != nil {
-			return nil, fmt.Errorf("failed to recover storage: %w", err)
+			return nil, errors.E(ctx, errors.CatInternal, errors.TypeBug, err)
 		}
 	}
 
@@ -92,7 +103,7 @@ func New(ctx context.Context, reg *registry.Register, store storage.Vault, optio
 
 	exec, err := execute.New(ctx, store, reg, ws.execOptions...)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create executor: %w", err)
+		return nil, errors.E(ctx, errors.CatInternal, errors.TypeBug, err)
 	}
 	ws.exec = exec
 
@@ -114,10 +125,10 @@ func (w *Workstream) Submit(ctx context.Context, plan *workflow.Plan) (uuid.UUID
 	w.requestDefaults(ctx, plan)
 
 	if err := workflow.Validate(plan); err != nil {
-		return uuid.Nil, fmt.Errorf("Plan did not validate: %s", err)
+		return uuid.Nil, err
 	}
 
-	for item := range walk.Plan(context.WithoutCancel(ctx), plan) {
+	for item := range walk.Plan(plan) {
 		if def, ok := item.Value.(defaulter); ok {
 			def.Defaults()
 		}
@@ -125,7 +136,7 @@ func (w *Workstream) Submit(ctx context.Context, plan *workflow.Plan) (uuid.UUID
 	plan.SubmitTime = w.now()
 
 	if err := w.store.Create(ctx, plan); err != nil {
-		return uuid.Nil, fmt.Errorf("Failed to write plan to storage: %w", err)
+		return uuid.Nil, err
 	}
 
 	return plan.ID, nil
@@ -137,7 +148,7 @@ type setPlanIDer interface {
 
 // requestDefaults finds all request objects in the plan and calls their Defaults() method.
 func (w *Workstream) requestDefaults(ctx context.Context, plan *workflow.Plan) {
-	for item := range walk.Plan(ctx, plan) {
+	for item := range walk.Plan(plan) {
 		if item.Value.Type() != workflow.OTPlan {
 			item.Value.(setPlanIDer).SetPlanID(plan.ID)
 		}
@@ -152,11 +163,11 @@ func (w *Workstream) requestDefaults(ctx context.Context, plan *workflow.Plan) {
 }
 
 func (w *Workstream) populateRegistry(ctx context.Context, plan *workflow.Plan) error {
-	for item := range walk.Plan(ctx, plan) {
+	for item := range walk.Plan(plan) {
 		if item.Value.Type() == workflow.OTAction {
 			a := item.Action()
 			if a.HasRegister() {
-				return fmt.Errorf("action(%s) had register set, which is not allowed", a.Name)
+				return errors.E(ctx, errors.CatInternal, errors.TypeBug, fmt.Errorf("action(%s) had register set, which is not allowed", a.Name))
 			}
 			a.SetRegister(w.reg)
 		}
@@ -190,37 +201,35 @@ func (w *Workstream) Wait(ctx context.Context, id uuid.UUID) (*workflow.Plan, er
 	return w.store.Read(ctx, id)
 }
 
-// Status returns a channel that will receive updates on the status of the plan with the given id. The interval
-// is the time between updates. The channel will be closed when the plan is complete or an error occurs.
-// If the Context is canceled, the channel will be closed and the final Result will have Err set. Otherwise, regardless
-// of the final status of the Plan, the last Result will have Err set to nil.
-func (w *Workstream) Status(ctx context.Context, id uuid.UUID, interval time.Duration) chan Result[*workflow.Plan] {
-	ch := make(chan Result[*workflow.Plan], 1)
-
-	t := time.NewTicker(interval)
-
-	go func() {
-		defer close(ch)
+// Status returns an iterator that will receive updates on the status of the plan with the given id. The interval
+// is the time between updates. Iteration will terminate when the plan is complete or an error occurs.
+// If the Context is canceled, this will stop iteration. It is not necessary to cancel the iterator, but it will
+// be running in the background until the interval expires. Regardless of the final status of the Plan,
+// the last Result will have Err set to nil.
+func (w *Workstream) Status(ctx context.Context, id uuid.UUID, interval time.Duration) iter.Seq[Result[*workflow.Plan]] {
+	return func(yield func(Result[*workflow.Plan]) bool) {
+		t := time.NewTicker(interval)
 		defer t.Stop()
 
 		for {
 			select {
 			case <-ctx.Done():
-				ch <- Result[*workflow.Plan]{Data: nil, Err: ctx.Err()}
+				return
 			case <-t.C:
 				plan, err := w.store.Read(ctx, id)
 				if err != nil {
-					ch <- Result[*workflow.Plan]{Data: nil, Err: err}
+					yield(Result[*workflow.Plan]{Data: nil, Err: err})
 					return
 				}
-				ch <- Result[*workflow.Plan]{Data: plan, Err: nil}
+				if !yield(Result[*workflow.Plan]{Data: plan, Err: nil}) {
+					return
+				}
 				if plan.State.Status != workflow.Running {
 					return
 				}
 			}
 		}
-	}()
-	return ch
+	}
 }
 
 func (w *Workstream) now() time.Time {

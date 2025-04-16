@@ -1,10 +1,14 @@
 package sm
 
 import (
+	"context"
 	"testing"
 	"time"
 
+	"github.com/element-of-surprise/coercion/plugins"
+	"github.com/element-of-surprise/coercion/plugins/registry"
 	"github.com/element-of-surprise/coercion/workflow"
+	"github.com/element-of-surprise/coercion/workflow/storage/sqlite"
 	"github.com/kylelemons/godebug/pretty"
 )
 
@@ -46,7 +50,19 @@ func TestFixAction(t *testing.T) {
 			},
 		},
 		{
-			name: "running action with attempts, no reset",
+			name: "running action with attempts that didn't finish, reset",
+			action: &workflow.Action{
+				State: &workflow.State{Status: workflow.Running, Start: now},
+				Attempts: []*workflow.Attempt{
+					{Start: now},
+				},
+			},
+			want: &workflow.Action{
+				State: &workflow.State{Status: workflow.NotStarted},
+			},
+		},
+		{
+			name: "running action with attempts that have been completed, no reset",
 			action: &workflow.Action{
 				State: &workflow.State{Status: workflow.Running, Start: now},
 				Attempts: []*workflow.Attempt{
@@ -54,9 +70,24 @@ func TestFixAction(t *testing.T) {
 				},
 			},
 			want: &workflow.Action{
-				State: &workflow.State{Status: workflow.Running, Start: now},
+				State: &workflow.State{Status: workflow.Completed, Start: now, End: now.Add(1)},
 				Attempts: []*workflow.Attempt{
 					{Start: now, End: now.Add(1)},
+				},
+			},
+		},
+		{
+			name: "running action with attempts that have been failed, no reset",
+			action: &workflow.Action{
+				State: &workflow.State{Status: workflow.Running, Start: now},
+				Attempts: []*workflow.Attempt{
+					{Err: &plugins.Error{}, Start: now, End: now.Add(1)},
+				},
+			},
+			want: &workflow.Action{
+				State: &workflow.State{Status: workflow.Failed, Start: now, End: now.Add(1)},
+				Attempts: []*workflow.Attempt{
+					{Err: &plugins.Error{}, Start: now, End: now.Add(1)},
 				},
 			},
 		},
@@ -297,7 +328,7 @@ func TestFixBlock(t *testing.T) {
 			},
 		},
 		{
-			name: "running block, all sequences completed, no postchecks, completes block",
+			name: "running block, all sequences completed, no postchecks, leaves running",
 			b: &workflow.Block{
 				State: &workflow.State{Status: workflow.Running},
 				Sequences: []*workflow.Sequence{
@@ -306,7 +337,7 @@ func TestFixBlock(t *testing.T) {
 				},
 			},
 			want: &workflow.Block{
-				State: &workflow.State{Status: workflow.Completed},
+				State: &workflow.State{Status: workflow.Running},
 				Sequences: []*workflow.Sequence{
 					{State: &workflow.State{Status: workflow.Completed}},
 					{State: &workflow.State{Status: workflow.Completed}},
@@ -314,7 +345,7 @@ func TestFixBlock(t *testing.T) {
 			},
 		},
 		{
-			name: "running block, all sequences completed, postcheck completed, completes block",
+			name: "running block, all sequences completed, postcheck completed, leaves running",
 			b: &workflow.Block{
 				State:      &workflow.State{Status: workflow.Running},
 				PostChecks: &workflow.Checks{State: &workflow.State{Status: workflow.Completed}},
@@ -324,7 +355,7 @@ func TestFixBlock(t *testing.T) {
 				},
 			},
 			want: &workflow.Block{
-				State:      &workflow.State{Status: workflow.Completed},
+				State:      &workflow.State{Status: workflow.Running},
 				PostChecks: &workflow.Checks{State: &workflow.State{Status: workflow.Completed}},
 				Sequences: []*workflow.Sequence{
 					{State: &workflow.State{Status: workflow.Completed}},
@@ -374,7 +405,12 @@ func TestFixBlock(t *testing.T) {
 	}
 
 	for _, test := range tests {
-		fixBlock(test.b)
+		reg := registry.New()
+		vault, err := sqlite.New(context.Background(), "", reg, sqlite.WithInMemory())
+		if err != nil {
+			t.Fatalf("TestFixBlock(%s): failed to create vault: %v", test.name, err)
+		}
+		(&States{store: vault}).fixBlock(test.b)
 		if test.want.State.Status != test.b.State.Status {
 			t.Errorf("TestFixBlock(%s): got state %v, want %v", test.name, test.b.State.Status, test.want.State.Status)
 		}
@@ -478,7 +514,12 @@ func TestFixPlan(t *testing.T) {
 	}
 
 	for _, test := range tests {
-		fixPlan(test.plan)
+		reg := registry.New()
+		vault, err := sqlite.New(context.Background(), "", reg, sqlite.WithInMemory())
+		if err != nil {
+			t.Fatalf("TestFixPlan(%s): failed to create vault: %v", test.name, err)
+		}
+		(&States{store: vault}).fixPlan(test.plan)
 		if test.plan.State.Status != test.want.State.Status {
 			t.Errorf("TestFixPlan(%s): got status %v, want %v", test.name, test.plan.State.Status, test.want.State.Status)
 		}

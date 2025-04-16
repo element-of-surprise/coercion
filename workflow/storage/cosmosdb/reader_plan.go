@@ -1,8 +1,9 @@
 package cosmosdb
 
 import (
-	"context"
 	"fmt"
+
+	"github.com/gostdlib/base/context"
 
 	"github.com/Azure/azure-sdk-for-go/sdk/data/azcosmos"
 	"github.com/element-of-surprise/coercion/workflow"

@@ -1,14 +1,16 @@
 package sqlite
 
 import (
-	"context"
 	"fmt"
 	"strings"
 	"time"
 	"unsafe"
 
+	"github.com/gostdlib/base/context"
+
 	"github.com/element-of-surprise/coercion/plugins/registry"
 	"github.com/element-of-surprise/coercion/workflow"
+	"github.com/element-of-surprise/coercion/workflow/errors"
 	"github.com/element-of-surprise/coercion/workflow/storage"
 
 	"github.com/go-json-experiment/json"
@@ -29,7 +31,7 @@ func (r reader) Exists(ctx context.Context, id uuid.UUID) (bool, error) {
 
 	conn, err := r.pool.Take(ctx)
 	if err != nil {
-		return false, fmt.Errorf("couldn't get a connection from the pool: %w", err)
+		return false, errors.E(ctx, errors.CatInternal, errors.TypeConn, fmt.Errorf("couldn't get a connection from the pool: %w", err))
 	}
 	defer r.pool.Put(conn)
 
@@ -48,10 +50,10 @@ func (r reader) Exists(ctx context.Context, id uuid.UUID) (bool, error) {
 		},
 	)
 	if err != nil {
-		return false, fmt.Errorf("couldn't do a lookup in table plans: %w", err)
+		return false, errors.E(ctx, errors.CatInternal, errors.TypeStorageGet, fmt.Errorf("couldn't do a lookup in table plans: %w", err))
 	}
 	if count < 0 {
-		return false, fmt.Errorf("bug: unexpected count value: %d", count)
+		return false, errors.E(ctx, errors.CatInternal, errors.TypeBug, fmt.Errorf("bug: unexpected count value: %d", count))
 	}
 	return count > 0, nil
 }
@@ -64,49 +66,53 @@ func (r reader) Read(ctx context.Context, id uuid.UUID) (*workflow.Plan, error) 
 // SearchPlans returns a list of Plan IDs that match the filter.
 func (r reader) Search(ctx context.Context, filters storage.Filters) (chan storage.Stream[storage.ListResult], error) {
 	if err := filters.Validate(); err != nil {
-		return nil, fmt.Errorf("invalid filter: %w", err)
+		return nil, errors.E(ctx, errors.CatUser, errors.TypeParameter, fmt.Errorf("invalid filter: %w", err))
 	}
 
 	conn, err := r.pool.Take(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("couldn't get a connection from the pool: %w", err)
+		return nil, errors.E(ctx, errors.CatInternal, errors.TypeConn, fmt.Errorf("couldn't get a connection from the pool: %w", err))
 	}
 
 	q, args, named := r.buildSearchQuery(filters)
 
 	results := make(chan storage.Stream[storage.ListResult], 1)
 
-	go func() {
-		defer r.pool.Put(conn)
-		defer close(results)
-		err := sqlitex.Execute(
-			conn,
-			q,
-			&sqlitex.ExecOptions{
-				Args:  args,
-				Named: named,
-				ResultFunc: func(stmt *sqlite.Stmt) error {
-					r, err := r.listResultsFunc(stmt)
-					if err != nil {
-						return fmt.Errorf("problem searching plans: %w", err)
-					}
-					select {
-					case <-ctx.Done():
-						results <- storage.Stream[storage.ListResult]{
-							Err: ctx.Err(),
+	context.Pool(ctx).Submit(
+		ctx,
+		func() {
+			defer r.pool.Put(conn)
+			defer close(results)
+			err := sqlitex.Execute(
+				conn,
+				q,
+				&sqlitex.ExecOptions{
+					Args:  args,
+					Named: named,
+					ResultFunc: func(stmt *sqlite.Stmt) error {
+						r, err := r.listResultsFunc(stmt)
+						if err != nil {
+							return errors.E(ctx, errors.CatInternal, errors.TypeStorageGet, fmt.Errorf("problem searching plans: %w", err))
 						}
-						return ctx.Err()
-					case results <- storage.Stream[storage.ListResult]{Result: r}:
-						return nil
-					}
+						select {
+						case <-ctx.Done():
+							err := errors.E(ctx, errors.CatInternal, errors.TypeTimeout, ctx.Err())
+							results <- storage.Stream[storage.ListResult]{
+								Err: err,
+							}
+							return ctx.Err()
+						case results <- storage.Stream[storage.ListResult]{Result: r}:
+							return nil
+						}
+					},
 				},
-			},
-		)
+			)
 
-		if err != nil {
-			results <- storage.Stream[storage.ListResult]{Err: fmt.Errorf("couldn't complete list plans: %w", err)}
-		}
-	}()
+			if err != nil {
+				results <- storage.Stream[storage.ListResult]{Err: err}
+			}
+		},
+	)
 	return results, nil
 }
 
@@ -172,7 +178,7 @@ func (r reader) List(ctx context.Context, limit int) (chan storage.Stream[storag
 
 	conn, err := r.pool.Take(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("couldn't get a connection from the pool: %w", err)
+		return nil, errors.E(ctx, errors.CatInternal, errors.TypeConn, fmt.Errorf("couldn't get a connection from the pool: %w", err))
 	}
 	defer r.pool.Put(conn)
 
@@ -186,34 +192,38 @@ func (r reader) List(ctx context.Context, limit int) (chan storage.Stream[storag
 
 	results := make(chan storage.Stream[storage.ListResult], 1)
 
-	go func() {
-		err := sqlitex.Execute(
-			conn,
-			q,
-			&sqlitex.ExecOptions{
-				Named: named,
-				ResultFunc: func(stmt *sqlite.Stmt) error {
-					result, err := r.listResultsFunc(stmt)
-					if err != nil {
-						return fmt.Errorf("problem listing plans: %w", err)
-					}
-					select {
-					case <-ctx.Done():
-						results <- storage.Stream[storage.ListResult]{
-							Err: ctx.Err(),
+	context.Pool(ctx).Submit(
+		ctx,
+		func() {
+			err := sqlitex.Execute(
+				conn,
+				q,
+				&sqlitex.ExecOptions{
+					Named: named,
+					ResultFunc: func(stmt *sqlite.Stmt) error {
+						result, err := r.listResultsFunc(stmt)
+						if err != nil {
+							return errors.E(ctx, errors.CatInternal, errors.TypeStorageGet, fmt.Errorf("problem listing plans: %w", err))
 						}
-						return ctx.Err()
-					case results <- storage.Stream[storage.ListResult]{Result: result}:
-						return nil
-					}
+						select {
+						case <-ctx.Done():
+							err := errors.E(ctx, errors.CatInternal, errors.TypeTimeout, ctx.Err())
+							results <- storage.Stream[storage.ListResult]{
+								Err: err,
+							}
+							return ctx.Err()
+						case results <- storage.Stream[storage.ListResult]{Result: result}:
+							return nil
+						}
+					},
 				},
-			},
-		)
+			)
 
-		if err != nil {
-			results <- storage.Stream[storage.ListResult]{Err: fmt.Errorf("couldn't complete list plans: %w", err)}
-		}
-	}()
+			if err != nil {
+				results <- storage.Stream[storage.ListResult]{Err: err}
+			}
+		},
+	)
 	return results, nil
 }
 

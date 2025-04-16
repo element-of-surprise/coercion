@@ -2,12 +2,13 @@ package main
 
 import (
 	"bytes"
-	"context"
 	"flag"
 	"io"
 	"net/http"
 	"os"
 	"time"
+
+	"github.com/gostdlib/base/context"
 
 	"github.com/element-of-surprise/coercion/workflow"
 	html "github.com/element-of-surprise/coercion/workflow/utils/html/reports"

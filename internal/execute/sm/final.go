@@ -6,7 +6,6 @@ import (
 	"github.com/element-of-surprise/coercion/workflow"
 
 	"github.com/gostdlib/base/statemachine"
-	"github.com/gostdlib/base/telemetry/log"
 )
 
 // finalStates is used to set the finalStates states on the Plan by examining the Plan's object states.
@@ -124,7 +123,6 @@ func (f finalStates) examineChecks(checks [4]*workflow.Checks) (workflow.Failure
 			return r, fmt.Errorf("%s failure", t)
 		default:
 			err := fmt.Errorf("plan End state reached with a %s in %s state, which is invalid: %w", t, check.State.Status, ErrInternalFailure)
-			log.Println(err)
 			return r, err
 		}
 	}

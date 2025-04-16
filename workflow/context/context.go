@@ -6,6 +6,7 @@ package context
 import (
 	"log/slog"
 
+	"github.com/element-of-surprise/coercion/workflow/errors"
 	"github.com/gostdlib/base/concurrency/background"
 	"github.com/gostdlib/base/concurrency/worker"
 	"github.com/gostdlib/base/context"
@@ -116,4 +117,11 @@ func ActionID(ctx context.Context) uuid.UUID {
 // SetActionID sets the actionID for context.
 func SetActionID(ctx context.Context, id uuid.UUID) context.Context {
 	return context.WithValue(ctx, actionIDKey{}, id)
+}
+
+// SetEOptions sets the error options for the context. This overrides the same options
+// set by the WithEOptions function. This allows you to do things like cause
+// stack traces to be printed on errors in a specific call.
+func SetEOptions(ctx context.Context, options ...errors.EOption) context.Context {
+	return context.SetEOptions(ctx, options...)
 }

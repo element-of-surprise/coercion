@@ -1,9 +1,10 @@
 package cosmosdb
 
 import (
-	"context"
 	"fmt"
-	"sync"
+
+	"github.com/gostdlib/base/concurrency/sync"
+	"github.com/gostdlib/base/context"
 
 	"github.com/element-of-surprise/coercion/internal/private"
 	"github.com/element-of-surprise/coercion/workflow"
