@@ -218,7 +218,6 @@ func (s *States) ExecuteBlock(req statemachine.Request[Data]) statemachine.Reque
 
 	h := req.Data.blocks[0]
 
-	metrics.Start(req.Ctx, workflow.OTBlock)
 	defer func() {
 		if err := s.store.UpdateBlock(req.Ctx, h.block); err != nil {
 			log.Fatalf("failed to write Block: %v", err)
@@ -242,6 +241,7 @@ func (s *States) ExecuteBlock(req statemachine.Request[Data]) statemachine.Reque
 		return req
 	}
 
+	metrics.Start(req.Ctx, workflow.OTBlock)
 	h.block.State.Status = workflow.Running
 	h.block.State.Start = s.now()
 	req.Next = s.BlockBypassChecks
@@ -474,7 +474,6 @@ func (s *States) BlockEnd(req statemachine.Request[Data]) statemachine.Request[D
 			log.Fatalf("failed to write Block: %v", err)
 		}
 		metrics.End(req.Ctx, workflow.OTBlock)
-		metrics.FinalStatus(req.Ctx, workflow.OTBlock, h.block.State.Status)
 	}()
 
 	// Don't use checksCompleted() here, we want to run the block if it is not completed.
@@ -587,6 +586,7 @@ func (s *States) End(req statemachine.Request[Data]) statemachine.Request[Data] 
 	defer func() {
 		plan.State.End = s.now()
 		s.writeEverything(req.Ctx, plan)
+		metrics.End(req.Ctx, workflow.OTPlan)
 	}()
 
 	// Extra cancel, defense in depth.
@@ -617,10 +617,9 @@ func (s *States) End(req statemachine.Request[Data]) statemachine.Request[Data] 
 
 func (s *States) writeEverything(ctx context.Context, plan *workflow.Plan) {
 	ctx = context.WithoutCancel(ctx)
-	// metrics.End(ctx, workflow.OTPlan)
-	// metrics.FinalStatus(ctx, workflow.OTPlan, plan.State.Status)
 	for item := range walk.Plan(plan) {
-		switch item.Value.Type() {
+		itemType := item.Value.Type()
+		switch itemType {
 		case workflow.OTPlan:
 			if err := s.store.UpdatePlan(ctx, item.Plan()); err != nil {
 				log.Fatalf("failed to write Plan: %v", err)
@@ -644,6 +643,7 @@ func (s *States) writeEverything(ctx context.Context, plan *workflow.Plan) {
 		default:
 			log.Fatalf("unknown type: %s", item.Value.Type())
 		}
+		metrics.FinalStatus(ctx, itemType, plan.State.Status)
 	}
 }
 
@@ -735,10 +735,12 @@ func (s *States) runChecksOnce(ctx context.Context, checks *workflow.Checks) err
 	if err := s.store.UpdateChecks(ctx, checks); err != nil {
 		log.Fatalf("failed to write Checks: %v", err)
 	}
+	metrics.Start(ctx, workflow.OTCheck)
 	defer func() {
 		if err := s.store.UpdateChecks(ctx, checks); err != nil {
 			log.Fatalf("failed to write Checks: %v", err)
 		}
+		metrics.End(ctx, workflow.OTCheck)
 	}()
 	defer func() {
 		checks.State.End = s.now()
@@ -782,10 +784,12 @@ func (s *States) runActionsParallel(ctx context.Context, actions []*workflow.Act
 // execSeq executes a sequence of actions. Any Job failures fail the Sequnence. The Job may retry
 // based on the retry policy.
 func (s *States) execSeq(ctx context.Context, seq *workflow.Sequence) error {
+	metrics.Start(ctx, workflow.OTSequence) // start and end may include completed and failed steps during recovery
 	defer func() {
 		if err := s.store.UpdateSequence(ctx, seq); err != nil {
 			log.Fatalf("failed to write Sequence: %v", err)
 		}
+		metrics.End(ctx, workflow.OTSequence) // start and end may include completed and failed steps during recovery
 	}()
 
 	switch seq.State.Status {
@@ -827,10 +831,12 @@ func (s *States) runAction(ctx context.Context, action *workflow.Action, updater
 	if s.testActionRunner != nil {
 		return s.testActionRunner(ctx, action, updater)
 	}
+	metrics.Start(ctx, workflow.OTAction) // start and end may include completed and failed steps during recovery
 	defer func() {
 		if err := s.store.UpdateAction(ctx, action); err != nil {
 			log.Fatalf("failed to write Action: %v", err)
 		}
+		metrics.End(ctx, workflow.OTAction) // start and end may include completed and failed steps during recovery
 	}()
 	switch action.State.Status {
 	case workflow.Completed:
