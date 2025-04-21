@@ -119,7 +119,7 @@ func New(ctx context.Context, reg *registry.Register, store storage.Vault, optio
 	}
 
 	if ws.meterProvider != nil {
-		if err := metrics.Init(ws.meterProvider.Meter("coercion")); err != nil {
+		if err := metrics.Init(ws.meterProvider.Meter("github.com/element-of-surprise/coercion")); err != nil {
 			return nil, fmt.Errorf("failed to initialize metrics: %w", err)
 		}
 	}
