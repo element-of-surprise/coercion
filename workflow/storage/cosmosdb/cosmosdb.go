@@ -37,14 +37,13 @@ var _ storage.Vault = &Vault{}
 type Vault struct {
 	// swarm is the name of the swarm in the database.
 	swarm string
-	// account is the CosmosDB account name for the storage.
-	account string
+	// endpoint is the CosmosDB account endpoint for the storage.
+	// For example: https://testdb.documents.azure.com:443
+	endpoint string
 	// db is the CosmosDB database name for the storage.
 	db string
 	// container is the CosmosDB container name for the storage.
 	container string
-	// endpoint is the CosmosDB account endpoint
-	endpoint string
 
 	client     *azcosmos.Client
 	contClient *azcosmos.ContainerClient
@@ -124,14 +123,14 @@ func WithItemOptions(opts azcosmos.ItemOptions) Option {
 // be inserted in "https://%s.documents.azure.com:443/". Container is the name of the CosmosDB container.
 // "cred is the Azure CosmosDB token credential. reg is the coercion registry.
 // If the container does not exist, it will be created.
-func New(ctx context.Context, swarm, account, db, container string, cred azcore.TokenCredential, reg *registry.Register, options ...Option) (*Vault, error) {
+func New(ctx context.Context, swarm, endpoint, db, container string, cred azcore.TokenCredential, reg *registry.Register, options ...Option) (*Vault, error) {
 	ctx = context.WithoutCancel(ctx)
 
 	if swarm == "" {
 		return nil, errors.E(ctx, errors.CatInternal, errors.TypeBug, errors.New("swarm name cannot be empty"))
 	}
-	if account == "" {
-		return nil, fmt.Errorf("account name cannot be empty")
+	if endpoint == "" {
+		return nil, fmt.Errorf("endpoint cannot be empty")
 	}
 	if db == "" {
 		return nil, errors.E(ctx, errors.CatInternal, errors.TypeBug, errors.New("db name cannot be empty"))
@@ -148,10 +147,9 @@ func New(ctx context.Context, swarm, account, db, container string, cred azcore.
 
 	r := &Vault{
 		swarm:     swarm,
-		account:   account,
+		endpoint:  endpoint,
 		db:        db,
 		container: container,
-		endpoint:  fmt.Sprintf("https://%s.documents.azure.com:443/", account),
 	}
 	for _, o := range options {
 		if err := o(r); err != nil {
@@ -267,9 +265,7 @@ func (v *Vault) createContainer(ctx context.Context, database *azcosmos.Database
 }
 
 // Teardown deletes a container from a given CosmosDB database. This is for testing only.
-func Teardown(ctx context.Context, account, db, container string, cred azcore.TokenCredential, clientOpts *azcosmos.ClientOptions) error {
-	endpoint := fmt.Sprintf("https://%s.documents.azure.com:443/", account)
-
+func Teardown(ctx context.Context, endpoint, db, container string, cred azcore.TokenCredential, clientOpts *azcosmos.ClientOptions) error {
 	client, err := azcosmos.NewClient(endpoint, cred, clientOpts)
 	if err != nil {
 		return errors.E(ctx, errors.CatInternal, errors.TypeConn, err)

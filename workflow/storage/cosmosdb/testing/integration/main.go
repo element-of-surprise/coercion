@@ -70,7 +70,9 @@ func main() {
 		fatalErr(logger, "Failed to create credential: %v", err)
 	}
 
-	vault, err := cosmosdb.New(ctx, *swarm, *account, *db, *container, cred, reg)
+	// Assume this is the public cloud
+	endpoint := fmt.Sprintf("https://%s.documents.azure.com:443/", *account)
+	vault, err := cosmosdb.New(ctx, *swarm, endpoint, *db, *container, cred, reg)
 	if err != nil {
 		fatalErr(logger, "Failed to create vault: %v", err)
 	}
@@ -82,7 +84,7 @@ func main() {
 	if *teardown == true {
 		defer func() {
 			// Teardown the cosmosdb container
-			if err := cosmosdb.Teardown(ctx, *account, *db, *container, cred, nil); err != nil {
+			if err := cosmosdb.Teardown(ctx, endpoint, *db, *container, cred, nil); err != nil {
 				fatalErr(logger, "Failed to teardown: %v", err)
 			}
 		}()
