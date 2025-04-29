@@ -14,7 +14,7 @@ import (
 	"time"
 
 	"github.com/element-of-surprise/coercion/internal/execute"
-	"github.com/element-of-surprise/coercion/internal/metrics"
+	coercionMetrics "github.com/element-of-surprise/coercion/internal/metrics"
 	"github.com/element-of-surprise/coercion/plugins/registry"
 	"github.com/element-of-surprise/coercion/workflow"
 	"github.com/element-of-surprise/coercion/workflow/errors"
@@ -23,6 +23,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/gostdlib/base/context"
+	"github.com/gostdlib/base/telemetry/otel/metrics"
 	"go.opentelemetry.io/otel/metric"
 )
 
@@ -111,7 +112,11 @@ func New(ctx context.Context, reg *registry.Register, store storage.Vault, optio
 		}
 	}
 
-	ws := &Workstream{reg: reg, store: store}
+	ws := &Workstream{
+		reg:           reg,
+		store:         store,
+		meterProvider: metrics.Default(),
+	}
 	for _, o := range options {
 		if err := o(ws); err != nil {
 			return nil, err
@@ -119,7 +124,7 @@ func New(ctx context.Context, reg *registry.Register, store storage.Vault, optio
 	}
 
 	if ws.meterProvider != nil {
-		if err := metrics.Init(ws.meterProvider.Meter("github.com/element-of-surprise/coercion")); err != nil {
+		if err := coercionMetrics.Init(ws.meterProvider.Meter("github.com/element-of-surprise/coercion")); err != nil {
 			return nil, fmt.Errorf("failed to initialize metrics: %w", err)
 		}
 	}
@@ -162,7 +167,7 @@ func (w *Workstream) Submit(ctx context.Context, plan *workflow.Plan) (uuid.UUID
 		return uuid.Nil, err
 	}
 
-	metrics.NotStarted(ctx)
+	coercionMetrics.NotStarted(ctx)
 
 	return plan.ID, nil
 }
