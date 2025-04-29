@@ -2,6 +2,7 @@ package monitor
 
 import (
 	"fmt"
+	"iter"
 	"strings"
 	"time"
 
@@ -20,8 +21,8 @@ var pConfig = pretty.Config{
 	SkipZeroFields:    true,
 }
 
-// Monitor is a function that listens to the workflow results channel and prints a running summary.
-func Monitor(results <-chan coercion.Result[*workflow.Plan]) coercion.Result[*workflow.Plan] {
+// Monitor is a function that listens to the workflow results iterator and prints a running summary.
+func Monitor(results iter.Seq[coercion.Result[*workflow.Plan]]) coercion.Result[*workflow.Plan] {
 	var last *workflow.Plan
 	var result coercion.Result[*workflow.Plan]
 	for result = range results {
