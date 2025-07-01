@@ -49,11 +49,11 @@ func (p reader) fetchPlan(ctx context.Context, id uuid.UUID) (*workflow.Plan, er
 				if err != nil {
 					return fmt.Errorf("couldn't get plan submit time: %w", err)
 				}
+				plan.Reason = workflow.FailureReason(stmt.GetInt64("reason"))
 				plan.State, err = fieldToState(stmt)
 				if err != nil {
 					return fmt.Errorf("couldn't get plan state: %w", err)
 				}
-
 				if b := fieldToBytes("meta", stmt); b != nil {
 					plan.Meta = b
 				}
