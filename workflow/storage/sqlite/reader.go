@@ -58,7 +58,7 @@ func (r reader) Exists(ctx context.Context, id uuid.UUID) (bool, error) {
 	return count > 0, nil
 }
 
-// ReadPlan returns a Plan from the storage.
+// Read returns a Plan from the storage.
 func (r reader) Read(ctx context.Context, id uuid.UUID) (*workflow.Plan, error) {
 	return r.fetchPlan(ctx, id)
 }

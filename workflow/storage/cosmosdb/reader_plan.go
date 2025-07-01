@@ -34,6 +34,7 @@ func (p reader) docToPlan(ctx context.Context, response *azcosmos.ItemResponse) 
 		Name:       resp.Name,
 		Descr:      resp.Descr,
 		SubmitTime: resp.SubmitTime,
+		Reason:     resp.Reason,
 		State: &workflow.State{
 			Status: resp.StateStatus,
 			Start:  resp.StateStart,
