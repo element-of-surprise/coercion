@@ -46,8 +46,8 @@ type blocksEntry struct {
 	Name              string              `json:"name,omitempty"`
 	Descr             string              `json:"descr,omitempty"`
 	Pos               int                 `json:"pos,omitempty"`
-	EntranceDelay     time.Duration       `json:"entranceDelay,omitempty"`
-	ExitDelay         time.Duration       `json:"exitDelay,omitempty"`
+	EntranceDelay     time.Duration       `json:"entranceDelay,omitempty" format:"iso8601"`
+	ExitDelay         time.Duration       `json:"exitDelay,omitempty" format:"iso8601"`
 	BypassChecks      uuid.UUID           `json:"bypassChecks,omitempty"`
 	PreChecks         uuid.UUID           `json:"preChecks,omitempty"`
 	PostChecks        uuid.UUID           `json:"postChecks,omitempty"`
@@ -71,7 +71,7 @@ type checksEntry struct {
 	Key          uuid.UUID           `json:"key,omitempty"`
 	PlanID       uuid.UUID           `json:"planID,omitempty"`
 	Actions      []uuid.UUID         `json:"actions,omitempty"`
-	Delay        time.Duration       `json:"delay,omitempty"`
+	Delay        time.Duration       `json:"delay,omitempty" format:"iso8601"`
 	StateStatus  workflow.Status     `json:"stateStatus,omitempty"`
 	StateStart   time.Time           `json:"stateStart,omitempty"`
 	StateEnd     time.Time           `json:"stateEnd,omitempty"`
@@ -108,7 +108,7 @@ type actionsEntry struct {
 	Descr        string              `json:"descr,omitempty"`
 	Pos          int                 `json:"pos,omitempty"`
 	Plugin       string              `json:"plugin,omitempty"`
-	Timeout      time.Duration       `json:"timeout,omitempty"`
+	Timeout      time.Duration       `json:"timeout,omitempty" format:"iso8601"`
 	Retries      int                 `json:"retries,omitempty"`
 	Req          []byte              `json:"req,omitempty"`
 	Attempts     []byte              `json:"attempts,omitempty"`
