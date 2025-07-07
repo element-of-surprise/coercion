@@ -91,7 +91,7 @@ func (r reader) docToAction(ctx context.Context, response []byte) (*workflow.Act
 		Name:    resp.Name,
 		Descr:   resp.Descr,
 		Plugin:  resp.Plugin,
-		Timeout: resp.Timeout,
+		Timeout: resp.TimeoutISO8601,
 		Retries: resp.Retries,
 		State: &workflow.State{
 			Status: resp.StateStatus,
