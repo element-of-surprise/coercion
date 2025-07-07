@@ -42,7 +42,6 @@ func TestMarshalPlansEntry(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to marshal plansEntry: %v", err)
 	}
-	t.Logf("plansEntry JSON: %s", string(marshalResult))
 }
 
 func TestMarshalBlocksEntry(t *testing.T) {
@@ -77,7 +76,6 @@ func TestMarshalBlocksEntry(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to marshal blocksEntry: %v", err)
 	}
-	t.Logf("blocksEntry JSON: %s", string(marshalResult))
 }
 
 func TestMarshalChecksEntry(t *testing.T) {
@@ -101,7 +99,6 @@ func TestMarshalChecksEntry(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to marshal checksEntry: %v", err)
 	}
-	t.Logf("checksEntry JSON: %s", string(marshalResult))
 }
 
 func TestMarshalSequencesEntry(t *testing.T) {
@@ -127,7 +124,6 @@ func TestMarshalSequencesEntry(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to marshal sequencesEntry: %v", err)
 	}
-	t.Logf("sequencesEntry JSON: %s", string(marshalResult))
 }
 
 func TestMarshalActionsEntry(t *testing.T) {
@@ -157,7 +153,6 @@ func TestMarshalActionsEntry(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to marshal actionsEntry: %v", err)
 	}
-	t.Logf("actionsEntry JSON: %s", string(marshalResult))
 }
 
 func TestMarshalSearchEntry(t *testing.T) {
@@ -179,7 +174,6 @@ func TestMarshalSearchEntry(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to marshal searchEntry: %v", err)
 	}
-	t.Logf("searchEntry JSON: %s", string(marshalResult))
 }
 
 func TestMarshalBasicTypes(t *testing.T) {
@@ -283,7 +277,6 @@ func TestMarshalBasicTypes(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Failed to marshal %s: %v", tt.name, err)
 			}
-			t.Logf("%s JSON: %s", tt.name, string(marshalResult))
 		})
 	}
 }
