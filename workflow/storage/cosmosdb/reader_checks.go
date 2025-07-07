@@ -47,7 +47,7 @@ func (p reader) docToChecks(ctx context.Context, planID azcosmos.PartitionKey, r
 	c := &workflow.Checks{
 		ID:    resp.ID,
 		Key:   resp.Key,
-		Delay: time.Duration(resp.Delay),
+		Delay: time.Duration(resp.DelayISO8601),
 		State: &workflow.State{
 			Status: resp.StateStatus,
 			Start:  resp.StateStart,
