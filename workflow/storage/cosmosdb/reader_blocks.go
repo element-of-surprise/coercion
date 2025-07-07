@@ -47,8 +47,8 @@ func (p reader) docToBlock(ctx context.Context, response *azcosmos.ItemResponse)
 		Key:           resp.Key,
 		Name:          resp.Name,
 		Descr:         resp.Descr,
-		EntranceDelay: resp.EntranceDelayISO8601,
-		ExitDelay:     resp.ExitDelayISO8601,
+		EntranceDelay: resp.EntranceDelay,
+		ExitDelay:     resp.ExitDelay,
 		State: &workflow.State{
 			Status: resp.StateStatus,
 			Start:  resp.StateStart,
