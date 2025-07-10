@@ -9,7 +9,7 @@ require (
 	github.com/brunoga/deep v1.2.4
 	github.com/fatih/color v1.18.0
 	github.com/go-git/go-git/v5 v5.14.0
-	github.com/go-json-experiment/json v0.0.0-20250211222650-7564cc53b040
+	github.com/go-json-experiment/json v0.0.0-20250709061156-d2cd4771eb1b
 	github.com/gofiber/fiber/v2 v2.52.6
 	github.com/google/go-cmp v0.7.0
 	github.com/google/go-github/v61 v61.0.0
