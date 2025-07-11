@@ -367,9 +367,9 @@ type Block struct {
 	Descr string
 
 	// EntranceDelay is the amount of time to wait before the block starts. This defaults to 0.
-	EntranceDelay time.Duration
+	EntranceDelay time.Duration `json:"entranceDelay,omitempty,format:iso8601"`
 	// ExitDelay is the amount of time to wait after the block has completed. This defaults to 0.
-	ExitDelay time.Duration
+	ExitDelay time.Duration `json:"exitDelay,omitempty,format:iso8601"`
 
 	// BypassChecks are actions that if they succeed will cause the block to be skipped.
 	// If any gate fails, the workflow will be executed. Optional.
