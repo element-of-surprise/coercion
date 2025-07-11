@@ -260,7 +260,7 @@ type Checks struct {
 	Key uuid.UUID
 	// Delay is the amount of time to wait before executing the checks. This
 	// is only used by continuous checks. Optional. Defaults to 30 seconds.
-	Delay time.Duration
+	Delay time.Duration `json:"delay,omitempty,format:iso8601"`
 	// Actions is a list of actions that are executed in parallel. Any error will
 	// cause the workflow to fail. Required.
 	Actions []*Action
@@ -367,9 +367,9 @@ type Block struct {
 	Descr string
 
 	// EntranceDelay is the amount of time to wait before the block starts. This defaults to 0.
-	EntranceDelay time.Duration
+	EntranceDelay time.Duration `json:"entranceDelay,omitempty,format:iso8601"`
 	// ExitDelay is the amount of time to wait after the block has completed. This defaults to 0.
-	ExitDelay time.Duration
+	ExitDelay time.Duration `json:"exitDelay,omitempty,format:iso8601"`
 
 	// BypassChecks are actions that if they succeed will cause the block to be skipped.
 	// If any gate fails, the workflow will be executed. Optional.
@@ -633,7 +633,7 @@ type Action struct {
 	Plugin string
 	// Timeout is the amount of time to wait for the Action to complete. This defaults to 30 seconds and
 	// must be at least 5 seconds.
-	Timeout time.Duration
+	Timeout time.Duration `json:"timeout,omitempty,format:iso8601"`
 	// Retries is the number of times to retry the Action if it fails. This defaults to 0.
 	Retries int
 	// Req is the request object that is passed to the plugin.
