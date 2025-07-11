@@ -633,7 +633,7 @@ type Action struct {
 	Plugin string
 	// Timeout is the amount of time to wait for the Action to complete. This defaults to 30 seconds and
 	// must be at least 5 seconds.
-	Timeout time.Duration
+	Timeout time.Duration `json:"timeout,omitempty,format:iso8601"`
 	// Retries is the number of times to retry the Action if it fails. This defaults to 0.
 	Retries int
 	// Req is the request object that is passed to the plugin.
