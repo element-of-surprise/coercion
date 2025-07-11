@@ -19,7 +19,7 @@ type Req struct {
 	// Arg is a placeholder.
 	Arg string
 	// Sleep is a duration to sleep before returning.
-	Sleep time.Duration
+	Sleep time.Duration `json:",format:iso8601"`
 	// FailValidation is a flag to indicate if the request should fail validation.
 	FailValidation bool
 	// Started is a channel that is closed when the request is started.
