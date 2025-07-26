@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 
 	"github.com/gostdlib/base/concurrency/sync"
@@ -89,12 +90,10 @@ func New(ctx context.Context, root string, reg *registry.Register, options ...Op
 	}
 
 	inMem := false
-	for _, flag := range r.openFlags {
-		if flag == sqlite.OpenMemory {
-			inMem = true
-			break
-		}
+	if slices.Contains(r.openFlags, sqlite.OpenMemory) {
+		inMem = true
 	}
+
 	if !inMem {
 		_, err := os.Stat(root)
 		if err != nil {

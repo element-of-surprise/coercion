@@ -68,15 +68,9 @@ type Vault struct {
 var backoff *exponential.Backoff
 
 func init() {
-	var err error
-	// This ensures that a custom retry policy is going to work. backoff is reusable.
-	// should this be different for read and write?
 	policy := plugins.SecondsRetryPolicy()
 	policy.MaxAttempts = 5
-	backoff, err = exponential.New(exponential.WithPolicy(plugins.SecondsRetryPolicy()))
-	if err != nil {
-		fatalErr(slog.Default(), "failed to create backoff policy: %v", err)
-	}
+	backoff = exponential.Must(exponential.New(exponential.WithPolicy(policy)))
 }
 
 // Option is an option for configuring a Vault.

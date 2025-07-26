@@ -165,7 +165,7 @@ func commitChecks(ctx context.Context, conn *sqlite.Conn, planID uuid.UUID, chec
 
 	for i, a := range checks.Actions {
 		if err := commitAction(ctx, conn, planID, i, a, capture); err != nil {
-			fmt.Errorf("commitCheck: %w", err)
+			return fmt.Errorf("commitCheck: %w", err)
 		}
 	}
 
