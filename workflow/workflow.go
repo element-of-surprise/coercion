@@ -260,7 +260,7 @@ type Checks struct {
 	Key uuid.UUID
 	// Delay is the amount of time to wait before executing the checks. This
 	// is only used by continuous checks. Optional. Defaults to 30 seconds.
-	Delay time.Duration
+	Delay time.Duration `json:",format:iso8601"`
 	// Actions is a list of actions that are executed in parallel. Any error will
 	// cause the workflow to fail. Required.
 	Actions []*Action
