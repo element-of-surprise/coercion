@@ -92,13 +92,7 @@ func (s *State) Duration() time.Duration {
 }
 
 // Equal compares two State instances for equality.
-func (s *State) Equal(other *State) bool {
-	if s == nil && other == nil {
-		return true
-	}
-	if s == nil || other == nil {
-		return false
-	}
+func (s State) Equal(other State) bool {
 	return s.Status == other.Status &&
 		s.Start.Equal(other.Start) &&
 		s.End.Equal(other.End) &&
@@ -267,14 +261,7 @@ func (p *Plan) validate(ctx context.Context) ([]validator, error) {
 
 // Equal compares two Plan instances for equality.
 // It excludes private/internal fields from comparison.
-func (p *Plan) Equal(other *Plan) bool {
-	if p == nil && other == nil {
-		return true
-	}
-	if p == nil || other == nil {
-		return false
-	}
-	
+func (p Plan) Equal(other Plan) bool {
 	// Compare basic fields
 	if p.ID != other.ID ||
 		p.Name != other.Name ||
@@ -294,17 +281,47 @@ func (p *Plan) Equal(other *Plan) bool {
 		return false
 	}
 	
-	// Compare State
-	if !p.State.Equal(other.State) {
+	// Compare State - handle nil pointers
+	if (p.State == nil) != (other.State == nil) {
+		return false
+	}
+	if p.State != nil && !p.State.Equal(*other.State) {
 		return false
 	}
 	
-	// Compare Check types
-	if !p.BypassChecks.Equal(other.BypassChecks) ||
-		!p.PreChecks.Equal(other.PreChecks) ||
-		!p.ContChecks.Equal(other.ContChecks) ||
-		!p.PostChecks.Equal(other.PostChecks) ||
-		!p.DeferredChecks.Equal(other.DeferredChecks) {
+	// Compare Check types - handle nil pointers
+	if (p.BypassChecks == nil) != (other.BypassChecks == nil) {
+		return false
+	}
+	if p.BypassChecks != nil && !p.BypassChecks.Equal(*other.BypassChecks) {
+		return false
+	}
+	
+	if (p.PreChecks == nil) != (other.PreChecks == nil) {
+		return false
+	}
+	if p.PreChecks != nil && !p.PreChecks.Equal(*other.PreChecks) {
+		return false
+	}
+	
+	if (p.ContChecks == nil) != (other.ContChecks == nil) {
+		return false
+	}
+	if p.ContChecks != nil && !p.ContChecks.Equal(*other.ContChecks) {
+		return false
+	}
+	
+	if (p.PostChecks == nil) != (other.PostChecks == nil) {
+		return false
+	}
+	if p.PostChecks != nil && !p.PostChecks.Equal(*other.PostChecks) {
+		return false
+	}
+	
+	if (p.DeferredChecks == nil) != (other.DeferredChecks == nil) {
+		return false
+	}
+	if p.DeferredChecks != nil && !p.DeferredChecks.Equal(*other.DeferredChecks) {
 		return false
 	}
 	
@@ -313,7 +330,13 @@ func (p *Plan) Equal(other *Plan) bool {
 		return false
 	}
 	for i, block := range p.Blocks {
-		if !block.Equal(other.Blocks[i]) {
+		if block == nil && other.Blocks[i] == nil {
+			continue
+		}
+		if block == nil || other.Blocks[i] == nil {
+			return false
+		}
+		if !block.Equal(*other.Blocks[i]) {
 			return false
 		}
 	}
@@ -424,14 +447,7 @@ func (c *Checks) validate(ctx context.Context) ([]validator, error) {
 
 // Equal compares two Checks instances for equality.
 // It excludes private fields (planID) from comparison.
-func (c *Checks) Equal(other *Checks) bool {
-	if c == nil && other == nil {
-		return true
-	}
-	if c == nil || other == nil {
-		return false
-	}
-	
+func (c Checks) Equal(other Checks) bool {
 	// Compare basic fields
 	if c.ID != other.ID ||
 		c.Key != other.Key ||
@@ -439,8 +455,11 @@ func (c *Checks) Equal(other *Checks) bool {
 		return false
 	}
 	
-	// Compare State
-	if !c.State.Equal(other.State) {
+	// Compare State - handle nil pointers
+	if (c.State == nil) != (other.State == nil) {
+		return false
+	}
+	if c.State != nil && !c.State.Equal(*other.State) {
 		return false
 	}
 	
@@ -449,7 +468,13 @@ func (c *Checks) Equal(other *Checks) bool {
 		return false
 	}
 	for i, action := range c.Actions {
-		if !action.Equal(other.Actions[i]) {
+		if action == nil && other.Actions[i] == nil {
+			continue
+		}
+		if action == nil || other.Actions[i] == nil {
+			return false
+		}
+		if !action.Equal(*other.Actions[i]) {
 			return false
 		}
 	}
@@ -603,14 +628,7 @@ func (b *Block) validate(ctx context.Context) ([]validator, error) {
 
 // Equal compares two Block instances for equality.
 // It excludes private fields (planID) from comparison.
-func (b *Block) Equal(other *Block) bool {
-	if b == nil && other == nil {
-		return true
-	}
-	if b == nil || other == nil {
-		return false
-	}
-	
+func (b Block) Equal(other Block) bool {
 	// Compare basic fields
 	if b.ID != other.ID ||
 		b.Key != other.Key ||
@@ -623,17 +641,47 @@ func (b *Block) Equal(other *Block) bool {
 		return false
 	}
 	
-	// Compare State
-	if !b.State.Equal(other.State) {
+	// Compare State - handle nil pointers
+	if (b.State == nil) != (other.State == nil) {
+		return false
+	}
+	if b.State != nil && !b.State.Equal(*other.State) {
 		return false
 	}
 	
-	// Compare Check types
-	if !b.BypassChecks.Equal(other.BypassChecks) ||
-		!b.PreChecks.Equal(other.PreChecks) ||
-		!b.ContChecks.Equal(other.ContChecks) ||
-		!b.PostChecks.Equal(other.PostChecks) ||
-		!b.DeferredChecks.Equal(other.DeferredChecks) {
+	// Compare Check types - handle nil pointers
+	if (b.BypassChecks == nil) != (other.BypassChecks == nil) {
+		return false
+	}
+	if b.BypassChecks != nil && !b.BypassChecks.Equal(*other.BypassChecks) {
+		return false
+	}
+	
+	if (b.PreChecks == nil) != (other.PreChecks == nil) {
+		return false
+	}
+	if b.PreChecks != nil && !b.PreChecks.Equal(*other.PreChecks) {
+		return false
+	}
+	
+	if (b.ContChecks == nil) != (other.ContChecks == nil) {
+		return false
+	}
+	if b.ContChecks != nil && !b.ContChecks.Equal(*other.ContChecks) {
+		return false
+	}
+	
+	if (b.PostChecks == nil) != (other.PostChecks == nil) {
+		return false
+	}
+	if b.PostChecks != nil && !b.PostChecks.Equal(*other.PostChecks) {
+		return false
+	}
+	
+	if (b.DeferredChecks == nil) != (other.DeferredChecks == nil) {
+		return false
+	}
+	if b.DeferredChecks != nil && !b.DeferredChecks.Equal(*other.DeferredChecks) {
 		return false
 	}
 	
@@ -642,7 +690,13 @@ func (b *Block) Equal(other *Block) bool {
 		return false
 	}
 	for i, sequence := range b.Sequences {
-		if !sequence.Equal(other.Sequences[i]) {
+		if sequence == nil && other.Sequences[i] == nil {
+			continue
+		}
+		if sequence == nil || other.Sequences[i] == nil {
+			return false
+		}
+		if !sequence.Equal(*other.Sequences[i]) {
 			return false
 		}
 	}
@@ -760,14 +814,7 @@ func (s *Sequence) validate(ctx context.Context) ([]validator, error) {
 
 // Equal compares two Sequence instances for equality.
 // It excludes private fields (planID) from comparison.
-func (s *Sequence) Equal(other *Sequence) bool {
-	if s == nil && other == nil {
-		return true
-	}
-	if s == nil || other == nil {
-		return false
-	}
-	
+func (s Sequence) Equal(other Sequence) bool {
 	// Compare basic fields
 	if s.ID != other.ID ||
 		s.Key != other.Key ||
@@ -776,8 +823,11 @@ func (s *Sequence) Equal(other *Sequence) bool {
 		return false
 	}
 	
-	// Compare State
-	if !s.State.Equal(other.State) {
+	// Compare State - handle nil pointers
+	if (s.State == nil) != (other.State == nil) {
+		return false
+	}
+	if s.State != nil && !s.State.Equal(*other.State) {
 		return false
 	}
 	
@@ -786,7 +836,13 @@ func (s *Sequence) Equal(other *Sequence) bool {
 		return false
 	}
 	for i, action := range s.Actions {
-		if !action.Equal(other.Actions[i]) {
+		if action == nil && other.Actions[i] == nil {
+			continue
+		}
+		if action == nil || other.Actions[i] == nil {
+			return false
+		}
+		if !action.Equal(*other.Actions[i]) {
 			return false
 		}
 	}
@@ -809,13 +865,7 @@ type Attempt struct {
 }
 
 // Equal compares two Attempt instances for equality.
-func (a *Attempt) Equal(other *Attempt) bool {
-	if a == nil && other == nil {
-		return true
-	}
-	if a == nil || other == nil {
-		return false
-	}
+func (a Attempt) Equal(other Attempt) bool {
 	return reflect.DeepEqual(a.Resp, other.Resp) &&
 		reflect.DeepEqual(a.Err, other.Err) &&
 		a.Start.Equal(other.Start) &&
@@ -983,14 +1033,7 @@ func (a *Action) FinalAttempt() *Attempt {
 
 // Equal compares two Action instances for equality.
 // It excludes private fields (planID and register) from comparison.
-func (a *Action) Equal(other *Action) bool {
-	if a == nil && other == nil {
-		return true
-	}
-	if a == nil || other == nil {
-		return false
-	}
-	
+func (a Action) Equal(other Action) bool {
 	// Compare basic fields
 	if a.ID != other.ID ||
 		a.Key != other.Key ||
@@ -1007,8 +1050,11 @@ func (a *Action) Equal(other *Action) bool {
 		return false
 	}
 	
-	// Compare State
-	if !a.State.Equal(other.State) {
+	// Compare State - handle nil pointers
+	if (a.State == nil) != (other.State == nil) {
+		return false
+	}
+	if a.State != nil && !a.State.Equal(*other.State) {
 		return false
 	}
 	
@@ -1017,7 +1063,13 @@ func (a *Action) Equal(other *Action) bool {
 		return false
 	}
 	for i, attempt := range a.Attempts {
-		if !attempt.Equal(other.Attempts[i]) {
+		if attempt == nil && other.Attempts[i] == nil {
+			continue
+		}
+		if attempt == nil || other.Attempts[i] == nil {
+			return false
+		}
+		if !attempt.Equal(*other.Attempts[i]) {
 			return false
 		}
 	}
