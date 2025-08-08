@@ -91,6 +91,20 @@ func (s *State) Duration() time.Duration {
 	return s.End.Sub(s.Start)
 }
 
+// Equal compares two State instances for equality.
+func (s *State) Equal(other *State) bool {
+	if s == nil && other == nil {
+		return true
+	}
+	if s == nil || other == nil {
+		return false
+	}
+	return s.Status == other.Status &&
+		s.Start.Equal(other.Start) &&
+		s.End.Equal(other.End) &&
+		s.ETag == other.ETag
+}
+
 // validator is a type that validates its own fields. If the validator has sub-types that
 // need validation, it returns a list of validators that need to be validated.
 // This allows tests to be more modular instead of a super test of the entire object tree.
@@ -251,6 +265,62 @@ func (p *Plan) validate(ctx context.Context) ([]validator, error) {
 	return vals, nil
 }
 
+// Equal compares two Plan instances for equality.
+// It excludes private/internal fields from comparison.
+func (p *Plan) Equal(other *Plan) bool {
+	if p == nil && other == nil {
+		return true
+	}
+	if p == nil || other == nil {
+		return false
+	}
+	
+	// Compare basic fields
+	if p.ID != other.ID ||
+		p.Name != other.Name ||
+		p.Descr != other.Descr ||
+		p.GroupID != other.GroupID ||
+		p.Reason != other.Reason {
+		return false
+	}
+	
+	// Compare Meta bytes
+	if !reflect.DeepEqual(p.Meta, other.Meta) {
+		return false
+	}
+	
+	// Compare SubmitTime
+	if !p.SubmitTime.Equal(other.SubmitTime) {
+		return false
+	}
+	
+	// Compare State
+	if !p.State.Equal(other.State) {
+		return false
+	}
+	
+	// Compare Check types
+	if !p.BypassChecks.Equal(other.BypassChecks) ||
+		!p.PreChecks.Equal(other.PreChecks) ||
+		!p.ContChecks.Equal(other.ContChecks) ||
+		!p.PostChecks.Equal(other.PostChecks) ||
+		!p.DeferredChecks.Equal(other.DeferredChecks) {
+		return false
+	}
+	
+	// Compare Blocks slice
+	if len(p.Blocks) != len(other.Blocks) {
+		return false
+	}
+	for i, block := range p.Blocks {
+		if !block.Equal(other.Blocks[i]) {
+			return false
+		}
+	}
+	
+	return true
+}
+
 // Checks represents a set of actions that are executed before the workflow starts.
 type Checks struct {
 	// ID is a unique identifier for the object. Should not be set by the user.
@@ -350,6 +420,41 @@ func (c *Checks) validate(ctx context.Context) ([]validator, error) {
 	}
 
 	return vals, nil
+}
+
+// Equal compares two Checks instances for equality.
+// It excludes private fields (planID) from comparison.
+func (c *Checks) Equal(other *Checks) bool {
+	if c == nil && other == nil {
+		return true
+	}
+	if c == nil || other == nil {
+		return false
+	}
+	
+	// Compare basic fields
+	if c.ID != other.ID ||
+		c.Key != other.Key ||
+		c.Delay != other.Delay {
+		return false
+	}
+	
+	// Compare State
+	if !c.State.Equal(other.State) {
+		return false
+	}
+	
+	// Compare Actions slice
+	if len(c.Actions) != len(other.Actions) {
+		return false
+	}
+	for i, action := range c.Actions {
+		if !action.Equal(other.Actions[i]) {
+			return false
+		}
+	}
+	
+	return true
 }
 
 // Block represents a set of replated work. It contains a list of sequences that are executed with
@@ -496,6 +601,55 @@ func (b *Block) validate(ctx context.Context) ([]validator, error) {
 	return vals, nil
 }
 
+// Equal compares two Block instances for equality.
+// It excludes private fields (planID) from comparison.
+func (b *Block) Equal(other *Block) bool {
+	if b == nil && other == nil {
+		return true
+	}
+	if b == nil || other == nil {
+		return false
+	}
+	
+	// Compare basic fields
+	if b.ID != other.ID ||
+		b.Key != other.Key ||
+		b.Name != other.Name ||
+		b.Descr != other.Descr ||
+		b.EntranceDelay != other.EntranceDelay ||
+		b.ExitDelay != other.ExitDelay ||
+		b.Concurrency != other.Concurrency ||
+		b.ToleratedFailures != other.ToleratedFailures {
+		return false
+	}
+	
+	// Compare State
+	if !b.State.Equal(other.State) {
+		return false
+	}
+	
+	// Compare Check types
+	if !b.BypassChecks.Equal(other.BypassChecks) ||
+		!b.PreChecks.Equal(other.PreChecks) ||
+		!b.ContChecks.Equal(other.ContChecks) ||
+		!b.PostChecks.Equal(other.PostChecks) ||
+		!b.DeferredChecks.Equal(other.DeferredChecks) {
+		return false
+	}
+	
+	// Compare Sequences slice
+	if len(b.Sequences) != len(other.Sequences) {
+		return false
+	}
+	for i, sequence := range b.Sequences {
+		if !sequence.Equal(other.Sequences[i]) {
+			return false
+		}
+	}
+	
+	return true
+}
+
 // Sequence represents a set of Actions that are executed in sequence. Any error will cause the workflow to fail.
 type Sequence struct {
 	// ID is a unique identifier for the object. Should not be set by the user.
@@ -604,6 +758,42 @@ func (s *Sequence) validate(ctx context.Context) ([]validator, error) {
 	return vals, nil
 }
 
+// Equal compares two Sequence instances for equality.
+// It excludes private fields (planID) from comparison.
+func (s *Sequence) Equal(other *Sequence) bool {
+	if s == nil && other == nil {
+		return true
+	}
+	if s == nil || other == nil {
+		return false
+	}
+	
+	// Compare basic fields
+	if s.ID != other.ID ||
+		s.Key != other.Key ||
+		s.Name != other.Name ||
+		s.Descr != other.Descr {
+		return false
+	}
+	
+	// Compare State
+	if !s.State.Equal(other.State) {
+		return false
+	}
+	
+	// Compare Actions slice
+	if len(s.Actions) != len(other.Actions) {
+		return false
+	}
+	for i, action := range s.Actions {
+		if !action.Equal(other.Actions[i]) {
+			return false
+		}
+	}
+	
+	return true
+}
+
 // Attempt is the result of an action that is executed by a plugin.
 // Nothing in Attempt should be set by the user.
 type Attempt struct {
@@ -616,6 +806,20 @@ type Attempt struct {
 	Start time.Time
 	// End is the time the attempt ended.
 	End time.Time
+}
+
+// Equal compares two Attempt instances for equality.
+func (a *Attempt) Equal(other *Attempt) bool {
+	if a == nil && other == nil {
+		return true
+	}
+	if a == nil || other == nil {
+		return false
+	}
+	return reflect.DeepEqual(a.Resp, other.Resp) &&
+		reflect.DeepEqual(a.Err, other.Err) &&
+		a.Start.Equal(other.Start) &&
+		a.End.Equal(other.End)
 }
 
 // Action represents a single action that is executed by a plugin.
@@ -775,6 +979,50 @@ func (a *Action) FinalAttempt() *Attempt {
 		return nil
 	}
 	return a.Attempts[len(a.Attempts)-1]
+}
+
+// Equal compares two Action instances for equality.
+// It excludes private fields (planID and register) from comparison.
+func (a *Action) Equal(other *Action) bool {
+	if a == nil && other == nil {
+		return true
+	}
+	if a == nil || other == nil {
+		return false
+	}
+	
+	// Compare basic fields
+	if a.ID != other.ID ||
+		a.Key != other.Key ||
+		a.Name != other.Name ||
+		a.Descr != other.Descr ||
+		a.Plugin != other.Plugin ||
+		a.Timeout != other.Timeout ||
+		a.Retries != other.Retries {
+		return false
+	}
+	
+	// Compare Req using reflection since it's any type
+	if !reflect.DeepEqual(a.Req, other.Req) {
+		return false
+	}
+	
+	// Compare State
+	if !a.State.Equal(other.State) {
+		return false
+	}
+	
+	// Compare Attempts slice
+	if len(a.Attempts) != len(other.Attempts) {
+		return false
+	}
+	for i, attempt := range a.Attempts {
+		if !attempt.Equal(other.Attempts[i]) {
+			return false
+		}
+	}
+	
+	return true
 }
 
 type queue[T any] struct {
