@@ -3,23 +3,17 @@ package monitor
 import (
 	"fmt"
 	"iter"
+	"reflect"
 	"strings"
 	"time"
 
 	"github.com/fatih/color"
 	"github.com/inancgumus/screen"
-	"github.com/kylelemons/godebug/pretty"
 	"github.com/rodaine/table"
 
 	"github.com/element-of-surprise/coercion"
 	"github.com/element-of-surprise/coercion/workflow"
 )
-
-var pConfig = pretty.Config{
-	IncludeUnexported: false,
-	PrintStringers:    true,
-	SkipZeroFields:    true,
-}
 
 // Monitor is a function that listens to the workflow results iterator and prints a running summary.
 func Monitor(results iter.Seq[coercion.Result[*workflow.Plan]]) coercion.Result[*workflow.Plan] {
@@ -30,11 +24,10 @@ func Monitor(results iter.Seq[coercion.Result[*workflow.Plan]]) coercion.Result[
 			panic(result.Err)
 		}
 
-		diff := pConfig.Compare(last, result.Data)
-		last = result.Data
-		if diff == "" {
+		if reflect.DeepEqual(last, result.Data) {
 			continue
 		}
+		last = result.Data
 
 		screen.Clear()
 		screen.MoveTopLeft()
