@@ -91,6 +91,17 @@ func (s *State) Duration() time.Duration {
 	return s.End.Sub(s.Start)
 }
 
+// Equals compares two State instances for equality.
+func (s *State) Equals(other *State) bool {
+	if other == nil {
+		return false
+	}
+	return s.Status == other.Status &&
+		s.Start.Equal(other.Start) &&
+		s.End.Equal(other.End) &&
+		s.ETag == other.ETag
+}
+
 // validator is a type that validates its own fields. If the validator has sub-types that
 // need validation, it returns a list of validators that need to be validated.
 // This allows tests to be more modular instead of a super test of the entire object tree.
@@ -251,6 +262,101 @@ func (p *Plan) validate(ctx context.Context) ([]validator, error) {
 	return vals, nil
 }
 
+// Equals compares two Plan instances for equality.
+func (p *Plan) Equals(other *Plan) bool {
+	if other == nil {
+		return false
+	}
+	
+	// Handle nil mismatch for State
+	if (p.State == nil) != (other.State == nil) {
+		return false
+	}
+	
+	// If both State non-nil, compare using .Equals
+	if p.State != nil && !p.State.Equals(other.State) {
+		return false
+	}
+	
+	// Handle nil mismatch for BypassChecks
+	if (p.BypassChecks == nil) != (other.BypassChecks == nil) {
+		return false
+	}
+	
+	// If both BypassChecks non-nil, compare using .Equals
+	if p.BypassChecks != nil && !p.BypassChecks.Equals(other.BypassChecks) {
+		return false
+	}
+	
+	// Handle nil mismatch for PreChecks
+	if (p.PreChecks == nil) != (other.PreChecks == nil) {
+		return false
+	}
+	
+	// If both PreChecks non-nil, compare using .Equals
+	if p.PreChecks != nil && !p.PreChecks.Equals(other.PreChecks) {
+		return false
+	}
+	
+	// Handle nil mismatch for ContChecks
+	if (p.ContChecks == nil) != (other.ContChecks == nil) {
+		return false
+	}
+	
+	// If both ContChecks non-nil, compare using .Equals
+	if p.ContChecks != nil && !p.ContChecks.Equals(other.ContChecks) {
+		return false
+	}
+	
+	// Handle nil mismatch for PostChecks
+	if (p.PostChecks == nil) != (other.PostChecks == nil) {
+		return false
+	}
+	
+	// If both PostChecks non-nil, compare using .Equals
+	if p.PostChecks != nil && !p.PostChecks.Equals(other.PostChecks) {
+		return false
+	}
+	
+	// Handle nil mismatch for DeferredChecks
+	if (p.DeferredChecks == nil) != (other.DeferredChecks == nil) {
+		return false
+	}
+	
+	// If both DeferredChecks non-nil, compare using .Equals
+	if p.DeferredChecks != nil && !p.DeferredChecks.Equals(other.DeferredChecks) {
+		return false
+	}
+	
+	// Handle nil mismatch for Blocks
+	if (p.Blocks == nil) != (other.Blocks == nil) {
+		return false
+	}
+	
+	// Compare Blocks slice length and elements
+	if p.Blocks != nil {
+		if len(p.Blocks) != len(other.Blocks) {
+			return false
+		}
+		for i, block := range p.Blocks {
+			if (block == nil) != (other.Blocks[i] == nil) {
+				return false
+			}
+			if block != nil && !block.Equals(other.Blocks[i]) {
+				return false
+			}
+		}
+	}
+	
+	return p.ID == other.ID &&
+		p.Name == other.Name &&
+		p.Descr == other.Descr &&
+		p.GroupID == other.GroupID &&
+		reflect.DeepEqual(p.Meta, other.Meta) &&
+		p.SubmitTime.Equal(other.SubmitTime) &&
+		p.Reason == other.Reason
+}
+
 // Checks represents a set of actions that are executed before the workflow starts.
 type Checks struct {
 	// ID is a unique identifier for the object. Should not be set by the user.
@@ -350,6 +456,47 @@ func (c *Checks) validate(ctx context.Context) ([]validator, error) {
 	}
 
 	return vals, nil
+}
+
+// Equals compares two Checks instances for equality, excluding unexported fields.
+func (c *Checks) Equals(other *Checks) bool {
+	if other == nil {
+		return false
+	}
+	
+	// Handle nil mismatch for State
+	if (c.State == nil) != (other.State == nil) {
+		return false
+	}
+	
+	// If both State non-nil, compare using .Equals
+	if c.State != nil && !c.State.Equals(other.State) {
+		return false
+	}
+	
+	// Handle nil mismatch for Actions
+	if (c.Actions == nil) != (other.Actions == nil) {
+		return false
+	}
+	
+	// Compare Actions slice length and elements
+	if c.Actions != nil {
+		if len(c.Actions) != len(other.Actions) {
+			return false
+		}
+		for i, action := range c.Actions {
+			if (action == nil) != (other.Actions[i] == nil) {
+				return false
+			}
+			if action != nil && !action.Equals(other.Actions[i]) {
+				return false
+			}
+		}
+	}
+	
+	return c.ID == other.ID &&
+		c.Key == other.Key &&
+		c.Delay == other.Delay
 }
 
 // Block represents a set of replated work. It contains a list of sequences that are executed with
@@ -496,6 +643,102 @@ func (b *Block) validate(ctx context.Context) ([]validator, error) {
 	return vals, nil
 }
 
+// Equals compares two Block instances for equality, excluding unexported fields.
+func (b *Block) Equals(other *Block) bool {
+	if other == nil {
+		return false
+	}
+	
+	// Handle nil mismatch for State
+	if (b.State == nil) != (other.State == nil) {
+		return false
+	}
+	
+	// If both State non-nil, compare using .Equals
+	if b.State != nil && !b.State.Equals(other.State) {
+		return false
+	}
+	
+	// Handle nil mismatch for BypassChecks
+	if (b.BypassChecks == nil) != (other.BypassChecks == nil) {
+		return false
+	}
+	
+	// If both BypassChecks non-nil, compare using .Equals
+	if b.BypassChecks != nil && !b.BypassChecks.Equals(other.BypassChecks) {
+		return false
+	}
+	
+	// Handle nil mismatch for PreChecks
+	if (b.PreChecks == nil) != (other.PreChecks == nil) {
+		return false
+	}
+	
+	// If both PreChecks non-nil, compare using .Equals
+	if b.PreChecks != nil && !b.PreChecks.Equals(other.PreChecks) {
+		return false
+	}
+	
+	// Handle nil mismatch for ContChecks
+	if (b.ContChecks == nil) != (other.ContChecks == nil) {
+		return false
+	}
+	
+	// If both ContChecks non-nil, compare using .Equals
+	if b.ContChecks != nil && !b.ContChecks.Equals(other.ContChecks) {
+		return false
+	}
+	
+	// Handle nil mismatch for PostChecks
+	if (b.PostChecks == nil) != (other.PostChecks == nil) {
+		return false
+	}
+	
+	// If both PostChecks non-nil, compare using .Equals
+	if b.PostChecks != nil && !b.PostChecks.Equals(other.PostChecks) {
+		return false
+	}
+	
+	// Handle nil mismatch for DeferredChecks
+	if (b.DeferredChecks == nil) != (other.DeferredChecks == nil) {
+		return false
+	}
+	
+	// If both DeferredChecks non-nil, compare using .Equals
+	if b.DeferredChecks != nil && !b.DeferredChecks.Equals(other.DeferredChecks) {
+		return false
+	}
+	
+	// Handle nil mismatch for Sequences
+	if (b.Sequences == nil) != (other.Sequences == nil) {
+		return false
+	}
+	
+	// Compare Sequences slice length and elements
+	if b.Sequences != nil {
+		if len(b.Sequences) != len(other.Sequences) {
+			return false
+		}
+		for i, sequence := range b.Sequences {
+			if (sequence == nil) != (other.Sequences[i] == nil) {
+				return false
+			}
+			if sequence != nil && !sequence.Equals(other.Sequences[i]) {
+				return false
+			}
+		}
+	}
+	
+	return b.ID == other.ID &&
+		b.Key == other.Key &&
+		b.Name == other.Name &&
+		b.Descr == other.Descr &&
+		b.EntranceDelay == other.EntranceDelay &&
+		b.ExitDelay == other.ExitDelay &&
+		b.Concurrency == other.Concurrency &&
+		b.ToleratedFailures == other.ToleratedFailures
+}
+
 // Sequence represents a set of Actions that are executed in sequence. Any error will cause the workflow to fail.
 type Sequence struct {
 	// ID is a unique identifier for the object. Should not be set by the user.
@@ -604,6 +847,48 @@ func (s *Sequence) validate(ctx context.Context) ([]validator, error) {
 	return vals, nil
 }
 
+// Equals compares two Sequence instances for equality, excluding unexported fields.
+func (s *Sequence) Equals(other *Sequence) bool {
+	if other == nil {
+		return false
+	}
+	
+	// Handle nil mismatch for State
+	if (s.State == nil) != (other.State == nil) {
+		return false
+	}
+	
+	// If both State non-nil, compare using .Equals
+	if s.State != nil && !s.State.Equals(other.State) {
+		return false
+	}
+	
+	// Handle nil mismatch for Actions
+	if (s.Actions == nil) != (other.Actions == nil) {
+		return false
+	}
+	
+	// Compare Actions slice length and elements
+	if s.Actions != nil {
+		if len(s.Actions) != len(other.Actions) {
+			return false
+		}
+		for i, action := range s.Actions {
+			if (action == nil) != (other.Actions[i] == nil) {
+				return false
+			}
+			if action != nil && !action.Equals(other.Actions[i]) {
+				return false
+			}
+		}
+	}
+	
+	return s.ID == other.ID &&
+		s.Key == other.Key &&
+		s.Name == other.Name &&
+		s.Descr == other.Descr
+}
+
 // Attempt is the result of an action that is executed by a plugin.
 // Nothing in Attempt should be set by the user.
 type Attempt struct {
@@ -616,6 +901,27 @@ type Attempt struct {
 	Start time.Time
 	// End is the time the attempt ended.
 	End time.Time
+}
+
+// Equals compares two Attempt instances for equality.
+func (a *Attempt) Equals(other *Attempt) bool {
+	if other == nil {
+		return false
+	}
+	
+	// Handle nil mismatch for Err
+	if (a.Err == nil) != (other.Err == nil) {
+		return false
+	}
+	
+	// If both non-nil, compare using .Equals
+	if a.Err != nil && !a.Err.Equals(other.Err) {
+		return false
+	}
+	
+	return reflect.DeepEqual(a.Resp, other.Resp) &&
+		a.Start.Equal(other.Start) &&
+		a.End.Equal(other.End)
 }
 
 // Action represents a single action that is executed by a plugin.
@@ -775,6 +1081,52 @@ func (a *Action) FinalAttempt() *Attempt {
 		return nil
 	}
 	return a.Attempts[len(a.Attempts)-1]
+}
+
+// Equals compares two Action instances for equality, excluding unexported fields.
+func (a *Action) Equals(other *Action) bool {
+	if other == nil {
+		return false
+	}
+	
+	// Handle nil mismatch for State
+	if (a.State == nil) != (other.State == nil) {
+		return false
+	}
+	
+	// If both State non-nil, compare using .Equals
+	if a.State != nil && !a.State.Equals(other.State) {
+		return false
+	}
+	
+	// Handle nil mismatch for Attempts
+	if (a.Attempts == nil) != (other.Attempts == nil) {
+		return false
+	}
+	
+	// Compare Attempts slice length and elements
+	if a.Attempts != nil {
+		if len(a.Attempts) != len(other.Attempts) {
+			return false
+		}
+		for i, attempt := range a.Attempts {
+			if (attempt == nil) != (other.Attempts[i] == nil) {
+				return false
+			}
+			if attempt != nil && !attempt.Equals(other.Attempts[i]) {
+				return false
+			}
+		}
+	}
+	
+	return a.ID == other.ID &&
+		a.Key == other.Key &&
+		a.Name == other.Name &&
+		a.Descr == other.Descr &&
+		a.Plugin == other.Plugin &&
+		a.Timeout == other.Timeout &&
+		a.Retries == other.Retries &&
+		reflect.DeepEqual(a.Req, other.Req)
 }
 
 type queue[T any] struct {

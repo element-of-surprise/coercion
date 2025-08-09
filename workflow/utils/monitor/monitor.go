@@ -30,9 +30,18 @@ func Monitor(results iter.Seq[coercion.Result[*workflow.Plan]]) coercion.Result[
 			panic(result.Err)
 		}
 
-		diff := pConfig.Compare(last, result.Data)
+		// Check if the plan has changed using our custom Equals method
+		var changed bool
+		if last == nil {
+			changed = true
+		} else if last.Equals(result.Data) {
+			changed = false
+		} else {
+			changed = true
+		}
+		
 		last = result.Data
-		if diff == "" {
+		if !changed {
 			continue
 		}
 

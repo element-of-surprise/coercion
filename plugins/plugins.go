@@ -50,6 +50,23 @@ func (e *Error) Unwrap() error {
 	return e.Wrapped
 }
 
+// Equals compares two Error instances for equality.
+func (e *Error) Equals(other *Error) bool {
+	if other == nil {
+		return false
+	}
+	if e.Code != other.Code || e.Message != other.Message || e.Permanent != other.Permanent {
+		return false
+	}
+	if e.Wrapped == nil && other.Wrapped == nil {
+		return true
+	}
+	if e.Wrapped == nil || other.Wrapped == nil {
+		return false
+	}
+	return e.Wrapped.Equals(other.Wrapped)
+}
+
 // Plugin is the interface that must be implemented by all plugins.
 type Plugin interface {
 	// Name returns the name of the plugin. This must be unique in the registry.
