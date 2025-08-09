@@ -106,13 +106,9 @@ func (r Runner) Execute(req statemachine.Request[Data]) statemachine.Request[Dat
 	plugin := req.Data.plugin
 	writer := req.Data.Updater
 
-	backoff, err := exponential.New(
-		exponential.WithPolicy(req.Data.plugin.RetryPolicy()),
+	backoff := exponential.Must(
+		exponential.New(exponential.WithPolicy(req.Data.plugin.RetryPolicy())),
 	)
-	// This should be protected by upper level code. If it fails, we should panic.
-	if err != nil {
-		log.Fatalf("failed to create backoff policy: %v", err)
-	}
 
 	req.Data.err = backoff.Retry(
 		req.Ctx,
