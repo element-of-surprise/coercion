@@ -3,7 +3,6 @@ package workflow
 import (
 	"bytes"
 	"reflect"
-	"unsafe"
 
 	"github.com/element-of-surprise/coercion/plugins"
 )
@@ -296,15 +295,18 @@ type objectEqual[T any] interface {
 }
 
 func sliceOfObjectsEqual[O any, T objectEqual[O]](a, b []T) bool {
-	// This does a pointer comparison between a slice's data pointer. If these two are the same array,
-	// then the are the same data. This trick is used in reflect.DeepEqual() but for some reason not in
-	// slices.Equal().
-	if unsafe.SliceData(a) == unsafe.SliceData(b) {
+	if len(a) != len(b) {
+		return false
+	}
+	if len(a) == 0 && len(b) == 0 {
 		return true
 	}
 
-	if len(a) != len(b) {
-		return false
+	// This does a pointer comparison between a slice's data pointer. If these two are the same array,
+	// then the are the same data. This trick is used in reflect.DeepEqual() but for some reason not in
+	// slices.Equal().
+	if &a[0] == &b[0] {
+		return true
 	}
 
 	for i := range a {
