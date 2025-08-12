@@ -26,6 +26,7 @@ func Monitor(results iter.Seq[coercion.Result[*workflow.Plan]]) coercion.Result[
 		if result.Data.Equal(last) {
 			continue
 		}
+		last = result.Data
 
 		screen.Clear()
 		screen.MoveTopLeft()
