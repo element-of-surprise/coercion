@@ -458,7 +458,6 @@ func (b *Block) Defaults() {
 	b.State = &State{
 		Status: NotStarted,
 	}
-	return
 }
 
 func (b *Block) validate(ctx context.Context) ([]validator, error) {
@@ -494,6 +493,11 @@ func (b *Block) validate(ctx context.Context) ([]validator, error) {
 		vals = append(vals, seq)
 	}
 	return vals, nil
+}
+
+// self simply returns itself. This is here to allows use in a generic interface for equality operations.
+func (b *Block) self() *Block {
+	return b
 }
 
 // Sequence represents a set of Actions that are executed in sequence. Any error will cause the workflow to fail.
@@ -604,6 +608,11 @@ func (s *Sequence) validate(ctx context.Context) ([]validator, error) {
 	return vals, nil
 }
 
+// self simply returns itself. This is here to allows use in a generic interface for equality operations.
+func (s *Sequence) self() *Sequence {
+	return s
+}
+
 // Attempt is the result of an action that is executed by a plugin.
 // Nothing in Attempt should be set by the user.
 type Attempt struct {
@@ -616,6 +625,11 @@ type Attempt struct {
 	Start time.Time
 	// End is the time the attempt ended.
 	End time.Time
+}
+
+// self simply returns itself. This is here to allows use in a generic interface for equality operations.
+func (a *Attempt) self() *Attempt {
+	return a
 }
 
 // Action represents a single action that is executed by a plugin.
@@ -775,6 +789,11 @@ func (a *Action) FinalAttempt() *Attempt {
 		return nil
 	}
 	return a.Attempts[len(a.Attempts)-1]
+}
+
+// self simply returns itself. This is here to allows use in a generic interface for equality operations.
+func (a *Action) self() *Action {
+	return a
 }
 
 type queue[T any] struct {
