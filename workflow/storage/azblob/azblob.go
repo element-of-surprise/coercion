@@ -1,0 +1,229 @@
+/*
+Package azblob provides an Azure Blob Storage-based storage implementation for workflow.Plan data.
+This is used to implement the storage.Vault interface.
+
+This package is for use only by the coercion.Workstream and any use outside of that is not supported.
+
+DO NOT USE THIS PACKAGE!!!! SERIOUSLY, DO NOT USE THIS PACKAGE!!!!!
+This package is internal to the workflow engine.
+*/
+package azblob
+
+import (
+	"fmt"
+	"log/slog"
+	"time"
+	"unsafe"
+
+	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
+	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob"
+	"github.com/google/uuid"
+	"github.com/gostdlib/base/concurrency/sync"
+	"github.com/gostdlib/base/context"
+	"github.com/gostdlib/base/retry/exponential"
+
+	"github.com/element-of-surprise/coercion/internal/private"
+	"github.com/element-of-surprise/coercion/plugins"
+	"github.com/element-of-surprise/coercion/plugins/registry"
+	"github.com/element-of-surprise/coercion/workflow"
+	"github.com/element-of-surprise/coercion/workflow/errors"
+	"github.com/element-of-surprise/coercion/workflow/storage"
+
+	_ "embed"
+)
+
+// This validates that the Vault type implements the storage.Vault interface.
+var _ storage.Vault = &Vault{}
+
+// Vault implements the storage.Vault interface using Azure Blob Storage.
+type Vault struct {
+	// prefix is the prefix for blob names and container names.
+	// This is typically a cluster ID or similar identifier.
+	prefix string
+	// endpoint is the Azure Blob Storage account endpoint.
+	// For example: https://mystorageaccount.blob.core.windows.net
+	endpoint string
+
+	client *azblob.Client
+	mu     *sync.RWMutex
+
+	reader
+	creator
+	updater
+	closer
+	deleter
+	recovery
+
+	private.Storage
+}
+
+var backoff *exponential.Backoff
+
+func init() {
+	policy := plugins.SecondsRetryPolicy()
+	policy.MaxAttempts = 5
+	backoff = exponential.Must(exponential.New(exponential.WithPolicy(policy)))
+}
+
+// Option is an option for configuring a Vault.
+type Option func(*Vault) error
+
+// New is the constructor for *Vault. prefix is used as the container prefix and blob prefix
+// to namespace blobs for this instance. endpoint is the Azure Blob Storage account endpoint
+// (e.g., https://mystorageaccount.blob.core.windows.net). cred is the Azure token credential.
+// reg is the coercion registry.
+func New(ctx context.Context, prefix, endpoint string, cred azcore.TokenCredential, reg *registry.Register, options ...Option) (*Vault, error) {
+	ctx = context.WithoutCancel(ctx)
+
+	if prefix == "" {
+		return nil, errors.E(ctx, errors.CatInternal, errors.TypeBug, errors.New("prefix cannot be empty"))
+	}
+	if endpoint == "" {
+		return nil, errors.E(ctx, errors.CatInternal, errors.TypeBug, errors.New("endpoint cannot be empty"))
+	}
+	if cred == nil {
+		return nil, errors.E(ctx, errors.CatInternal, errors.TypeBug, errors.New("credential cannot be nil"))
+	}
+	if reg == nil {
+		return nil, errors.E(ctx, errors.CatInternal, errors.TypeBug, errors.New("registry cannot be nil"))
+	}
+
+	v := &Vault{
+		prefix:   prefix,
+		endpoint: endpoint,
+		mu:       &sync.RWMutex{},
+	}
+
+	for _, o := range options {
+		if err := o(v); err != nil {
+			return nil, errors.E(ctx, errors.CatInternal, errors.TypeBug, err)
+		}
+	}
+
+	client, err := azblob.NewClient(endpoint, cred, nil)
+	if err != nil {
+		return nil, errors.E(ctx, errors.CatInternal, errors.TypeConn, fmt.Errorf("failed to create blob client: %w", err))
+	}
+	v.client = client
+
+	v.reader = reader{
+		mu:       v.mu,
+		prefix:   prefix,
+		client:   client,
+		endpoint: endpoint,
+		reg:      reg,
+	}
+	v.creator = creator{
+		mu:       v.mu,
+		prefix:   prefix,
+		client:   client,
+		endpoint: endpoint,
+		reader:   v.reader,
+	}
+	v.updater = newUpdater(v.mu, prefix, client, endpoint)
+	v.deleter = deleter{
+		mu:       v.mu,
+		prefix:   prefix,
+		client:   client,
+		endpoint: endpoint,
+		reader:   v.reader,
+	}
+	v.closer = closer{}
+	v.recovery = recovery{
+		reader:  v.reader,
+		updater: v.updater,
+	}
+
+	return v, nil
+}
+
+// containerExists checks if a container exists.
+func containerExists(ctx context.Context, client *azblob.Client, containerName string) (bool, error) {
+	containerClient := client.ServiceClient().NewContainerClient(containerName)
+	_, err := containerClient.GetProperties(ctx, nil)
+	if err != nil {
+		if isNotFound(err) {
+			return false, nil
+		}
+		return false, fmt.Errorf("failed to check container existence: %w", err)
+	}
+	return true, nil
+}
+
+// createContainer creates a container if it doesn't exist.
+func createContainer(ctx context.Context, client *azblob.Client, containerName string) error {
+	containerClient := client.ServiceClient().NewContainerClient(containerName)
+	_, err := containerClient.Create(ctx, nil)
+	if err != nil {
+		if isConflict(err) {
+			slog.Default().Debug(fmt.Sprintf("container(%s) already exists", containerName))
+			return nil
+		}
+		return fmt.Errorf("failed to create container(%s): %w", containerName, err)
+	}
+	return nil
+}
+
+// ensureContainer creates a container if it doesn't exist.
+func ensureContainer(ctx context.Context, client *azblob.Client, containerName string) error {
+	exists, err := containerExists(ctx, client, containerName)
+	if err != nil {
+		return err
+	}
+	if !exists {
+		return createContainer(ctx, client, containerName)
+	}
+	return nil
+}
+
+// uploadBlob uploads a blob with retry logic.
+func uploadBlob(ctx context.Context, client *azblob.Client, containerName, blobName string, md map[string]*string, data []byte) error {
+	uploadOp := func(ctx context.Context, r exponential.Record) error {
+		opts := &azblob.UploadBufferOptions{
+			Metadata: md,
+		}
+		_, err := client.UploadBuffer(ctx, containerName, blobName, data, opts)
+		if err != nil {
+			if !isRetriableError(err) {
+				return fmt.Errorf("%w: %w", err, exponential.ErrPermanent)
+			}
+			return err
+		}
+		return nil
+	}
+
+	if err := backoff.Retry(context.WithoutCancel(ctx), uploadOp); err != nil {
+		return fmt.Errorf("failed to upload blob %s: %w", blobName, err)
+	}
+
+	return nil
+}
+
+// findObjectContainer finds the container where an object blob exists.
+func findObjectContainer(prefix string, obj workflow.Object) (string, error) {
+	// Extract planID from the object (all objects have a planID)
+	var planID uuid.UUID
+	switch o := obj.(type) {
+	case *workflow.Block:
+		planID = o.GetPlanID()
+	case *workflow.Sequence:
+		planID = o.GetPlanID()
+	case *workflow.Checks:
+		planID = o.GetPlanID()
+	case *workflow.Action:
+		planID = o.GetPlanID()
+	default:
+		return "", fmt.Errorf("unknown object type: %T", obj)
+	}
+
+	t := time.Unix(planID.Time().UnixTime()).UTC()
+	return containerName(prefix, t), nil
+}
+
+func strToBytes(s string) []byte {
+	return unsafe.Slice(unsafe.StringData(s), len(s))
+}
+
+func bytesToStr(b []byte) string {
+	return unsafe.String(unsafe.SliceData(b), len(b))
+}
