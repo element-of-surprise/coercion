@@ -12,6 +12,7 @@ package azblob
 import (
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 	"unsafe"
 
@@ -135,6 +136,34 @@ func New(ctx context.Context, prefix, endpoint string, cred azcore.TokenCredenti
 	}
 
 	return v, nil
+}
+
+// Teardown deletes all containers and blobs with the given prefix. This is intended for use in tests only.
+func Teardown(ctx context.Context, endpoint, prefix string, cred azcore.TokenCredential) error {
+	client, err := azblob.NewClient(endpoint, cred, nil)
+	if err != nil {
+		return errors.E(ctx, errors.CatInternal, errors.TypeConn, fmt.Errorf("failed to create blob client: %w", err))
+	}
+	pager := client.NewListContainersPager(nil)
+	for pager.More() {
+		page, err := pager.NextPage(ctx)
+		if err != nil {
+			return errors.E(ctx, errors.CatInternal, errors.TypeConn, fmt.Errorf("failed to list containers: %w", err))
+		}
+		for _, container := range page.ContainerItems {
+			if container.Name == nil {
+				continue
+			}
+			name := *container.Name
+			if strings.HasPrefix(name, prefix) {
+
+				if _, err := client.DeleteContainer(ctx, name, nil); err != nil {
+					return errors.E(ctx, errors.CatInternal, errors.TypeStorageDelete, fmt.Errorf("failed to delete container(%s): %w", name, err))
+				}
+			}
+		}
+	}
+	return nil
 }
 
 // containerExists checks if a container exists.
