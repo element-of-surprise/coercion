@@ -16,8 +16,9 @@ var _ storage.Recovery = recovery{}
 
 // recovery implements the storage.Recovery interface.
 type recovery struct {
-	reader  reader
-	updater updater
+	reader   reader
+	updater  updater
+	uploader *uploader
 
 	private.Storage
 }
@@ -128,7 +129,7 @@ func (r recovery) ensureBlockBlob(ctx context.Context, c creator, containerName 
 	}
 
 	if !exists {
-		if err := c.uploadBlockBlob(ctx, containerName, planID, block, pos); err != nil {
+		if err := r.uploader.uploadBlockBlob(ctx, containerName, planID, block, pos); err != nil {
 			return fmt.Errorf("failed to recreate block blob: %w", err)
 		}
 	}
@@ -159,7 +160,7 @@ func (r recovery) ensureSequenceBlob(ctx context.Context, c creator, containerNa
 	}
 
 	if !exists {
-		if err := c.uploadSequenceBlob(ctx, containerName, planID, seq, pos); err != nil {
+		if err := r.uploader.uploadSequenceBlob(ctx, containerName, planID, seq, pos); err != nil {
 			return fmt.Errorf("failed to recreate sequence blob: %w", err)
 		}
 	}
@@ -182,7 +183,7 @@ func (r recovery) ensureChecksBlob(ctx context.Context, c creator, containerName
 	}
 
 	if !exists {
-		if err := c.uploadChecksBlob(ctx, containerName, planID, checks); err != nil {
+		if err := r.uploader.uploadChecksBlob(ctx, containerName, planID, checks); err != nil {
 			return fmt.Errorf("failed to recreate checks blob: %w", err)
 		}
 	}
@@ -206,7 +207,7 @@ func (r recovery) ensureActionBlob(ctx context.Context, c creator, containerName
 
 	// If blob doesn't exist, create it
 	if !exists {
-		if err := c.uploadActionBlob(ctx, containerName, planID, action, pos); err != nil {
+		if err := r.uploader.uploadActionBlob(ctx, containerName, planID, action, pos); err != nil {
 			return fmt.Errorf("failed to recreate action blob: %w", err)
 		}
 	}

@@ -16,7 +16,7 @@ require (
 	github.com/google/go-github/v61 v61.0.0
 	github.com/google/goexpect v0.0.0-20210430020637-ab937bf7fd6f
 	github.com/google/uuid v1.6.0
-	github.com/gostdlib/base v0.0.0-20250801162137-d4d5810ab5ed
+	github.com/gostdlib/base v0.0.0-20251006165448-0ffd4328fcdd
 	github.com/inancgumus/screen v0.0.0-20190314163918-06e984b86ed3
 	github.com/kylelemons/godebug v1.1.0
 	github.com/rodaine/table v1.3.0

@@ -1,13 +1,115 @@
 package azblob
 
 import (
+	"bytes"
 	"fmt"
+	"reflect"
+	"strings"
 	"time"
 
+	"github.com/element-of-surprise/coercion/plugins"
+	"github.com/element-of-surprise/coercion/plugins/registry"
 	"github.com/element-of-surprise/coercion/workflow"
+	"github.com/element-of-surprise/coercion/workflow/errors"
+	"github.com/element-of-surprise/coercion/workflow/storage"
 	"github.com/go-json-experiment/json"
+	"github.com/go-json-experiment/json/jsontext"
 	"github.com/google/uuid"
+	"github.com/gostdlib/base/context"
 )
+
+const (
+	mdKeyPlanID     = "planid"
+	mdKeyGroupID    = "groupid"
+	mdKeyName       = "name"
+	mdKeyDescr      = "descr"
+	mdKeySubmitTime = "submittime"
+	mdKeyState      = "state"
+	mdPlanType      = "plantype"
+)
+
+const (
+	// ptEntry means the file contains a planEntry structure.
+	ptEntry = "entry"
+	// ptBlocks means the file contains the actual plan object.
+	ptObject = "object"
+)
+
+// planMeta is a wrapper around ListResult that includes the plan type.
+type planMeta struct {
+	storage.ListResult
+	PlanType string
+}
+
+// mapToPlanMeta converts a metadata map to a planMeta structure. The keys in the map can have any case and that case
+// can change between each pull of the metadata from blob storage. I'm not sure who to blame here, the SDK or the service,
+// but this is completely nutso (they could have forced lower case keys in their own map type so everything would be case
+// insensitive on match, or made this a list instead of a map. Nope, so we have to loop over all keys and do case insensitive
+// matches ourselves doing another loop over the values. Ugh.
+func mapToPlanMeta(m map[string]*string) (planMeta, error) {
+	pm := planMeta{}
+	lr := storage.ListResult{}
+	for k, v := range m {
+		if v == nil {
+			continue
+		}
+		switch strings.ToLower(k) {
+		case mdKeyPlanID:
+			id, err := uuid.Parse(*v)
+			if err != nil {
+				return planMeta{}, fmt.Errorf("invalid plan ID in metadata: %w", err)
+			}
+			lr.ID = id
+		case mdKeyGroupID:
+			id, err := uuid.Parse(*v)
+			if err != nil {
+				return planMeta{}, fmt.Errorf("invalid group ID in metadata: %w", err)
+			}
+			lr.GroupID = id
+		case mdKeyName:
+			lr.Name = *v
+		case mdKeyDescr:
+			lr.Descr = *v
+		case mdKeySubmitTime:
+			t, err := time.Parse(time.RFC3339, *v)
+			if err != nil {
+				return planMeta{}, fmt.Errorf("invalid submit time in metadata: %w", err)
+			}
+			lr.SubmitTime = t
+		case mdKeyState:
+			var state workflow.State
+			if err := json.Unmarshal([]byte(*v), &state); err != nil {
+				return planMeta{}, fmt.Errorf("invalid state in metadata: %w", err)
+			}
+			lr.State = &state
+		case mdPlanType:
+			pm.PlanType = *v
+		}
+	}
+	pm.ListResult = lr
+	return pm, nil
+}
+
+// planToMetadata converts a workflow.Plan to a metadata map for blob storage.
+func planToMetadata(ctx context.Context, p *workflow.Plan) (map[string]*string, error) {
+	stateJSON, err := json.Marshal(p.State)
+	if err != nil {
+		return nil, errors.E(ctx, errors.CatInternal, errors.TypeStoragePut, fmt.Errorf("failed to marshal plan state: %w", err))
+	}
+
+	md := map[string]*string{
+		mdKeyPlanID:     toPtr(p.ID.String()),
+		mdKeyName:       toPtr(p.Name),
+		mdKeyDescr:      toPtr(p.Descr),
+		mdKeySubmitTime: toPtr(p.SubmitTime.Format(time.RFC3339Nano)),
+		mdKeyState:      toPtr(bytesToStr(stateJSON)),
+	}
+
+	if p.GroupID != uuid.Nil {
+		md[mdKeyGroupID] = toPtr(p.GroupID.String())
+	}
+	return md, nil
+}
 
 // planEntry represents a lightweight Plan structure in blob storage with IDs only.
 // This is used for running plans and contains only references to sub-objects.
@@ -41,8 +143,8 @@ type blocksEntry struct {
 	Name              string              `json:"name"`
 	Descr             string              `json:"descr"`
 	Pos               int                 `json:"pos"`
-	EntranceDelay     time.Duration       `json:"entranceDelay,omitempty"`
-	ExitDelay         time.Duration       `json:"exitDelay,omitempty"`
+	EntranceDelay     time.Duration       `json:"entranceDelay,omitempty,format:iso8601"`
+	ExitDelay         time.Duration       `json:"exitDelay,omitempty,format:iso8601"`
 	BypassChecks      uuid.UUID           `json:"bypassChecks,omitempty"`
 	PreChecks         uuid.UUID           `json:"preChecks,omitempty"`
 	PostChecks        uuid.UUID           `json:"postChecks,omitempty"`
@@ -63,7 +165,7 @@ type checksEntry struct {
 	Key         uuid.UUID           `json:"key,omitempty"`
 	PlanID      uuid.UUID           `json:"planID"`
 	Actions     []uuid.UUID         `json:"actions,omitempty"`
-	Delay       time.Duration       `json:"delay,omitempty"`
+	Delay       time.Duration       `json:"delay,omitempty,format:iso8601"`
 	StateStatus workflow.Status     `json:"stateStatus"`
 	StateStart  time.Time           `json:"stateStart,omitzero"`
 	StateEnd    time.Time           `json:"stateEnd,omitzero"`
@@ -94,7 +196,7 @@ type actionsEntry struct {
 	Descr       string              `json:"descr"`
 	Pos         int                 `json:"pos"`
 	Plugin      string              `json:"plugin"`
-	Timeout     time.Duration       `json:"timeout"`
+	Timeout     time.Duration       `json:"timeout,format:iso8601"`
 	Retries     int                 `json:"retries"`
 	Req         []byte              `json:"req,omitempty"`
 	Attempts    []byte              `json:"attempts,omitempty"`
@@ -371,43 +473,99 @@ func actionToEntry(a *workflow.Action, pos int) (actionsEntry, error) {
 			return actionsEntry{}, fmt.Errorf("failed to marshal action request: %w", err)
 		}
 	}
+
 	if len(a.Attempts) > 0 {
-		entry.Attempts, err = json.Marshal(a.Attempts)
+		attempts, err := json.Marshal(a.Attempts)
 		if err != nil {
-			return actionsEntry{}, fmt.Errorf("failed to marshal action attempts: %w", err)
+			return actionsEntry{}, fmt.Errorf("can't encode action.Attempts: %w", err)
 		}
+		entry.Attempts = attempts
 	}
 
 	return entry, nil
 }
 
 // entryToAction converts an actionsEntry back to a workflow.Action.
-func entryToAction(entry actionsEntry) (*workflow.Action, error) {
+func entryToAction(ctx context.Context, reg *registry.Register, response []byte) (*workflow.Action, error) {
+	var err error
+	var resp actionsEntry
+	if err = json.Unmarshal(response, &resp); err != nil {
+		return nil, errors.E(ctx, errors.CatInternal, errors.TypeStorageGet, fmt.Errorf("failed to unmarshal action: %w", err))
+	}
+
 	a := &workflow.Action{
-		ID:      entry.ID,
-		Key:     entry.Key,
-		Name:    entry.Name,
-		Descr:   entry.Descr,
-		Plugin:  entry.Plugin,
-		Timeout: entry.Timeout,
-		Retries: entry.Retries,
+		ID:      resp.ID,
+		Key:     resp.Key,
+		Name:    resp.Name,
+		Descr:   resp.Descr,
+		Plugin:  resp.Plugin,
+		Timeout: resp.Timeout,
+		Retries: resp.Retries,
 		State: &workflow.State{
-			Status: entry.StateStatus,
-			Start:  entry.StateStart,
-			End:    entry.StateEnd,
+			Status: resp.StateStatus,
+			Start:  resp.StateStart,
+			End:    resp.StateEnd,
 		},
 	}
-	a.SetPlanID(entry.PlanID)
+	a.SetPlanID(resp.PlanID)
 
-	// Unmarshal Req and Attempts from JSON bytes
-	// Note: Req type will be set during reconstruction based on plugin
-	if len(entry.Attempts) > 0 {
-		var attempts []*workflow.Attempt
-		if err := json.Unmarshal(entry.Attempts, &attempts); err != nil {
-			return nil, fmt.Errorf("failed to unmarshal action attempts: %w", err)
+	plug := reg.Plugin(a.Plugin)
+	if plug == nil {
+		return nil, fmt.Errorf("couldn't find plugin %s", a.Plugin)
+	}
+	b := resp.Req
+	if len(b) > 0 {
+		req := plug.Request()
+		if req != nil {
+			if reflect.TypeOf(req).Kind() != reflect.Pointer {
+				if err := json.Unmarshal(b, &req); err != nil {
+					return nil, fmt.Errorf("couldn't unmarshal request: %w", err)
+				}
+			} else {
+				if err := json.Unmarshal(b, req); err != nil {
+					return nil, fmt.Errorf("couldn't unmarshal request: %w", err)
+				}
+			}
+			a.Req = req
 		}
-		a.Attempts = attempts
+	}
+
+	b = resp.Attempts
+	if len(b) > 0 {
+		a.Attempts, err = decodeAttempts(ctx, b, plug)
+		if err != nil {
+			return nil, fmt.Errorf("couldn't decode attempts: %w", err)
+		}
 	}
 
 	return a, nil
+}
+
+// decodeAttempts decodes a JSON array of JSON encoded attempts as byte slices into a slice of attempts.
+func decodeAttempts(ctx context.Context, rawAttempts []byte, plug plugins.Plugin) ([]*workflow.Attempt, error) {
+	if len(rawAttempts) == 0 {
+		return nil, nil
+	}
+
+	var attempts []*workflow.Attempt
+
+	dec := jsontext.NewDecoder(bytes.NewReader(rawAttempts))
+	if dec.PeekKind() != jsontext.BeginArray.Kind() {
+		return nil, errors.E(ctx, errors.CatInternal, errors.TypeStorageGet, fmt.Errorf("invalid attempts format"))
+	}
+	dec.ReadToken()
+
+	for {
+		k := dec.PeekKind()
+		if k == jsontext.EndArray.Kind() {
+			break
+		}
+
+		var a = &workflow.Attempt{Resp: plug.Response()}
+		if err := json.UnmarshalDecode(dec, a); err != nil {
+			return nil, errors.E(ctx, errors.CatInternal, errors.TypeStorageGet, fmt.Errorf("failed to unmarshal attempt: %w", err))
+		}
+		attempts = append(attempts, a)
+	}
+	return attempts, nil
 }

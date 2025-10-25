@@ -2,6 +2,15 @@
 Package azblob provides an Azure Blob Storage-based storage implementation for workflow.Plan data.
 This is used to implement the storage.Vault interface.
 
+When on Azure, consider using for either cost or availability reasons. SQLite on distributed storage can be a cost
+effective solution. CosmosDB is a more robust solution, but it has higher costs, the Go SDK is not as mature (so we had
+to do some hacks around cross partition key searches) and is not available in all regions.
+
+Blob storage is cheap and highly available. However without transaction support, the first data write and the last one
+are very expensive. It is the number of objects + 2 writes per plan and we use concurrency to make this livable.
+This lets us do a kind of transaction journal that lets us recover from partial writes. Updates are cheap,
+as they only touch the object that changed.
+
 This package is for use only by the coercion.Workstream and any use outside of that is not supported.
 
 DO NOT USE THIS PACKAGE!!!! SERIOUSLY, DO NOT USE THIS PACKAGE!!!!!
@@ -18,6 +27,7 @@ import (
 
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
 	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob"
+	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob/blob"
 	"github.com/google/uuid"
 	"github.com/gostdlib/base/concurrency/sync"
 	"github.com/gostdlib/base/context"
@@ -107,6 +117,12 @@ func New(ctx context.Context, prefix, endpoint string, cred azcore.TokenCredenti
 	}
 	v.client = client
 
+	uploader := &uploader{
+		client: v.client,
+		prefix: v.prefix,
+		pool:   context.Pool(ctx).Limited(20),
+	}
+
 	v.reader = reader{
 		mu:       v.mu,
 		prefix:   prefix,
@@ -120,8 +136,9 @@ func New(ctx context.Context, prefix, endpoint string, cred azcore.TokenCredenti
 		client:   client,
 		endpoint: endpoint,
 		reader:   v.reader,
+		uploader: uploader,
 	}
-	v.updater = newUpdater(v.mu, prefix, client, endpoint)
+	v.updater = newUpdater(v.mu, prefix, client, endpoint, uploader)
 	v.deleter = deleter{
 		mu:       v.mu,
 		prefix:   prefix,
@@ -131,8 +148,9 @@ func New(ctx context.Context, prefix, endpoint string, cred azcore.TokenCredenti
 	}
 	v.closer = closer{}
 	v.recovery = recovery{
-		reader:  v.reader,
-		updater: v.updater,
+		reader:   v.reader,
+		updater:  v.updater,
+		uploader: uploader,
 	}
 
 	return v, nil
@@ -226,6 +244,13 @@ func uploadBlob(ctx context.Context, client *azblob.Client, containerName, blobN
 	}
 
 	return nil
+}
+
+// deleteBlob deletes a blob (used for cleanup on failure).
+func deleteBlob(ctx context.Context, client *azblob.Client, containerName, blobName string) error {
+	blobClient := client.ServiceClient().NewContainerClient(containerName).NewBlobClient(blobName)
+	_, err := blobClient.Delete(ctx, &blob.DeleteOptions{})
+	return err
 }
 
 // findObjectContainer finds the container where an object blob exists.

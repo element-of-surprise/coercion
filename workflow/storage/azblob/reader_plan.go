@@ -41,13 +41,13 @@ func (r reader) fetchPlanFromContainer(ctx context.Context, id uuid.UUID) (*work
 		return nil, errors.E(ctx, errors.CatInternal, errors.TypeStorageGet, fmt.Errorf("failed to get planEntry blob properties: %w", err))
 	}
 
-	lr, err := r.parsePlanMetadata(props.Metadata)
+	pm, err := mapToPlanMeta(props.Metadata)
 	if err != nil {
 		return nil, errors.E(ctx, errors.CatInternal, errors.TypeStorageGet, fmt.Errorf("failed to parse planEntry metadata: %w", err))
 	}
 
-	if lr.State.Status == workflow.Running {
-		return r.fetchRunningPlan(ctx, containerName, id, lr)
+	if pm.State.Status == workflow.Running {
+		return r.fetchRunningPlan(ctx, containerName, id, pm.ListResult)
 	}
 
 	// Not running - read the workflow.Plan object blob directly
@@ -322,12 +322,7 @@ func (r reader) fetchAction(ctx context.Context, containerName string, planID, a
 		return nil, errors.E(ctx, errors.CatInternal, errors.TypeStorageGet, fmt.Errorf("failed to read action blob: %w", err))
 	}
 
-	var entry actionsEntry
-	if err := json.Unmarshal(data, &entry); err != nil {
-		return nil, errors.E(ctx, errors.CatInternal, errors.TypeStorageGet, fmt.Errorf("failed to unmarshal action: %w", err))
-	}
-
-	action, err := entryToAction(entry)
+	action, err := entryToAction(ctx, r.reg, data)
 	if err != nil {
 		return nil, errors.E(ctx, errors.CatInternal, errors.TypeStorageGet, fmt.Errorf("failed to convert entry to action: %w", err))
 	}

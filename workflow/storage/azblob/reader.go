@@ -4,11 +4,9 @@ import (
 	"fmt"
 	"slices"
 	"sort"
-	"time"
 
 	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob"
 	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob/container"
-	"github.com/go-json-experiment/json"
 
 	"github.com/google/uuid"
 	"github.com/gostdlib/base/concurrency/sync"
@@ -235,78 +233,24 @@ func (r reader) listPlansInContainer(ctx context.Context, containerName string) 
 			if blob.Name == nil {
 				continue
 			}
+			if v := blob.Metadata[mdPlanType]; v == nil || *v != ptEntry {
+				continue
+			}
 
 			p := blob.Metadata[mdKeyPlanID]
 			if p == nil {
 				context.Log(ctx).Error(fmt.Sprintf("could not read planID metatadata for entry(%s)", *blob.Name))
 				continue
 			}
-			lr, err := r.parsePlanMetadata(blob.Metadata)
+			pm, err := mapToPlanMeta(blob.Metadata)
 			if err != nil {
 				context.Log(ctx).Error(fmt.Sprintf("could not parse plan metadata for entry(%s): %v", *blob.Name, err))
 				continue
 			}
 
-			results = append(results, lr)
+			results = append(results, pm.ListResult)
 		}
 	}
 
 	return results, nil
-}
-
-// parsePlanMetadata parses plan metadata from blob metadata.
-func (r reader) parsePlanMetadata(md map[string]*string) (storage.ListResult, error) {
-	sr := storage.ListResult{}
-
-	planIDStr, ok := md[mdKeyPlanID]
-	if !ok || planIDStr == nil {
-		return storage.ListResult{}, fmt.Errorf("missing plan ID metadata")
-	}
-	planID, err := uuid.Parse(*planIDStr)
-	if err != nil {
-		return storage.ListResult{}, fmt.Errorf("invalid plan ID metadata: %w", err)
-	}
-	sr.ID = planID
-
-	groupIDStr, ok := md[mdKeyGroupID]
-	if ok && groupIDStr != nil {
-		groupID, err := uuid.Parse(*groupIDStr)
-		if err != nil {
-			return storage.ListResult{}, fmt.Errorf("invalid group ID metadata: %w", err)
-		}
-		sr.GroupID = groupID
-	}
-
-	nameStr, ok := md[mdKeyName]
-	if !ok || nameStr == nil {
-		return storage.ListResult{}, fmt.Errorf("missing name metadata")
-	}
-	sr.Name = *nameStr
-
-	descrStr, ok := md[mdKeyDescr]
-	if !ok || descrStr == nil {
-		return storage.ListResult{}, fmt.Errorf("missing description metadata")
-	}
-	sr.Descr = *descrStr
-
-	submitTimeStr, ok := md[mdKeySubmitTime]
-	if !ok || submitTimeStr == nil {
-		return storage.ListResult{}, fmt.Errorf("missing submit time metadata")
-	}
-	submitTime, err := time.Parse(time.RFC3339Nano, *submitTimeStr)
-	if err != nil {
-		return storage.ListResult{}, fmt.Errorf("invalid submit time metadata: %w", err)
-	}
-	sr.SubmitTime = submitTime
-
-	stateJSON, ok := md[mdKeyState]
-	if !ok || stateJSON == nil {
-		return storage.ListResult{}, fmt.Errorf("missing state metadata")
-	}
-	var state workflow.State
-	if err := json.Unmarshal(strToBytes(*stateJSON), &state); err != nil {
-		return storage.ListResult{}, fmt.Errorf("invalid state metadata: %w", err)
-	}
-	sr.State = &state
-	return sr, nil
 }

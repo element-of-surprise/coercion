@@ -4,8 +4,13 @@ import (
 	"testing"
 	"time"
 
+	"github.com/element-of-surprise/coercion/plugins"
+	"github.com/element-of-surprise/coercion/plugins/registry"
 	"github.com/element-of-surprise/coercion/workflow"
+	testPlugins "github.com/element-of-surprise/coercion/workflow/storage/sqlite/testing/plugins"
+	"github.com/go-json-experiment/json"
 	"github.com/google/uuid"
+	"github.com/kylelemons/godebug/pretty"
 )
 
 func TestPlanToEntry(t *testing.T) {
@@ -67,11 +72,11 @@ func TestPlanToEntry(t *testing.T) {
 		{
 			name: "Error: plan with nil ID",
 			plan: &workflow.Plan{
-				ID:      uuid.Nil,
-				Name:    "Test",
-				Descr:   "Test",
-				Blocks:  []*workflow.Block{},
-				State:   &workflow.State{},
+				ID:     uuid.Nil,
+				Name:   "Test",
+				Descr:  "Test",
+				Blocks: []*workflow.Block{},
+				State:  &workflow.State{},
 			},
 			wantErr: true,
 		},
@@ -421,4 +426,45 @@ func TestActionToEntry(t *testing.T) {
 
 func TestRoundTripConversion(t *testing.T) {
 	t.Skip("Round-trip test skipped - entryToPlan function was removed with new architecture")
+}
+
+func TestDecodeAttempts(t *testing.T) {
+	reg := registry.New()
+	reg.Register(&testPlugins.HelloPlugin{})
+
+	attempts := []*workflow.Attempt{
+		{
+			Resp: &testPlugins.HelloResp{},
+			Err: &plugins.Error{
+				Message: "msg",
+			},
+			Start: time.Now().UTC(),
+			End:   time.Now().UTC(),
+		},
+		{
+			Resp:  &testPlugins.HelloResp{Said: "world"},
+			Start: time.Now().UTC(),
+			End:   time.Now().UTC(),
+		},
+	}
+
+	encoded, err := json.Marshal(attempts)
+	if err != nil {
+		panic(err)
+	}
+
+	decoded, err := decodeAttempts(t.Context(), encoded, reg.Plugin(testPlugins.HelloPluginName))
+	if err != nil {
+		t.Fatalf("decodeAttempts returned error: %v", err)
+	}
+
+	pconfig := pretty.Config{
+		PrintStringers:      true,
+		PrintTextMarshalers: true,
+		SkipZeroFields:      true,
+	}
+
+	if diff := pconfig.Compare(attempts, decoded); diff != "" {
+		t.Errorf("-want/+got:\n%s", diff)
+	}
 }

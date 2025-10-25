@@ -87,7 +87,6 @@ func main() {
 
 	if *teardown == true {
 		defer func() {
-
 			// Teardown the cosmosdb container
 			if err := azblob.Teardown(ctx, *endpoint, *prefix, cred); err != nil {
 				fatalErr(logger, "Failed to teardown: %v", err)
@@ -135,7 +134,7 @@ func main() {
 
 	// creator will set to zero time
 	if diff := prettyConfig.Compare(plan, result); diff != "" {
-		fatalErr(logger, "mismatch in submitted and returned plan with ID %s: returned plan: -want/+got:\n%s", plan.ID, diff)
+		fatalErr(logger, "before update: mismatch in submitted and returned plan with ID %s: returned plan: -want/+got:\n%s", plan.ID, diff)
 	}
 
 	plan.State.Status = workflow.Completed
@@ -148,10 +147,8 @@ func main() {
 		fatalErr(logger, "Failed to read plan entry: %v", err)
 	}
 	if diff := prettyConfig.Compare(plan, result); diff != "" {
-		fatalErr(logger, "mismatch in submitted and returned plan with ID %s: returned plan: -want/+got:\n%s", plan.ID, diff)
+		fatalErr(logger, "after update: mismatch in submitted and returned plan with ID %s: returned plan: -want/+got:\n%s", plan.ID, diff)
 	}
-
-	log.Println("Success")
 }
 
 // msiCred returns a managed identity credential.

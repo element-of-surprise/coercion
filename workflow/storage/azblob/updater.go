@@ -26,10 +26,12 @@ type updater struct {
 	sequenceUpdater
 	actionUpdater
 
+	uploader *uploader
+
 	private.Storage
 }
 
-func newUpdater(mu *sync.RWMutex, prefix string, client *azblob.Client, endpoint string) updater {
+func newUpdater(mu *sync.RWMutex, prefix string, client *azblob.Client, endpoint string, uploader *uploader) updater {
 	u := updater{}
 
 	u.planUpdater = planUpdater{
@@ -37,6 +39,7 @@ func newUpdater(mu *sync.RWMutex, prefix string, client *azblob.Client, endpoint
 		prefix:   prefix,
 		client:   client,
 		endpoint: endpoint,
+		uploader: uploader,
 	}
 	u.checksUpdater = checksUpdater{
 		mu:       mu,
@@ -72,6 +75,7 @@ type planUpdater struct {
 	prefix   string
 	client   *azblob.Client
 	endpoint string
+	uploader *uploader
 
 	private.Storage
 }
@@ -86,6 +90,9 @@ func (u planUpdater) UpdatePlan(ctx context.Context, plan *workflow.Plan) error 
 	// Find the container where the plan exists
 	containerName := containerForPlan(u.prefix, plan.ID)
 
+	if plan.State.Status > workflow.Running {
+		return u.uploader.uploadPlan(ctx, plan, false)
+	}
 	// Convert plan to lightweight planEntry
 	planEntry, err := planToPlanEntry(plan)
 	if err != nil {
