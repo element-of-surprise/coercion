@@ -311,15 +311,9 @@ go test -cover
 
 Integration tests require a real Azure Storage account or emulator.
 
-Set environment variables:
-```bash
-export AZURE_STORAGE_ACCOUNT="mystorageaccount"
-export AZURE_STORAGE_ENDPOINT="https://mystorageaccount.blob.core.windows.net"
-```
-
 Run integration tests:
 ```bash
-go test -v -tags=integration
+go run . -endpoint https://[storage account].blob.core.windows.net/
 ```
 
 ## Limitations
@@ -331,17 +325,6 @@ go test -v -tags=integration
 3. **Local locking only**: Uses local mutex, not distributed locks.
 
 4. **Manual container cleanup**: Old containers must be cleaned up externally.
-
-## Comparison with Other Backends
-
-| Feature | SQLite | CosmosDB | Azure Blob (this) |
-|---------|--------|----------|-------------------|
-| Storage Type | Local file | Cloud NoSQL | Cloud Object Store |
-| Transactions | Native | Batch | Manual cleanup |
-| Search | SQL queries | Cosmos queries | Tag-based + listing |
-| Cost | Free | High | Low-Medium |
-| Scale | Single node | Distributed | Distributed |
-| Best For | Development | Production (high-throughput) | Production (cost-effective) |
 
 ## Development
 

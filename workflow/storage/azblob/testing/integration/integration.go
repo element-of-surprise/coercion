@@ -1,7 +1,7 @@
 /*
 This provides an integration test for the azblob storage implementation of the workflow storage interface.
 
-This is almost the same as the intergration test for CosmosDB, however it uses Azure Blob Storage instead and has
+This is almost the same as the integration test for CosmosDB, however it uses Azure Blob Storage instead and has
 a few different flags for configuration.
 
 TODO: Consider having one integration test that can be configured to use different storage backends.
@@ -164,8 +164,8 @@ func msiCred(msi string) (azcore.TokenCredential, error) {
 		return cred, nil
 	}
 	// Otherwise, allow authentication via az login
-	// Need following roles comosdb sql roles:
-	// https://learn.microsoft.com/en-us/azure/cosmos-db/nosql/security/how-to-grant-data-plane-role-based-access?tabs=built-in-definition%2Ccsharp&pivots=azure-interface-cli
+	// Need following roles azblob roles:
+	//
 	azOptions := &azidentity.AzureCLICredentialOptions{}
 	azCred, err := azidentity.NewAzureCLICredential(azOptions)
 	if err != nil {

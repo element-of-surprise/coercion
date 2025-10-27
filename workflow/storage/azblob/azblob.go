@@ -20,7 +20,6 @@ package azblob
 
 import (
 	"fmt"
-	"log/slog"
 	"strings"
 	"time"
 	"unsafe"
@@ -207,7 +206,7 @@ func createContainer(ctx context.Context, client *azblob.Client, containerName s
 	_, err := containerClient.Create(ctx, nil)
 	if err != nil {
 		if isConflict(err) {
-			slog.Default().Debug(fmt.Sprintf("container(%s) already exists", containerName))
+			context.Log(ctx).Debug(fmt.Sprintf("container(%s) already exists", containerName))
 			return nil
 		}
 		return fmt.Errorf("failed to create container(%s): %w", containerName, err)
