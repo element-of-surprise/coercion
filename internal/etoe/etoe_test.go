@@ -19,6 +19,7 @@ import (
 	"github.com/element-of-surprise/coercion/workflow/builder"
 	"github.com/element-of-surprise/coercion/workflow/context"
 	"github.com/element-of-surprise/coercion/workflow/storage"
+	"github.com/element-of-surprise/coercion/workflow/storage/azblob"
 	"github.com/element-of-surprise/coercion/workflow/storage/cosmosdb"
 	"github.com/element-of-surprise/coercion/workflow/storage/sqlite"
 	"github.com/element-of-surprise/coercion/workflow/utils/clone"
@@ -44,6 +45,7 @@ var (
 	// CosmosDB flags that are only used if vault is set to "cosmosdb".
 	swarm     = flag.String("swarm", os.Getenv("AZURE_COSMOSDB_SWARM"), "The name of the coercion swarm.")
 	endpoint  = flag.String("endpoint", fmt.Sprintf("https://%s.documents.azure.com:443/", os.Getenv("AZURE_COSMOSDB_ACCOUNT")), "The endpoint of the cosmosdb account.")
+	azblobURL = flag.String("azblob_url", fmt.Sprintf("https://%s.blob.core.windows.net", os.Getenv("AZURE_BLOB_ACCOUNT")), "The endpoint of the azblob account.")
 	db        = flag.String("db", os.Getenv("AZURE_COSMOSDB_DBNAME"), "The name of the cosmosdb database.")
 	container = flag.String("container", os.Getenv("AZURE_COSMOSDB_CNAME"), "The name of the cosmosdb container.")
 	msi       = flag.String("msi", "", "The identity with vmss contributor role. If empty, az login is used.")
@@ -213,6 +215,9 @@ func TestEtoE(t *testing.T) {
 	case "cosmosdb":
 		logger.Info(fmt.Sprintf("TestEtoE: Using cosmosdb: %s, %s, %s", *endpoint, *db, *container))
 		vault, err = cosmosdb.New(ctx, *swarm, *endpoint, *db, *container, cred, reg)
+	case "azblob":
+		logger.Info(fmt.Sprintf("TestEtoE: Using azblob: %s", *endpoint))
+		vault, err = azblob.New(ctx, "coercion", *azblobURL, cred, reg)
 	default:
 		panic(fmt.Errorf("TestEtoE: unknown storage vault type: %s", *vaultType))
 	}
