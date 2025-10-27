@@ -2,11 +2,9 @@ package azblob
 
 import (
 	"fmt"
-	"time"
 
 	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob"
 	"github.com/go-json-experiment/json"
-	"github.com/google/uuid"
 	"github.com/gostdlib/base/context"
 
 	"github.com/element-of-surprise/coercion/internal/private"
@@ -87,50 +85,13 @@ func (u planUpdater) UpdatePlan(ctx context.Context, plan *workflow.Plan) error 
 	u.mu.Lock(plan.ID)
 	defer u.mu.Unlock(plan.ID)
 
-	// Find the container where the plan exists
-	containerName := containerForPlan(u.prefix, plan.ID)
-
-	if plan.State.Status > workflow.Running {
-		return u.uploader.uploadPlan(ctx, plan, false)
+	switch plan.State.Status {
+	case workflow.NotStarted:
+		return u.uploader.uploadPlan(ctx, plan, uptCreate)
+	case workflow.Running:
+		return u.uploader.uploadPlan(ctx, plan, uptUpdate)
 	}
-	// Convert plan to lightweight planEntry
-	planEntry, err := planToPlanEntry(plan)
-	if err != nil {
-		return errors.E(ctx, errors.CatUser, errors.TypeParameter, err)
-	}
-
-	// Marshal state for metadata
-	stateJSON, err := json.Marshal(plan.State)
-	if err != nil {
-		return errors.E(ctx, errors.CatInternal, errors.TypeStoragePut, fmt.Errorf("failed to marshal plan state: %w", err))
-	}
-
-	// Update metadata
-	md := map[string]*string{
-		mdKeyPlanID:     toPtr(plan.ID.String()),
-		mdKeyName:       toPtr(plan.Name),
-		mdKeyDescr:      toPtr(plan.Descr),
-		mdKeySubmitTime: toPtr(plan.SubmitTime.Format(time.RFC3339Nano)),
-		mdKeyState:      toPtr(bytesToStr(stateJSON)),
-	}
-
-	if plan.GroupID != uuid.Nil {
-		md[mdKeyGroupID] = toPtr(plan.GroupID.String())
-	}
-
-	// Marshal planEntry
-	data, err := json.Marshal(planEntry)
-	if err != nil {
-		return errors.E(ctx, errors.CatInternal, errors.TypeStoragePut, fmt.Errorf("failed to marshal planEntry: %w", err))
-	}
-
-	// Upload updated planEntry blob with metadata
-	blobName := planEntryBlobName(plan.ID)
-	if err := uploadBlob(ctx, u.client, containerName, blobName, md, data); err != nil {
-		return errors.E(ctx, errors.CatInternal, errors.TypeStoragePut, fmt.Errorf("failed to update planEntry blob: %w", err))
-	}
-
-	return nil
+	return u.uploader.uploadPlan(ctx, plan, uptComplete)
 }
 
 // blocksUpdater implements storage.BlockUpdater.

@@ -29,5 +29,5 @@ func (c creator) Create(ctx context.Context, plan *workflow.Plan) error {
 	c.mu.Lock(plan.ID)
 	defer c.mu.Unlock(plan.ID)
 
-	return c.uploader.uploadPlan(ctx, plan, true)
+	return c.uploader.uploadPlan(ctx, plan, uptCreate)
 }

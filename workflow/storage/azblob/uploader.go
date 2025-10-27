@@ -23,22 +23,36 @@ type uploader struct {
 	pool   *worker.Limited
 }
 
+type uploadPlanType uint8
+
+const (
+	uptUnknown uploadPlanType = iota
+	uptCreate
+	uptUpdate
+	uptComplete
+)
+
 // uploadPlan uploads a plan and all its sub-objects to blob storage.
 // Write order: planEntry (with metadata) → sub-objects → workflow.Plan object
-func (u *uploader) uploadPlan(ctx context.Context, p *workflow.Plan, initialUpload bool) error {
+func (u *uploader) uploadPlan(ctx context.Context, p *workflow.Plan, uploadPlanType uploadPlanType) error {
 	if p == nil {
 		return errors.E(ctx, errors.CatInternal, errors.TypeParameter, fmt.Errorf("commitPlan: plan cannot be nil"))
 	}
 	if p.ID == uuid.Nil {
 		return errors.E(ctx, errors.CatUser, errors.TypeParameter, fmt.Errorf("commitPlan: plan ID cannot be nil"))
 	}
+	if uploadPlanType == uptUnknown {
+		return errors.E(ctx, errors.CatInternal, errors.TypeParameter, fmt.Errorf("commitPlan: uploadPlanType cannot be unknown"))
+	}
 
 	// Use Plan.SubmitTime to determine container name
 	// This ensures the plan and all sub-objects are in the same container
 	containerName := containerForPlan(u.prefix, p.ID)
 
-	if err := ensureContainer(ctx, u.client, containerName); err != nil {
-		return errors.E(ctx, errors.CatInternal, errors.TypeStorageCreate, fmt.Errorf("failed to create container: %w", err))
+	if uploadPlanType == uptCreate {
+		if err := ensureContainer(ctx, u.client, containerName); err != nil {
+			return errors.E(ctx, errors.CatInternal, errors.TypeStorageCreate, fmt.Errorf("failed to create container: %w", err))
+		}
 	}
 
 	md, err := planToMetadata(ctx, p)
@@ -53,14 +67,16 @@ func (u *uploader) uploadPlan(ctx context.Context, p *workflow.Plan, initialUplo
 	// Do NOT attempt to make these uploads concurrent. This will screw up the ordering that is required to
 	// do consistency checks since we don't have transactions.
 	if err := u.uploadPlanEntry(ctx, p, md); err != nil {
-		_ = deleteBlob(ctx, u.client, containerName, planObjectBlobName(p.ID))
+		if uploadPlanType == uptCreate {
+			_ = deleteBlob(ctx, u.client, containerName, planObjectBlobName(p.ID))
+		}
 		return err
 	}
 
 	// Only upload sub-objects if plan is not started. This is called at the start of plan execution
 	// and the end, so we only need to upload sub-objects once. At the end of execution we only need to update the
 	// plan object.
-	if initialUpload {
+	if uploadPlanType == uptCreate {
 		if err := u.uploadSubObjects(ctx, containerName, p); err != nil {
 			_ = deleteBlob(ctx, u.client, containerName, planObjectBlobName(p.ID))
 			_ = deleteBlob(ctx, u.client, containerName, planEntryBlobName(p.ID))
