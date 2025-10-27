@@ -28,7 +28,7 @@ func TestLockUnlock(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			g := &Group{}
+			g := New(t.Context())
 			planID := uuid.New()
 
 			switch test.name {
@@ -72,7 +72,7 @@ func TestRLockRUnlock(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			g := &Group{}
+			g := New(t.Context())
 			planID := uuid.New()
 
 			switch test.name {
@@ -122,7 +122,7 @@ func TestUnlockPanic(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			g := &Group{}
+			g := New(t.Context())
 			planID := uuid.New()
 
 			test.setupFunc(g, planID)
@@ -163,7 +163,7 @@ func TestRUnlockPanic(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			g := &Group{}
+			g := New(t.Context())
 			planID := uuid.New()
 
 			test.setupFunc(g, planID)
@@ -192,7 +192,7 @@ func TestConcurrentWriteLocks(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			g := &Group{}
+			g := New(t.Context())
 			planID := uuid.New()
 
 			var counter int64
@@ -251,7 +251,7 @@ func TestConcurrentReadLocks(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			g := &Group{}
+			g := New(t.Context())
 			planID := uuid.New()
 
 			var counter int64
@@ -313,7 +313,7 @@ func TestMixedReadWriteLocks(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			g := &Group{}
+			g := New(t.Context())
 			planID := uuid.New()
 
 			switch test.name {
@@ -396,7 +396,7 @@ func TestMultiplePlanIDs(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			g := &Group{}
+			g := New(t.Context())
 			planID1 := uuid.New()
 			planID2 := uuid.New()
 
@@ -436,7 +436,7 @@ func TestConcurrentOperationsDifferentPlanIDs(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			g := &Group{}
+			g := New(t.Context())
 			const numPlanIDs = 10
 			const opsPerPlan = 5
 
@@ -486,7 +486,7 @@ func TestMultipleReadLocksSamePlan(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			g := &Group{}
+			g := New(t.Context())
 			planID := uuid.New()
 
 			// Acquire first read lock
@@ -509,49 +509,6 @@ func TestMultipleReadLocksSamePlan(t *testing.T) {
 			}
 
 			g.RUnlock(planID)
-		})
-	}
-}
-
-func TestInitialization(t *testing.T) {
-	t.Parallel()
-
-	tests := []struct {
-		name string
-	}{
-		{
-			name: "Success: Group initializes createLocks map on first Lock",
-		},
-		{
-			name: "Success: Group initializes createLocks map on first RLock",
-		},
-	}
-
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			g := &Group{}
-			planID := uuid.New()
-
-			// createLocks should be nil initially
-			if g.createLocks != nil {
-				t.Errorf("TestInitialization(%s): createLocks should be nil initially", test.name)
-			}
-
-			switch test.name {
-			case "Success: Group initializes createLocks map on first Lock":
-				g.Lock(planID)
-				if g.createLocks == nil {
-					t.Errorf("TestInitialization(%s): createLocks not initialized after Lock", test.name)
-				}
-				g.Unlock(planID)
-
-			case "Success: Group initializes createLocks map on first RLock":
-				g.RLock(planID)
-				if g.createLocks == nil {
-					t.Errorf("TestInitialization(%s): createLocks not initialized after RLock", test.name)
-				}
-				g.RUnlock(planID)
-			}
 		})
 	}
 }

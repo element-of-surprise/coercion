@@ -69,9 +69,6 @@ func (g *Group) Lock(planID uuid.UUID) {
 		panic("planlocks Group has been canceled")
 	}
 	g.mu.Lock()
-	if g.createLocks == nil {
-		g.createLocks = map[uuid.UUID]*sync.RWMutex{}
-	}
 	lock, exists := g.createLocks[planID]
 	if !exists {
 		lock = &sync.RWMutex{}
@@ -103,9 +100,6 @@ func (g *Group) RLock(planID uuid.UUID) {
 		panic("planlocks Group has been canceled")
 	}
 	g.mu.Lock()
-	if g.createLocks == nil {
-		g.createLocks = map[uuid.UUID]*sync.RWMutex{}
-	}
 	lock, exists := g.createLocks[planID]
 	if !exists {
 		lock = &sync.RWMutex{}

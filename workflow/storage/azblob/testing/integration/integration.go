@@ -165,7 +165,7 @@ func msiCred(msi string) (azcore.TokenCredential, error) {
 	}
 	// Otherwise, allow authentication via az login
 	// Need following roles azblob roles:
-	//
+	// - Storage Blob Data Contributor
 	azOptions := &azidentity.AzureCLICredentialOptions{}
 	azCred, err := azidentity.NewAzureCLICredential(azOptions)
 	if err != nil {
