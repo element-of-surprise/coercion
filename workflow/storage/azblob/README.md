@@ -311,9 +311,17 @@ go test -cover
 
 Integration tests require a real Azure Storage account or emulator.
 
-Run integration tests:
+
+Run base storage integration tests:
 ```bash
+cd storage/azblob/integration
 go run . -endpoint https://[storage account].blob.core.windows.net/
+```
+
+Run service based integration tests:
+```bash
+cd internal/etoe
+go run . --azblobURL https://[storage account].blob.core.windows.net/
 ```
 
 ## Limitations
