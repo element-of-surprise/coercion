@@ -29,9 +29,9 @@ import (
 	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob"
 	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob/blob"
 	"github.com/google/uuid"
-	"github.com/gostdlib/base/concurrency/sync"
 	"github.com/gostdlib/base/context"
 	"github.com/gostdlib/base/retry/exponential"
+	"golang.org/x/sync/singleflight"
 
 	"github.com/element-of-surprise/coercion/internal/private"
 	"github.com/element-of-surprise/coercion/plugins"
@@ -39,6 +39,7 @@ import (
 	"github.com/element-of-surprise/coercion/workflow"
 	"github.com/element-of-surprise/coercion/workflow/errors"
 	"github.com/element-of-surprise/coercion/workflow/storage"
+	"github.com/element-of-surprise/coercion/workflow/storage/azblob/internal/planlocks"
 
 	_ "embed"
 )
@@ -56,7 +57,7 @@ type Vault struct {
 	endpoint string
 
 	client *azblob.Client
-	mu     *sync.RWMutex
+	mu     *planlocks.Group
 
 	reader
 	creator
@@ -102,7 +103,7 @@ func New(ctx context.Context, prefix, endpoint string, cred azcore.TokenCredenti
 	v := &Vault{
 		prefix:   prefix,
 		endpoint: endpoint,
-		mu:       &sync.RWMutex{},
+		mu:       planlocks.New(ctx),
 	}
 
 	for _, o := range options {
@@ -119,16 +120,19 @@ func New(ctx context.Context, prefix, endpoint string, cred azcore.TokenCredenti
 
 	uploader := &uploader{
 		client: v.client,
+		mu:     v.mu,
 		prefix: v.prefix,
 		pool:   context.Pool(ctx).Limited(20),
 	}
 
 	v.reader = reader{
-		mu:       v.mu,
-		prefix:   prefix,
-		client:   client,
-		endpoint: endpoint,
-		reg:      reg,
+		mu:           v.mu,
+		readFlight:   &singleflight.Group{},
+		existsFlight: &singleflight.Group{},
+		prefix:       prefix,
+		client:       client,
+		endpoint:     endpoint,
+		reg:          reg,
 	}
 	v.creator = creator{
 		mu:       v.mu,

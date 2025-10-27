@@ -5,20 +5,20 @@ import (
 
 	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob"
 	"github.com/google/uuid"
-	"github.com/gostdlib/base/concurrency/sync"
 	"github.com/gostdlib/base/context"
 
 	"github.com/element-of-surprise/coercion/internal/private"
 	"github.com/element-of-surprise/coercion/workflow"
 	"github.com/element-of-surprise/coercion/workflow/errors"
 	"github.com/element-of-surprise/coercion/workflow/storage"
+	"github.com/element-of-surprise/coercion/workflow/storage/azblob/internal/planlocks"
 )
 
 var _ storage.Deleter = deleter{}
 
 // deleter implements the storage.Deleter interface.
 type deleter struct {
-	mu       *sync.RWMutex
+	mu       *planlocks.Group
 	prefix   string
 	client   *azblob.Client
 	endpoint string
@@ -30,8 +30,8 @@ type deleter struct {
 // Delete implements storage.Deleter.Delete(). It deletes all blobs associated with the plan:
 // the plan blob and all sub-object blobs (blocks, sequences, checks, actions).
 func (d deleter) Delete(ctx context.Context, id uuid.UUID) error {
-	d.mu.Lock()
-	defer d.mu.Unlock()
+	d.mu.Lock(id)
+	defer d.mu.Unlock(id)
 
 	// Read the plan to get full hierarchy
 	plan, err := d.reader.Read(ctx, id)

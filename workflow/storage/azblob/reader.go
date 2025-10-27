@@ -9,34 +9,50 @@ import (
 	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob/container"
 
 	"github.com/google/uuid"
-	"github.com/gostdlib/base/concurrency/sync"
 	"github.com/gostdlib/base/context"
+	"golang.org/x/sync/singleflight"
 
 	"github.com/element-of-surprise/coercion/internal/private"
 	"github.com/element-of-surprise/coercion/plugins/registry"
 	"github.com/element-of-surprise/coercion/workflow"
 	"github.com/element-of-surprise/coercion/workflow/errors"
 	"github.com/element-of-surprise/coercion/workflow/storage"
+	"github.com/element-of-surprise/coercion/workflow/storage/azblob/internal/planlocks"
 )
 
 var _ storage.Reader = reader{}
 
 // reader implements the storage.Reader interface.
 type reader struct {
-	mu       *sync.RWMutex
-	prefix   string
-	client   *azblob.Client
-	endpoint string
-	reg      *registry.Register
+	mu           *planlocks.Group
+	readFlight   *singleflight.Group
+	existsFlight *singleflight.Group
+	prefix       string
+	client       *azblob.Client
+	endpoint     string
+	reg          *registry.Register
 
 	private.Storage
 }
 
 // Exists implements storage.Reader.Exists(). It returns true if the plan exists.
 func (r reader) Exists(ctx context.Context, id uuid.UUID) (bool, error) {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
+	r.mu.RLock(id)
+	defer r.mu.RUnlock(id)
 
+	v, err, _ := r.existsFlight.Do(
+		id.String(),
+		func() (any, error) {
+			return r.exists(ctx, id)
+		},
+	)
+	if err != nil {
+		return false, err
+	}
+	return v.(bool), nil
+}
+
+func (r reader) exists(ctx context.Context, id uuid.UUID) (bool, error) {
 	// Get the container for this plan based on its ID
 	containerName := containerForPlan(r.prefix, id)
 	blobName := planEntryBlobName(id)
@@ -54,17 +70,24 @@ func (r reader) Exists(ctx context.Context, id uuid.UUID) (bool, error) {
 
 // Read implements storage.Reader.Read().
 func (r reader) Read(ctx context.Context, id uuid.UUID) (*workflow.Plan, error) {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
+	r.mu.RLock(id)
+	defer r.mu.RUnlock(id)
 
-	return r.fetchPlan(ctx, id)
+	v, err, _ := r.readFlight.Do(
+		id.String(),
+		func() (any, error) {
+			return r.fetchPlan(ctx, id)
+		},
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	return v.(*workflow.Plan), nil
 }
 
 // Search implements storage.Reader.Search().
 func (r reader) Search(ctx context.Context, filters storage.Filters) (chan storage.Stream[storage.ListResult], error) {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-
 	if err := filters.Validate(); err != nil {
 		return nil, errors.E(ctx, errors.CatUser, errors.TypeParameter, err)
 	}
@@ -81,9 +104,6 @@ func (r reader) Search(ctx context.Context, filters storage.Filters) (chan stora
 
 // List implements storage.Reader.List(). It lists recent plans, most recent first.
 func (r reader) List(ctx context.Context, limit int) (chan storage.Stream[storage.ListResult], error) {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-
 	ch := make(chan storage.Stream[storage.ListResult], 1)
 
 	go func() {

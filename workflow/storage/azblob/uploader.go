@@ -12,10 +12,12 @@ import (
 
 	"github.com/element-of-surprise/coercion/workflow"
 	"github.com/element-of-surprise/coercion/workflow/errors"
+	"github.com/element-of-surprise/coercion/workflow/storage/azblob/internal/planlocks"
 )
 
 // uploader uploads a plan and its sub-objects to blob storage.
 type uploader struct {
+	mu     *planlocks.Group
 	client *azblob.Client
 	prefix string
 	pool   *worker.Limited

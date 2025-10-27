@@ -7,13 +7,13 @@ import (
 	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob"
 	"github.com/go-json-experiment/json"
 	"github.com/google/uuid"
-	"github.com/gostdlib/base/concurrency/sync"
 	"github.com/gostdlib/base/context"
 
 	"github.com/element-of-surprise/coercion/internal/private"
 	"github.com/element-of-surprise/coercion/workflow"
 	"github.com/element-of-surprise/coercion/workflow/errors"
 	"github.com/element-of-surprise/coercion/workflow/storage"
+	"github.com/element-of-surprise/coercion/workflow/storage/azblob/internal/planlocks"
 )
 
 var _ storage.Updater = updater{}
@@ -31,7 +31,7 @@ type updater struct {
 	private.Storage
 }
 
-func newUpdater(mu *sync.RWMutex, prefix string, client *azblob.Client, endpoint string, uploader *uploader) updater {
+func newUpdater(mu *planlocks.Group, prefix string, client *azblob.Client, endpoint string, uploader *uploader) updater {
 	u := updater{}
 
 	u.planUpdater = planUpdater{
@@ -71,7 +71,7 @@ func newUpdater(mu *sync.RWMutex, prefix string, client *azblob.Client, endpoint
 
 // planUpdater implements storage.PlanUpdater.
 type planUpdater struct {
-	mu       *sync.RWMutex
+	mu       *planlocks.Group
 	prefix   string
 	client   *azblob.Client
 	endpoint string
@@ -84,8 +84,8 @@ type planUpdater struct {
 // Updates only the planEntry blob (lightweight, IDs only) and metadata during execution.
 // Does NOT update the workflow.Plan object blob.
 func (u planUpdater) UpdatePlan(ctx context.Context, plan *workflow.Plan) error {
-	u.mu.Lock()
-	defer u.mu.Unlock()
+	u.mu.Lock(plan.ID)
+	defer u.mu.Unlock(plan.ID)
 
 	// Find the container where the plan exists
 	containerName := containerForPlan(u.prefix, plan.ID)
@@ -135,7 +135,7 @@ func (u planUpdater) UpdatePlan(ctx context.Context, plan *workflow.Plan) error 
 
 // blocksUpdater implements storage.BlockUpdater.
 type blockUpdater struct {
-	mu       *sync.RWMutex
+	mu       *planlocks.Group
 	prefix   string
 	client   *azblob.Client
 	creator  creator
@@ -146,8 +146,8 @@ type blockUpdater struct {
 
 // UpdateBlock implements storage.BlockUpdater.UpdateBlock().
 func (u blockUpdater) UpdateBlock(ctx context.Context, block *workflow.Block) error {
-	u.mu.Lock()
-	defer u.mu.Unlock()
+	u.mu.Lock(block.GetPlanID())
+	defer u.mu.Unlock(block.GetPlanID())
 
 	return u.updateObject(ctx, block, func(pos int) ([]byte, error) {
 		entry, err := blockToEntry(block, pos)
@@ -160,7 +160,7 @@ func (u blockUpdater) UpdateBlock(ctx context.Context, block *workflow.Block) er
 
 // checksUpdater implements storage.ChecksUpdater.
 type checksUpdater struct {
-	mu       *sync.RWMutex
+	mu       *planlocks.Group
 	prefix   string
 	client   *azblob.Client
 	endpoint string
@@ -170,8 +170,8 @@ type checksUpdater struct {
 
 // UpdateChecks implements storage.ChecksUpdater.UpdateChecks().
 func (u checksUpdater) UpdateChecks(ctx context.Context, checks *workflow.Checks) error {
-	u.mu.Lock()
-	defer u.mu.Unlock()
+	u.mu.Lock(checks.GetPlanID())
+	defer u.mu.Unlock(checks.GetPlanID())
 
 	return u.updateObject(ctx, checks, func(pos int) ([]byte, error) {
 		entry, err := checksToEntry(checks)
@@ -184,7 +184,7 @@ func (u checksUpdater) UpdateChecks(ctx context.Context, checks *workflow.Checks
 
 // sequenceUpdater implements storage.SequenceUpdater.
 type sequenceUpdater struct {
-	mu       *sync.RWMutex
+	mu       *planlocks.Group
 	prefix   string
 	client   *azblob.Client
 	endpoint string
@@ -194,8 +194,8 @@ type sequenceUpdater struct {
 
 // UpdateSequence implements storage.SequenceUpdater.UpdateSequence().
 func (u sequenceUpdater) UpdateSequence(ctx context.Context, seq *workflow.Sequence) error {
-	u.mu.Lock()
-	defer u.mu.Unlock()
+	u.mu.Lock(seq.GetPlanID())
+	defer u.mu.Unlock(seq.GetPlanID())
 
 	return u.updateObject(ctx, seq, func(pos int) ([]byte, error) {
 		entry, err := sequenceToEntry(seq, pos)
@@ -208,7 +208,7 @@ func (u sequenceUpdater) UpdateSequence(ctx context.Context, seq *workflow.Seque
 
 // actionUpdater implements storage.ActionUpdater.
 type actionUpdater struct {
-	mu       *sync.RWMutex
+	mu       *planlocks.Group
 	prefix   string
 	client   *azblob.Client
 	endpoint string
@@ -218,8 +218,8 @@ type actionUpdater struct {
 
 // UpdateAction implements storage.ActionUpdater.UpdateAction().
 func (u actionUpdater) UpdateAction(ctx context.Context, action *workflow.Action) error {
-	u.mu.Lock()
-	defer u.mu.Unlock()
+	u.mu.Lock(action.GetPlanID())
+	defer u.mu.Unlock(action.GetPlanID())
 
 	return u.updateObject(ctx, action, func(pos int) ([]byte, error) {
 		entry, err := actionToEntry(action, pos)

@@ -149,6 +149,7 @@ func main() {
 	if diff := prettyConfig.Compare(plan, result); diff != "" {
 		fatalErr(logger, "after update: mismatch in submitted and returned plan with ID %s: returned plan: -want/+got:\n%s", plan.ID, diff)
 	}
+	log.Println("Integration test completed successfully.")
 }
 
 // msiCred returns a managed identity credential.
