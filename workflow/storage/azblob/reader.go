@@ -31,7 +31,6 @@ type reader struct {
 	existsFlight *singleflight.Group
 	prefix       string
 	client       blobops.Ops
-	endpoint     string
 	reg          *registry.Register
 
 	testListPlansInContainer func(ctx context.Context, containerName string) ([]storage.ListResult, error)

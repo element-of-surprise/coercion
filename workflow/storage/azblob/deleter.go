@@ -18,11 +18,10 @@ var _ storage.Deleter = deleter{}
 
 // deleter implements the storage.Deleter interface.
 type deleter struct {
-	mu       *planlocks.Group
-	prefix   string
-	client   blobops.Ops
-	endpoint string
-	reader   reader
+	mu     *planlocks.Group
+	prefix string
+	client blobops.Ops
+	reader reader
 
 	private.Storage
 }

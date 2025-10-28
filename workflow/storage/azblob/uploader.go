@@ -76,7 +76,6 @@ func (u *uploader) uploadPlan(ctx context.Context, p *workflow.Plan, uploadPlanT
 	// plan object.
 	if uploadPlanType == uptCreate {
 		if err := u.uploadSubObjects(ctx, containerName, p); err != nil {
-			_ = u.client.DeleteBlob(ctx, containerName, planObjectBlobName(p.ID))
 			_ = u.client.DeleteBlob(ctx, containerName, planEntryBlobName(p.ID))
 			return err
 		}

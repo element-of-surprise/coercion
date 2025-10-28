@@ -33,17 +33,15 @@ func setupDeleterTest(t *testing.T) (*blobops.Fake, deleter) {
 		existsFlight: &singleflight.Group{},
 		prefix:       prefix,
 		client:       fakeClient,
-		endpoint:     "https://test.blob.core.windows.net",
 		reg:          reg,
 	}
 
 	// Create deleter
 	del := deleter{
-		mu:       planlocks.New(ctx),
-		prefix:   prefix,
-		client:   fakeClient,
-		endpoint: "https://test.blob.core.windows.net",
-		reader:   r,
+		mu:     planlocks.New(ctx),
+		prefix: prefix,
+		client: fakeClient,
+		reader: r,
 	}
 
 	return fakeClient, del
@@ -303,10 +301,10 @@ func TestDeletePlanInContainer(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		name              string
-		containerExists   bool
-		uploadBlobs       bool
-		wantErr           bool
+		name            string
+		containerExists bool
+		uploadBlobs     bool
+		wantErr         bool
 	}{
 		{
 			name:            "Success: container doesn't exist",

@@ -132,7 +132,6 @@ func New(ctx context.Context, prefix, endpoint string, cred azcore.TokenCredenti
 		existsFlight: &singleflight.Group{},
 		prefix:       prefix,
 		client:       opsClient,
-		endpoint:     endpoint,
 		reg:          reg,
 	}
 	v.creator = creator{
@@ -144,11 +143,10 @@ func New(ctx context.Context, prefix, endpoint string, cred azcore.TokenCredenti
 	}
 	v.updater = newUpdater(v.mu, prefix, opsClient, endpoint, uploader)
 	v.deleter = deleter{
-		mu:       v.mu,
-		prefix:   prefix,
-		client:   opsClient,
-		endpoint: endpoint,
-		reader:   v.reader,
+		mu:     v.mu,
+		prefix: prefix,
+		client: opsClient,
+		reader: v.reader,
 	}
 	v.closer = closer{}
 	v.recovery = recovery{

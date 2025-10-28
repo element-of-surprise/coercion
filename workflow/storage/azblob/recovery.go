@@ -116,9 +116,8 @@ func (r recovery) recoverPlan(ctx context.Context, containerName string, planID 
 // ensureSubObjectBlobs ensures all sub-object blobs exist for a plan.
 func (r recovery) ensureSubObjectBlobs(ctx context.Context, containerName string, plan *workflow.Plan) error {
 	c := creator{
-		prefix:   r.reader.prefix,
-		endpoint: r.reader.endpoint,
-		reader:   r.reader,
+		prefix: r.reader.prefix,
+		reader: r.reader,
 	}
 
 	for _, checks := range []*workflow.Checks{plan.BypassChecks, plan.PreChecks, plan.PostChecks, plan.ContChecks, plan.DeferredChecks} {

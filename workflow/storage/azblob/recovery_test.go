@@ -37,7 +37,6 @@ func setupRecoveryTest(t *testing.T) (*blobops.Fake, recovery) {
 		existsFlight: &singleflight.Group{},
 		prefix:       prefix,
 		client:       fakeClient,
-		endpoint:     "https://test.blob.core.windows.net",
 		reg:          reg,
 	}
 
