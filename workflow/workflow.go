@@ -140,7 +140,7 @@ type Plan struct {
 	GroupID uuid.UUID
 	// Meta is any type of metadata that the user wants to store with the workflow.
 	// This is not used by the workflow engine. Optional.
-	Meta []byte
+	Meta []byte `json:",omitempty"`
 	// BypassChecks are actions that if they succeed will cause the workflow to be skipped.
 	// If any gate fails, the workflow will be executed. Optional.
 	BypassChecks *Checks
@@ -653,7 +653,7 @@ type Action struct {
 	// Req is the request object that is passed to the plugin.
 	Req any
 	// Attempts is the attempts of the action. This should not be set by the user.
-	Attempts []*Attempt
+	Attempts []*Attempt `json:",omitempty"`
 	// State represents settings that should not be set by the user, but users can query.
 	State *State
 
