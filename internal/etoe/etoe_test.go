@@ -44,7 +44,7 @@ var (
 
 	// CosmosDB flags that are only used if vault is set to "cosmosdb".
 	swarm     = flag.String("swarm", os.Getenv("AZURE_COSMOSDB_SWARM"), "The name of the coercion swarm.")
-	endpoint  = flag.String("endpoint", fmt.Sprintf("https://%s.documents.azure.com:443/", os.Getenv("AZURE_COSMOSDB_ACCOUNT")), "The endpoint of the cosmosdb account.")
+	endpoint  = flag.String("cosmos_url", fmt.Sprintf("https://%s.documents.azure.com:443/", os.Getenv("AZURE_COSMOSDB_ACCOUNT")), "The endpoint of the cosmosdb account.")
 	azblobURL = flag.String("azblob_url", fmt.Sprintf("https://%s.blob.core.windows.net", os.Getenv("AZURE_BLOB_ACCOUNT")), "The endpoint of the azblob account.")
 	db        = flag.String("db", os.Getenv("AZURE_COSMOSDB_DBNAME"), "The name of the cosmosdb database.")
 	container = flag.String("container", os.Getenv("AZURE_COSMOSDB_CNAME"), "The name of the cosmosdb container.")
@@ -668,7 +668,23 @@ func TestBypassBlock(t *testing.T) {
 }
 
 func validateFlags() error {
-	if *vaultType == "cosmosdb" {
+	switch *vaultType {
+	case "sqlite":
+		// Nothing to do.
+	case "azblob":
+		if *azblobURL == "" {
+			return fmt.Errorf("missing azblobURL")
+		}
+		// Parse the endpoint as a URL
+		parsedURL, err := url.Parse(*endpoint)
+		if err != nil {
+			return fmt.Errorf("invalid URL: %v", err)
+		}
+		// Check if the scheme is HTTPS
+		if parsedURL.Scheme != "https" {
+			return fmt.Errorf("invalid scheme: expected 'https', got '%s'", parsedURL.Scheme)
+		}
+	case "cosmosdb":
 		if *db == "" {
 			return fmt.Errorf("missing db name")
 		}
@@ -687,6 +703,8 @@ func validateFlags() error {
 		if parsedURL.Scheme != "https" {
 			return fmt.Errorf("invalid scheme: expected 'https', got '%s'", parsedURL.Scheme)
 		}
+	default:
+		return fmt.Errorf("invalid vault type: %s", *vaultType)
 	}
 	return nil
 }
