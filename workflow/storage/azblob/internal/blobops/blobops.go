@@ -9,6 +9,7 @@ import (
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore/runtime"
 	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob"
+	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob/blob"
 	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob/bloberror"
 	"github.com/Azure/retry/exponential"
 	"github.com/element-of-surprise/coercion/plugins"
@@ -55,35 +56,72 @@ type Real struct {
 // DeleteBlob deletes the specified blob from the given container.
 func (r *Real) DeleteBlob(ctx context.Context, containerName string, blobName string) error {
 	blobClient := r.Client.ServiceClient().NewContainerClient(containerName).NewBlobClient(blobName)
-	_, err := blobClient.Delete(ctx, nil)
-	return err
+
+	op := func(ctx context.Context, rec exponential.Record) error {
+		_, err := blobClient.Delete(ctx, nil)
+		if err != nil {
+			if IsNotFound(err) {
+				return fmt.Errorf("%w: %w", err, exponential.ErrPermanent)
+			}
+			if !IsRetriableError(err) {
+				return fmt.Errorf("%w: %w", err, exponential.ErrPermanent)
+			}
+			return err
+		}
+		return nil
+	}
+
+	return backoff.Retry(context.WithoutCancel(ctx), op)
 }
 
 // ContainerExists checks if a container exists.
 func (r *Real) ContainerExists(ctx context.Context, containerName string) (bool, error) {
 	containerClient := r.Client.ServiceClient().NewContainerClient(containerName)
-	_, err := containerClient.GetProperties(ctx, nil)
-	if err != nil {
-		if IsNotFound(err) {
-			return false, nil
+
+	var found bool
+
+	op := func(ctx context.Context, rec exponential.Record) error {
+		_, err := containerClient.GetProperties(ctx, nil)
+		if err != nil {
+			if IsNotFound(err) {
+				return nil
+			}
+			if !IsRetriableError(err) {
+				return fmt.Errorf("%w: %w", err, exponential.ErrPermanent)
+			}
+			return err
 		}
-		return false, fmt.Errorf("failed to check container existence: %w", err)
+		found = true
+		return nil
 	}
-	return true, nil
+
+	if err := backoff.Retry(context.WithoutCancel(ctx), op); err != nil {
+		return false, err
+	}
+
+	return found, nil
 }
 
 // CreateContainer creates a container if it doesn't exist.
 func (r *Real) CreateContainer(ctx context.Context, containerName string) error {
 	containerClient := r.Client.ServiceClient().NewContainerClient(containerName)
-	_, err := containerClient.Create(ctx, nil)
-	if err != nil {
-		if IsConflict(err) {
-			context.Log(ctx).Debug(fmt.Sprintf("container(%s) already exists", containerName))
-			return nil
+
+	op := func(ctx context.Context, rec exponential.Record) error {
+		_, err := containerClient.Create(ctx, nil)
+		if err != nil {
+			if IsConflict(err) {
+				context.Log(ctx).Debug(fmt.Sprintf("container(%s) already exists", containerName))
+				return nil
+			}
+			if !IsRetriableError(err) {
+				return fmt.Errorf("%w: %w", err, exponential.ErrPermanent)
+			}
+			return fmt.Errorf("failed to create container(%s): %w", containerName, err)
 		}
-		return fmt.Errorf("failed to create container(%s): %w", containerName, err)
+		return nil
 	}
-	return nil
+
+	return backoff.Retry(context.WithoutCancel(ctx), op)
 }
 
 // EnsureContainer creates a container if it doesn't exist.
@@ -100,7 +138,7 @@ func (r *Real) EnsureContainer(ctx context.Context, containerName string) error 
 
 // UploadBlob uploads a blob with retry logic.
 func (r *Real) UploadBlob(ctx context.Context, containerName, blobName string, md map[string]*string, data []byte) error {
-	uploadOp := func(ctx context.Context, rec exponential.Record) error {
+	op := func(ctx context.Context, rec exponential.Record) error {
 		opts := &azblob.UploadBufferOptions{
 			Metadata: md,
 		}
@@ -114,7 +152,7 @@ func (r *Real) UploadBlob(ctx context.Context, containerName, blobName string, m
 		return nil
 	}
 
-	if err := backoff.Retry(context.WithoutCancel(ctx), uploadOp); err != nil {
+	if err := backoff.Retry(context.WithoutCancel(ctx), op); err != nil {
 		return fmt.Errorf("failed to upload blob %s: %w", blobName, err)
 	}
 
@@ -129,25 +167,52 @@ func (r *Real) NewListBlobsFlatPager(containerName string, o *azblob.ListBlobsFl
 // GetMetadata retrieves the metadata of a blob.
 func (r *Real) GetMetadata(ctx context.Context, containerName, blobName string) (map[string]*string, error) {
 	blobClient := r.Client.ServiceClient().NewContainerClient(containerName).NewBlobClient(blobName)
-	props, err := blobClient.GetProperties(ctx, nil)
-	if err != nil {
+
+	var props blob.GetPropertiesResponse
+
+	op := func(ctx context.Context, rec exponential.Record) error {
+		var err error
+		props, err = blobClient.GetProperties(ctx, nil)
+		if err != nil {
+			if !IsRetriableError(err) {
+				return fmt.Errorf("%w: %w", err, exponential.ErrPermanent)
+			}
+			return fmt.Errorf("failed to get metadata for blob(%s/%s): %w", containerName, blobName, err)
+		}
+
+		return nil
+	}
+
+	if err := backoff.Retry(context.WithoutCancel(ctx), op); err != nil {
 		return nil, err
 	}
+
 	return props.Metadata, nil
 }
 
 // GetBlob downloads the blob data.
 func (r *Real) GetBlob(ctx context.Context, containerName, blobName string) ([]byte, error) {
-	resp, err := r.Client.DownloadStream(ctx, containerName, blobName, nil)
-	if err != nil {
-		return nil, fmt.Errorf("failed to download planEntry blob: %w", err)
-	}
-	defer resp.Body.Close()
+	var data []byte
+	op := func(ctx context.Context, rec exponential.Record) error {
+		resp, err := r.Client.DownloadStream(ctx, containerName, blobName, nil)
+		if err != nil {
+			if !IsRetriableError(err) {
+				return fmt.Errorf("failed to download planEntry blob: %w: %w", err, exponential.ErrPermanent)
+			}
+		}
+		defer resp.Body.Close()
 
-	data, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read planEntry blob: %w", err)
+		data, err = io.ReadAll(resp.Body)
+		if err != nil {
+			return fmt.Errorf("failed to read planEntry blob: %w", err)
+		}
+		return nil
 	}
+
+	if err := backoff.Retry(context.WithoutCancel(ctx), op); err != nil {
+		return nil, err
+	}
+
 	return data, nil
 }
 
