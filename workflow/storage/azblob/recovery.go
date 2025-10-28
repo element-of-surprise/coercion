@@ -2,6 +2,7 @@ package azblob
 
 import (
 	"fmt"
+	"testing"
 
 	"github.com/google/uuid"
 	"github.com/gostdlib/base/context"
@@ -20,6 +21,8 @@ type recovery struct {
 	reader   reader
 	updater  updater
 	uploader *uploader
+
+	testRecoverPlan func(ctx context.Context, containerName string, planID uuid.UUID) error
 
 	private.Storage
 }
@@ -79,6 +82,9 @@ func (r recovery) recoverPlansInContainer(ctx context.Context, containerName str
 
 // recoverPlan recovers a single plan by ensuring all sub-object blobs exist.
 func (r recovery) recoverPlan(ctx context.Context, containerName string, planID uuid.UUID) error {
+	if r.testRecoverPlan != nil && testing.Testing() {
+		return r.testRecoverPlan(ctx, containerName, planID)
+	}
 	pom, err := r.reader.fetchPlanObjectMeta(ctx, planID)
 	if err != nil {
 		return errors.E(ctx, errors.CatInternal, errors.TypeStorageGet, fmt.Errorf("failed to read plan object meta for recovery: %w", err))

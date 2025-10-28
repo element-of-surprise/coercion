@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"slices"
 	"sort"
+	"testing"
 
 	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob"
 	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob/container"
@@ -32,6 +33,8 @@ type reader struct {
 	client       blobops.Ops
 	endpoint     string
 	reg          *registry.Register
+
+	testListPlansInContainer func(ctx context.Context, containerName string) ([]storage.ListResult, error)
 
 	private.Storage
 }
@@ -232,6 +235,10 @@ func (r reader) list(ctx context.Context, limit int, ch chan storage.Stream[stor
 
 // listPlansInContainer lists all plans in a specific container.
 func (r reader) listPlansInContainer(ctx context.Context, containerName string) ([]storage.ListResult, error) {
+	if r.testListPlansInContainer != nil && testing.Testing() {
+		return r.testListPlansInContainer(ctx, containerName)
+	}
+
 	var results []storage.ListResult
 
 	pager := r.client.NewListBlobsFlatPager(containerName, &azblob.ListBlobsFlatOptions{

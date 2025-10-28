@@ -1,16 +1,20 @@
 package azblob
 
 import (
+	"fmt"
 	"testing"
 	"time"
 
 	"github.com/element-of-surprise/coercion/plugins/registry"
 	"github.com/element-of-surprise/coercion/workflow"
 	"github.com/element-of-surprise/coercion/workflow/context"
+	"github.com/element-of-surprise/coercion/workflow/storage"
 	"github.com/element-of-surprise/coercion/workflow/storage/azblob/internal/blobops"
 	"github.com/element-of-surprise/coercion/workflow/storage/azblob/internal/planlocks"
 	testPlugins "github.com/element-of-surprise/coercion/workflow/storage/sqlite/testing/plugins"
 	"github.com/go-json-experiment/json"
+	"github.com/google/uuid"
+	"github.com/gostdlib/base/concurrency/sync"
 	"golang.org/x/sync/singleflight"
 )
 
@@ -126,7 +130,7 @@ func createTestPlan(running bool) *workflow.Plan {
 	}
 }
 
-// uploadPlanToFake uploads a plan and its metadata to the fake client
+// uploadPlanToFake uploads a plan and its metadata to the fake client.
 func uploadPlanToFake(ctx context.Context, t *testing.T, fakeClient *blobops.Fake, prefix string, plan *workflow.Plan) {
 	t.Helper()
 
@@ -377,10 +381,123 @@ func TestRecoverPlan(t *testing.T) {
 	}
 }
 
-// TestRecoverPlansInContainer is not implemented because it requires implementing
-// a complex Azure SDK pager in the fake. The core recovery logic is tested by
-// the other tests (TestRecoverPlan, TestEnsure* functions) which test the actual
-// recovery logic without requiring the pager.
+func TestRecoverPlansInContainer(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name            string
+		numPlans        int
+		plansRunning    []bool
+		recoverPlanErrs map[int]error
+		wantErr         bool
+	}{
+		{
+			name:     "Success: empty container",
+			numPlans: 0,
+			wantErr:  false,
+		},
+		{
+			name:         "Success: single plan recovered",
+			numPlans:     1,
+			plansRunning: []bool{false},
+			wantErr:      false,
+		},
+		{
+			name:         "Success: multiple plans recovered",
+			numPlans:     3,
+			plansRunning: []bool{false, false, false},
+			wantErr:      false,
+		},
+		{
+			name:         "Success: mix of running and non-running plans",
+			numPlans:     2,
+			plansRunning: []bool{false, true},
+			wantErr:      false,
+		},
+		{
+			name:         "Error: recoverPlan fails for one plan",
+			numPlans:     2,
+			plansRunning: []bool{false, false},
+			recoverPlanErrs: map[int]error{
+				0: fmt.Errorf("test recovery error"),
+			},
+			wantErr: true,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			ctx := context.Background()
+			fakeClient, rec := setupRecoveryTest(t)
+
+			containerName := "test-container"
+
+			// Create container in fake client
+			if err := fakeClient.CreateContainer(ctx, containerName); err != nil {
+				t.Fatalf("[TestRecoverPlansInContainer]: failed to create container: %v", err)
+			}
+
+			plans := make([]*workflow.Plan, test.numPlans)
+			listResults := make([]storage.ListResult, test.numPlans)
+
+			for i := 0; i < test.numPlans; i++ {
+				running := false
+				if i < len(test.plansRunning) {
+					running = test.plansRunning[i]
+				}
+				plan := createTestPlan(running)
+				plans[i] = plan
+
+				listResults[i] = storage.ListResult{
+					ID:         plan.ID,
+					Name:       plan.Name,
+					Descr:      plan.Descr,
+					SubmitTime: plan.SubmitTime,
+					State:      plan.State,
+				}
+			}
+
+			rec.reader.testListPlansInContainer = func(ctx context.Context, containerName string) ([]storage.ListResult, error) {
+				return listResults, nil
+			}
+
+			recoveredPlans := sync.ShardedMap[uuid.UUID, bool]{}
+			rec.testRecoverPlan = func(ctx context.Context, containerName string, planID uuid.UUID) error {
+				// Find the plan index
+				for i, plan := range plans {
+					if plan.ID == planID {
+						if err, ok := test.recoverPlanErrs[i]; ok {
+							return err
+						}
+						recoveredPlans.Set(planID, true)
+						return nil
+					}
+				}
+				return fmt.Errorf("unknown plan ID: %s", planID)
+			}
+
+			err := rec.recoverPlansInContainer(ctx, containerName)
+
+			switch {
+			case err == nil && test.wantErr:
+				t.Errorf("[TestRecoverPlansInContainer](%s): got err == nil, want err != nil", test.name)
+				return
+			case err != nil && !test.wantErr:
+				t.Errorf("[TestRecoverPlansInContainer](%s): got err == %s, want err == nil", test.name, err)
+				return
+			case err != nil:
+				return
+			}
+
+			// Verify all plans were attempted to be recovered
+			for i, plan := range plans {
+				if _, recovered := recoveredPlans.Get(plan.ID); !recovered {
+					t.Errorf("[TestRecoverPlansInContainer](%s): plan %d (ID: %s) was not recovered", test.name, i, plan.ID)
+				}
+			}
+		})
+	}
+}
 
 func TestEnsureActionBlob(t *testing.T) {
 	t.Parallel()
