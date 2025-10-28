@@ -4,10 +4,10 @@ import (
 	"flag"
 	"fmt"
 	"log"
-	"log/slog"
 	"net/url"
 	"os"
 	"strconv"
+	"sync"
 	"testing"
 	"time"
 
@@ -70,14 +70,13 @@ func (c *cloner) seq(ctx context.Context, seq *workflow.Sequence, opts ...clone.
 	return s
 }
 
-func TestEtoE(t *testing.T) {
-	flag.Parse()
-	if err := validateFlags(); err != nil {
-		t.Fatalf("TestEtoE: failed to validate flags: %v", err)
-	}
+var cred azcore.TokenCredential
+var vault storage.Vault
+var reg *registry.Register
+var initOnce sync.Once
 
-	ctx := context.Background()
-	logger := slog.Default()
+func initGlobals() {
+	var err error
 
 	plugCheck := &testplugin.Plugin{
 		AlwaysRespond: true,
@@ -89,9 +88,62 @@ func TestEtoE(t *testing.T) {
 		AlwaysRespond: true,
 	}
 
-	reg := registry.New()
+	reg = registry.New()
 	reg.Register(plugCheck)
 	reg.Register(plugAction)
+
+	ctx := context.Background()
+	switch *vaultType {
+	case "azblob", "cosmosdb":
+		cred, err = msiCred(*msi)
+		if err != nil {
+			panic(err)
+		}
+	}
+
+	switch *vaultType {
+	case "sqlite":
+		vault, err = sqlite.New(ctx, "", reg, sqlite.WithInMemory(), sqlite.WithCapture(capture))
+	case "cosmosdb":
+		context.Log(ctx).Info(fmt.Sprintf("TestEtoE: Using cosmosdb: %s, %s, %s", *endpoint, *db, *container))
+		vault, err = cosmosdb.New(ctx, *swarm, *endpoint, *db, *container, cred, reg)
+	case "azblob":
+		context.Log(ctx).Info(fmt.Sprintf("TestEtoE: Using azblob: %s", *azblobURL))
+		vault, err = azblob.New(ctx, "coercion", *azblobURL, cred, reg)
+	default:
+		panic(fmt.Errorf("TestEtoE: unknown storage vault type: %s", *vaultType))
+	}
+	if err != nil {
+		panic(err)
+	}
+
+	if *teardown == true {
+		defer func() {
+			switch *vaultType {
+			case "azblob":
+				/*
+					if err := azblob.Teardown(ctx, "coercion", *azblobURL, cred); err != nil {
+						panic(err)
+					}
+				*/
+			case "cosmosdb":
+				if err := cosmosdb.Teardown(ctx, *endpoint, *db, *container, cred, nil); err != nil {
+					panic(err)
+				}
+			}
+		}()
+	}
+}
+
+func TestEtoE(t *testing.T) {
+	flag.Parse()
+	if err := validateFlags(); err != nil {
+		t.Fatalf("TestEtoE: failed to validate flags: %v", err)
+	}
+
+	initGlobals()
+
+	ctx := context.Background()
 
 	bypassChecks := &workflow.Checks{
 		Delay: 0,
@@ -187,42 +239,6 @@ func TestEtoE(t *testing.T) {
 		case *workflow.Checks:
 			obj.Key = workflow.NewV7()
 		}
-	}
-
-	var cred azcore.TokenCredential
-	if *vaultType == "cosmosdb" {
-		cred, err = msiCred(*msi)
-		if err != nil {
-			panic(err)
-		}
-	}
-
-	if *teardown == true {
-		defer func() {
-			if *vaultType == "cosmosdb" {
-				// Teardown the cosmosdb container
-				if err := cosmosdb.Teardown(ctx, *endpoint, *db, *container, cred, nil); err != nil {
-					panic(err)
-				}
-			}
-		}()
-	}
-
-	var vault storage.Vault
-	switch *vaultType {
-	case "sqlite":
-		vault, err = sqlite.New(ctx, "", reg, sqlite.WithInMemory(), sqlite.WithCapture(capture))
-	case "cosmosdb":
-		logger.Info(fmt.Sprintf("TestEtoE: Using cosmosdb: %s, %s, %s", *endpoint, *db, *container))
-		vault, err = cosmosdb.New(ctx, *swarm, *endpoint, *db, *container, cred, reg)
-	case "azblob":
-		logger.Info(fmt.Sprintf("TestEtoE: Using azblob: %s", *endpoint))
-		vault, err = azblob.New(ctx, "coercion", *azblobURL, cred, reg)
-	default:
-		panic(fmt.Errorf("TestEtoE: unknown storage vault type: %s", *vaultType))
-	}
-	if err != nil {
-		panic(err)
 	}
 
 	ws, err := workstream.New(ctx, reg, vault)
@@ -322,7 +338,6 @@ func testPlugResp(action *workflow.Action, want string) error {
 
 func TestBypassPlan(t *testing.T) {
 	ctx := context.Background()
-	logger := slog.Default()
 
 	plugCheck := &testplugin.Plugin{
 		AlwaysRespond: true,
@@ -426,20 +441,6 @@ func TestBypassPlan(t *testing.T) {
 		}()
 	}
 
-	var vault storage.Vault
-	switch *vaultType {
-	case "sqlite":
-		vault, err = sqlite.New(ctx, "", reg, sqlite.WithInMemory())
-	case "cosmosdb":
-		logger.Info(fmt.Sprintf("TestBypassPlan: Using cosmosdb: %s, %s, %s", *endpoint, *db, *container))
-		vault, err = cosmosdb.New(ctx, *swarm, *endpoint, *db, *container, cred, reg)
-	default:
-		panic(fmt.Errorf("TestBypassPlan: unknown storage vault type: %s", *vaultType))
-	}
-	if err != nil {
-		panic(err)
-	}
-
 	ws, err := workstream.New(ctx, reg, vault)
 	if err != nil {
 		panic(err)
@@ -480,7 +481,6 @@ func TestBypassPlan(t *testing.T) {
 
 func TestBypassBlock(t *testing.T) {
 	ctx := context.Background()
-	logger := slog.Default()
 
 	plugCheck := &testplugin.Plugin{
 		AlwaysRespond: true,
@@ -589,14 +589,6 @@ func TestBypassBlock(t *testing.T) {
 		panic(err)
 	}
 
-	var cred azcore.TokenCredential
-	if *vaultType == "cosmosdb" {
-		cred, err = msiCred(*msi)
-		if err != nil {
-			panic(err)
-		}
-	}
-
 	if *teardown == true {
 		defer func() {
 			if *vaultType == "cosmosdb" {
@@ -606,20 +598,6 @@ func TestBypassBlock(t *testing.T) {
 				}
 			}
 		}()
-	}
-
-	var vault storage.Vault
-	switch *vaultType {
-	case "sqlite":
-		vault, err = sqlite.New(ctx, "", reg, sqlite.WithInMemory())
-	case "cosmosdb":
-		logger.Info(fmt.Sprintf("TestBypassBlock: Using cosmosdb: %s, %s, %s", *endpoint, *db, *container))
-		vault, err = cosmosdb.New(ctx, *swarm, *endpoint, *db, *container, cred, reg)
-	default:
-		panic(fmt.Errorf("TestBypassBlock: unknown storage vault type: %s", *vaultType))
-	}
-	if err != nil {
-		panic(err)
 	}
 
 	ws, err := workstream.New(ctx, reg, vault)

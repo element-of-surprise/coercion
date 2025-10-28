@@ -2,6 +2,7 @@ package azblob
 
 import (
 	"fmt"
+	"log"
 
 	"github.com/google/uuid"
 	"github.com/gostdlib/base/context"
@@ -72,6 +73,7 @@ func (r recovery) recoverPlansInContainer(ctx context.Context, containerName str
 
 // recoverPlan recovers a single plan by ensuring all sub-object blobs exist.
 func (r recovery) recoverPlan(ctx context.Context, containerName string, planID uuid.UUID) error {
+	log.Println("recoverPlan: ", planID.String())
 	// Read the plan to get the full hierarchy
 	plan, err := r.reader.fetchPlan(ctx, planID)
 	if err != nil {

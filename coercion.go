@@ -146,7 +146,7 @@ type setPlanIDer interface {
 	SetPlanID(uuid.UUID)
 }
 
-// requestDefaults finds all request objects in the plan and calls their Defaults() method.
+// requestDefaults finds all actions and callds Defaults() on the request objects.
 func (w *Workstream) requestDefaults(ctx context.Context, plan *workflow.Plan) {
 	for item := range walk.Plan(plan) {
 		if item.Value.Type() != workflow.OTPlan {

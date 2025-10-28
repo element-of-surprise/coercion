@@ -49,10 +49,8 @@ func (u *uploader) uploadPlan(ctx context.Context, p *workflow.Plan, uploadPlanT
 	// This ensures the plan and all sub-objects are in the same container
 	containerName := containerForPlan(u.prefix, p.ID)
 
-	if uploadPlanType == uptCreate {
-		if err := ensureContainer(ctx, u.client, containerName); err != nil {
-			return errors.E(ctx, errors.CatInternal, errors.TypeStorageCreate, fmt.Errorf("failed to create container: %w", err))
-		}
+	if err := ensureContainer(ctx, u.client, containerName); err != nil {
+		return errors.E(ctx, errors.CatInternal, errors.TypeStorageCreate, fmt.Errorf("failed to create container: %w", err))
 	}
 
 	md, err := planToMetadata(ctx, p)

@@ -3,6 +3,8 @@ package azblob
 import (
 	"fmt"
 	"io"
+	"log"
+	"reflect"
 
 	"github.com/go-json-experiment/json"
 	"github.com/google/uuid"
@@ -11,7 +13,12 @@ import (
 	"github.com/element-of-surprise/coercion/workflow"
 	"github.com/element-of-surprise/coercion/workflow/errors"
 	"github.com/element-of-surprise/coercion/workflow/storage"
+	"github.com/element-of-surprise/coercion/workflow/utils/walk"
 )
+
+type setPlanIDer interface {
+	SetPlanID(uuid.UUID)
+}
 
 // fetchPlan fetches a plan from blob storage and reconstructs the full hierarchy.
 func (r reader) fetchPlan(ctx context.Context, id uuid.UUID) (*workflow.Plan, error) {
@@ -49,7 +56,11 @@ func (r reader) fetchPlanFromContainer(ctx context.Context, id uuid.UUID) (*work
 	if pm.State.Status == workflow.Running {
 		return r.fetchRunningPlan(ctx, containerName, id, pm.ListResult)
 	}
+	return r.fetchNonRunningPlan(ctx, containerName, id)
+}
 
+// fetchNonRunningPlan fetches a non-running plan by downloading the full workflow.Plan object blob.
+func (r reader) fetchNonRunningPlan(ctx context.Context, containerName string, id uuid.UUID) (*workflow.Plan, error) {
 	// Not running - read the workflow.Plan object blob directly
 	objectBlobName := planObjectBlobName(id)
 
@@ -69,17 +80,27 @@ func (r reader) fetchPlanFromContainer(ctx context.Context, id uuid.UUID) (*work
 	}
 
 	// Unmarshal the full workflow.Plan object
-	var plan workflow.Plan
-	if err := json.Unmarshal(data, &plan); err != nil {
+	plan := &workflow.Plan{}
+	if err := json.Unmarshal(data, plan); err != nil {
 		return nil, errors.E(ctx, errors.CatInternal, errors.TypeStorageGet, fmt.Errorf("failed to unmarshal plan object: %w", err))
 	}
 
 	// Set registry for all actions
-	if err := r.setRegistry(&plan); err != nil {
+	if err := r.setRegistry(plan); err != nil {
 		return nil, errors.E(ctx, errors.CatInternal, errors.TypeStorageGet, fmt.Errorf("failed to set registry: %w", err))
 	}
 
-	return &plan, nil
+	if err := r.fixActions(ctx, plan); err != nil {
+		return nil, errors.E(ctx, errors.CatInternal, errors.TypeStorageGet, fmt.Errorf("failed to fix action requests: %w", err))
+	}
+
+	for item := range walk.Plan(plan) {
+		if item.Value.Type() != workflow.OTPlan {
+			item.Value.(setPlanIDer).SetPlanID(plan.ID)
+		}
+	}
+
+	return plan, nil
 }
 
 // fetchRunningPlan fetches a running plan by reconstructing it from planEntry and all sub-objects.
@@ -182,6 +203,7 @@ func (r reader) fetchChecks(ctx context.Context, containerName string, planID, c
 		return nil, errors.E(ctx, errors.CatInternal, errors.TypeStorageGet, fmt.Errorf("failed to read checks blob: %w", err))
 	}
 
+	log.Println(string(data))
 	var entry checksEntry
 	if err := json.Unmarshal(data, &entry); err != nil {
 		return nil, errors.E(ctx, errors.CatInternal, errors.TypeStorageGet, fmt.Errorf("failed to unmarshal checks: %w", err))
@@ -191,6 +213,7 @@ func (r reader) fetchChecks(ctx context.Context, containerName string, planID, c
 	if err != nil {
 		return nil, errors.E(ctx, errors.CatInternal, errors.TypeStorageGet, fmt.Errorf("failed to convert entry to checks: %w", err))
 	}
+	checks.SetPlanID(planID)
 
 	// Fetch all actions
 	checks.Actions = make([]*workflow.Action, len(entry.Actions))
@@ -227,6 +250,7 @@ func (r reader) fetchBlock(ctx context.Context, containerName string, planID, bl
 	if err != nil {
 		return nil, errors.E(ctx, errors.CatInternal, errors.TypeStorageGet, fmt.Errorf("failed to convert entry to block: %w", err))
 	}
+	block.SetPlanID(planID)
 
 	// Fetch all check objects
 	if entry.BypassChecks != uuid.Nil {
@@ -295,6 +319,7 @@ func (r reader) fetchSequence(ctx context.Context, containerName string, planID,
 	if err != nil {
 		return nil, errors.E(ctx, errors.CatInternal, errors.TypeStorageGet, fmt.Errorf("failed to convert entry to sequence: %w", err))
 	}
+	seq.SetPlanID(planID)
 
 	// Fetch all actions
 	seq.Actions = make([]*workflow.Action, len(entry.Actions))
@@ -326,6 +351,7 @@ func (r reader) fetchAction(ctx context.Context, containerName string, planID, a
 	if err != nil {
 		return nil, errors.E(ctx, errors.CatInternal, errors.TypeStorageGet, fmt.Errorf("failed to convert entry to action: %w", err))
 	}
+	action.SetPlanID(planID)
 
 	return action, nil
 }
@@ -356,6 +382,100 @@ func (r reader) setRegistry(plan *workflow.Plan) error {
 		for _, seq := range block.Sequences {
 			for _, action := range seq.Actions {
 				action.SetRegister(r.reg)
+			}
+		}
+	}
+
+	return nil
+}
+
+// fixActions reconstructs Action.Req and Attempt.Resp fields after unmarshaling from JSON.
+func (r reader) fixActions(ctx context.Context, plan *workflow.Plan) error {
+	fixAction := func(action *workflow.Action) error {
+		plug := r.reg.Plugin(action.Plugin)
+		if plug == nil {
+			return fmt.Errorf("plugin %s not found", action.Plugin)
+		}
+
+		// Fix Action.Req
+		if action.Req != nil {
+			reqBytes, err := json.Marshal(action.Req)
+			if err != nil {
+				return fmt.Errorf("failed to marshal req: %w", err)
+			}
+
+			req := plug.Request()
+			if req != nil {
+				if reflect.TypeOf(req).Kind() != reflect.Pointer {
+					if err := json.Unmarshal(reqBytes, &req); err != nil {
+						return fmt.Errorf("failed to unmarshal req: %w", err)
+					}
+				} else {
+					if err := json.Unmarshal(reqBytes, req); err != nil {
+						return fmt.Errorf("failed to unmarshal req: %w", err)
+					}
+				}
+				action.Req = req
+			}
+		}
+
+		// Fix Attempt.Resp for all attempts
+		for _, attempt := range action.Attempts {
+			if attempt.Resp != nil {
+				respBytes, err := json.Marshal(attempt.Resp)
+				if err != nil {
+					return fmt.Errorf("failed to marshal attempt resp: %w", err)
+				}
+
+				resp := plug.Response()
+				if resp != nil {
+					if reflect.TypeOf(resp).Kind() != reflect.Pointer {
+						if err := json.Unmarshal(respBytes, &resp); err != nil {
+							return fmt.Errorf("failed to unmarshal attempt resp: %w", err)
+						}
+					} else {
+						if err := json.Unmarshal(respBytes, resp); err != nil {
+							return fmt.Errorf("failed to unmarshal attempt resp: %w", err)
+						}
+					}
+					attempt.Resp = resp
+				}
+			}
+		}
+
+		return nil
+	}
+
+	// Fix all actions in plan-level checks
+	for _, checks := range []*workflow.Checks{plan.BypassChecks, plan.PreChecks, plan.PostChecks, plan.ContChecks, plan.DeferredChecks} {
+		if checks != nil {
+			for _, action := range checks.Actions {
+				if err := fixAction(action); err != nil {
+					return err
+				}
+			}
+		}
+	}
+
+	// Fix all actions in blocks
+	for _, block := range plan.Blocks {
+		// Block-level checks
+		for _, checks := range []*workflow.Checks{block.BypassChecks, block.PreChecks, block.PostChecks, block.ContChecks, block.DeferredChecks} {
+			if checks != nil {
+				for _, action := range checks.Actions {
+					if err := fixAction(action); err != nil {
+						return err
+					}
+				}
+			}
+		}
+
+		// Sequence actions
+		for _, seq := range block.Sequences {
+			for _, action := range seq.Actions {
+				if err := fixAction(action); err != nil {
+					return err
+				}
 			}
 		}
 	}
