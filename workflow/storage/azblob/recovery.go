@@ -38,9 +38,7 @@ func (r recovery) Recovery(ctx context.Context) error {
 
 	for _, containerName := range containers {
 		if err := r.recoverPlansInContainer(ctx, containerName); err != nil {
-			// Log error but continue with other containers
-			// We don't want a failure in one container to prevent recovery of others
-			continue
+			return err
 		}
 	}
 
@@ -54,7 +52,7 @@ func (r recovery) recoverPlansInContainer(ctx context.Context, containerName str
 		return err
 	}
 	if !exists {
-		return nil // Container doesn't exist, nothing to recover
+		return nil
 	}
 
 	planBlobs, err := r.reader.listPlansInContainer(ctx, containerName)
@@ -102,7 +100,6 @@ func (r recovery) recoverPlan(ctx context.Context, containerName string, planID 
 		return nil // Plan is running, don't interfere
 	}
 
-	// Verify and recreate missing blobs
 	if err := r.ensureSubObjectBlobs(ctx, containerName, plan); err != nil {
 		return errors.E(ctx, errors.CatInternal, errors.TypeStoragePut, fmt.Errorf("failed to ensure sub-object blobs: %w", err))
 	}
@@ -112,14 +109,12 @@ func (r recovery) recoverPlan(ctx context.Context, containerName string, planID 
 
 // ensureSubObjectBlobs ensures all sub-object blobs exist for a plan.
 func (r recovery) ensureSubObjectBlobs(ctx context.Context, containerName string, plan *workflow.Plan) error {
-	// Create a temporary creator to upload missing blobs
 	c := creator{
 		prefix:   r.reader.prefix,
 		endpoint: r.reader.endpoint,
 		reader:   r.reader,
 	}
 
-	// Ensure checks blobs exist
 	for _, checks := range []*workflow.Checks{plan.BypassChecks, plan.PreChecks, plan.PostChecks, plan.ContChecks, plan.DeferredChecks} {
 		if checks != nil {
 			if err := r.ensureChecksBlob(ctx, c, containerName, plan.ID, checks); err != nil {
@@ -128,7 +123,6 @@ func (r recovery) ensureSubObjectBlobs(ctx context.Context, containerName string
 		}
 	}
 
-	// Ensure block blobs exist
 	for i, block := range plan.Blocks {
 		if err := r.ensureBlockBlob(ctx, c, containerName, plan.ID, block, i); err != nil {
 			return err
@@ -223,7 +217,6 @@ func (r recovery) ensureActionBlob(ctx context.Context, c creator, containerName
 		return err
 	}
 
-	// If blob doesn't exist, create it
 	if !exists {
 		if err := r.uploader.uploadActionBlob(ctx, containerName, planID, action, pos); err != nil {
 			return fmt.Errorf("failed to recreate action blob: %w", err)

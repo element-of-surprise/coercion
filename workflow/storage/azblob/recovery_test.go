@@ -251,45 +251,45 @@ func TestRecoverPlan(t *testing.T) {
 			expectRecovered: []string{},
 		},
 		{
-			name:        "Success: plan not running, all blobs exist",
-			planRunning: false,
-			missingBlobs: []string{},
-			wantErr:     false,
+			name:            "Success: plan not running, all blobs exist",
+			planRunning:     false,
+			missingBlobs:    []string{},
+			wantErr:         false,
 			expectRecovered: []string{},
 		},
 		{
-			name:        "Success: plan not running, missing block blob",
-			planRunning: false,
-			missingBlobs: []string{"block"},
-			wantErr:     false,
+			name:            "Success: plan not running, missing block blob",
+			planRunning:     false,
+			missingBlobs:    []string{"block"},
+			wantErr:         false,
 			expectRecovered: []string{"block"},
 		},
 		{
-			name:        "Success: plan not running, missing sequence blob",
-			planRunning: false,
-			missingBlobs: []string{"sequence"},
-			wantErr:     false,
+			name:            "Success: plan not running, missing sequence blob",
+			planRunning:     false,
+			missingBlobs:    []string{"sequence"},
+			wantErr:         false,
 			expectRecovered: []string{"sequence"},
 		},
 		{
-			name:        "Success: plan not running, missing checks blob",
-			planRunning: false,
-			missingBlobs: []string{"checks"},
-			wantErr:     false,
+			name:            "Success: plan not running, missing checks blob",
+			planRunning:     false,
+			missingBlobs:    []string{"checks"},
+			wantErr:         false,
 			expectRecovered: []string{"checks"},
 		},
 		{
-			name:        "Success: plan not running, missing action blob",
-			planRunning: false,
-			missingBlobs: []string{"action"},
-			wantErr:     false,
+			name:            "Success: plan not running, missing action blob",
+			planRunning:     false,
+			missingBlobs:    []string{"action"},
+			wantErr:         false,
 			expectRecovered: []string{"action"},
 		},
 		{
-			name:        "Success: plan not running, multiple missing blobs",
-			planRunning: false,
-			missingBlobs: []string{"block", "sequence", "checks", "action"},
-			wantErr:     false,
+			name:            "Success: plan not running, multiple missing blobs",
+			planRunning:     false,
+			missingBlobs:    []string{"block", "sequence", "checks", "action"},
+			wantErr:         false,
 			expectRecovered: []string{"block", "sequence", "checks", "action"},
 		},
 	}
@@ -299,15 +299,12 @@ func TestRecoverPlan(t *testing.T) {
 			ctx := context.Background()
 			fakeClient, rec := setupRecoveryTest(t)
 
-			// Create test plan
 			plan := createTestPlan(test.planRunning)
 
-			// Upload plan to fake client
 			uploadPlanToFake(ctx, t, fakeClient, "test", plan)
 
 			containerName := containerForPlan("test", plan.ID)
 
-			// Upload all sub-objects initially
 			u := &uploader{
 				mu:     planlocks.New(ctx),
 				client: fakeClient,
@@ -315,7 +312,6 @@ func TestRecoverPlan(t *testing.T) {
 				pool:   context.Pool(ctx).Limited(10),
 			}
 
-			// Upload all sub-objects
 			if err := u.uploadSubObjects(ctx, containerName, plan); err != nil {
 				t.Fatalf("[TestRecoverPlan]: failed to upload sub-objects: %v", err)
 			}
@@ -342,7 +338,6 @@ func TestRecoverPlan(t *testing.T) {
 				}
 			}
 
-			// Run recovery
 			err := rec.recoverPlan(ctx, containerName, plan.ID)
 
 			switch {
@@ -356,7 +351,6 @@ func TestRecoverPlan(t *testing.T) {
 				return
 			}
 
-			// Verify that missing blobs were recovered
 			for _, blobType := range test.expectRecovered {
 				var blobName string
 				switch blobType {
