@@ -1,7 +1,6 @@
 package azblob
 
 import (
-	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob"
 	"github.com/gostdlib/base/context"
 
 	"github.com/element-of-surprise/coercion/internal/private"
@@ -16,7 +15,6 @@ var _ storage.Creator = creator{}
 type creator struct {
 	mu       *planlocks.Group
 	prefix   string
-	client   *azblob.Client
 	endpoint string
 	reader   reader
 	uploader *uploader

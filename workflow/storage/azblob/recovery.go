@@ -2,7 +2,6 @@ package azblob
 
 import (
 	"fmt"
-	"log"
 
 	"github.com/google/uuid"
 	"github.com/gostdlib/base/context"
@@ -11,6 +10,7 @@ import (
 	"github.com/element-of-surprise/coercion/workflow"
 	"github.com/element-of-surprise/coercion/workflow/errors"
 	"github.com/element-of-surprise/coercion/workflow/storage"
+	"github.com/element-of-surprise/coercion/workflow/storage/azblob/internal/blobops"
 )
 
 var _ storage.Recovery = recovery{}
@@ -49,7 +49,7 @@ func (r recovery) Recovery(ctx context.Context) error {
 
 // recoverPlansInContainer recovers all plans in a specific container.
 func (r recovery) recoverPlansInContainer(ctx context.Context, containerName string) error {
-	exists, err := containerExists(ctx, r.reader.client, containerName)
+	exists, err := r.reader.client.ContainerExists(ctx, containerName)
 	if err != nil {
 		return err
 	}
@@ -62,10 +62,18 @@ func (r recovery) recoverPlansInContainer(ctx context.Context, containerName str
 		return err
 	}
 
+	g := context.Pool(ctx).Limited(10).Group()
+
 	for _, planResult := range planBlobs {
-		if err := r.recoverPlan(ctx, containerName, planResult.ID); err != nil {
-			return err
-		}
+		_ = g.Go(
+			ctx,
+			func(ctx context.Context) error {
+				return r.recoverPlan(ctx, containerName, planResult.ID)
+			},
+		)
+	}
+	if err := g.Wait(ctx); err != nil {
+		return err
 	}
 
 	return nil
@@ -73,8 +81,17 @@ func (r recovery) recoverPlansInContainer(ctx context.Context, containerName str
 
 // recoverPlan recovers a single plan by ensuring all sub-object blobs exist.
 func (r recovery) recoverPlan(ctx context.Context, containerName string, planID uuid.UUID) error {
-	log.Println("recoverPlan: ", planID.String())
-	// Read the plan to get the full hierarchy
+	pom, err := r.reader.fetchPlanObjectMeta(ctx, planID)
+	if err != nil {
+		return errors.E(ctx, errors.CatInternal, errors.TypeStorageGet, fmt.Errorf("failed to read plan object meta for recovery: %w", err))
+	}
+
+	// If the object is finished, no recovery needed. Since the object is the last thing to change,
+	// we don't need consistency checks here.
+	if pom.State.Status > workflow.Running {
+		return nil
+	}
+
 	plan, err := r.reader.fetchPlan(ctx, planID)
 	if err != nil {
 		return errors.E(ctx, errors.CatInternal, errors.TypeStorageGet, fmt.Errorf("failed to read plan for recovery: %w", err))
@@ -98,7 +115,6 @@ func (r recovery) ensureSubObjectBlobs(ctx context.Context, containerName string
 	// Create a temporary creator to upload missing blobs
 	c := creator{
 		prefix:   r.reader.prefix,
-		client:   r.reader.client,
 		endpoint: r.reader.endpoint,
 		reader:   r.reader,
 	}
@@ -219,12 +235,11 @@ func (r recovery) ensureActionBlob(ctx context.Context, c creator, containerName
 
 // blobExists checks if a blob exists in a container.
 func (r recovery) blobExists(ctx context.Context, containerName, blobName string) (bool, error) {
-	blobClient := r.reader.client.ServiceClient().NewContainerClient(containerName).NewBlobClient(blobName)
-	_, err := blobClient.GetProperties(ctx, nil)
+	_, err := r.reader.client.GetMetadata(ctx, containerName, blobName)
 	if err == nil {
 		return true, nil
 	}
-	if isNotFound(err) {
+	if blobops.IsNotFound(err) {
 		return false, nil
 	}
 	return false, err

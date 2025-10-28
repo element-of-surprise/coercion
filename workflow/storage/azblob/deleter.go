@@ -3,7 +3,6 @@ package azblob
 import (
 	"fmt"
 
-	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob"
 	"github.com/google/uuid"
 	"github.com/gostdlib/base/context"
 
@@ -11,6 +10,7 @@ import (
 	"github.com/element-of-surprise/coercion/workflow"
 	"github.com/element-of-surprise/coercion/workflow/errors"
 	"github.com/element-of-surprise/coercion/workflow/storage"
+	"github.com/element-of-surprise/coercion/workflow/storage/azblob/internal/blobops"
 	"github.com/element-of-surprise/coercion/workflow/storage/azblob/internal/planlocks"
 )
 
@@ -20,7 +20,7 @@ var _ storage.Deleter = deleter{}
 type deleter struct {
 	mu       *planlocks.Group
 	prefix   string
-	client   *azblob.Client
+	client   blobops.Ops
 	endpoint string
 	reader   reader
 
@@ -43,7 +43,7 @@ func (d deleter) Delete(ctx context.Context, id uuid.UUID) error {
 	containerName := containerForPlan(d.prefix, id)
 
 	if err := d.deletePlanInContainer(ctx, containerName, plan); err != nil {
-		if !isNotFound(err) {
+		if !blobops.IsNotFound(err) {
 			return errors.E(ctx, errors.CatInternal, errors.TypeStorageDelete, fmt.Errorf("failed to delete plan in container %s: %w", containerName, err))
 		}
 	}
@@ -55,7 +55,7 @@ func (d deleter) Delete(ctx context.Context, id uuid.UUID) error {
 // This includes both the planEntry blob and the workflow.Plan object blob, plus all sub-objects.
 func (d deleter) deletePlanInContainer(ctx context.Context, containerName string, plan *workflow.Plan) error {
 	// Check if container exists
-	exists, err := containerExists(ctx, d.client, containerName)
+	exists, err := d.client.ContainerExists(ctx, containerName)
 	if err != nil {
 		return err
 	}
@@ -66,7 +66,7 @@ func (d deleter) deletePlanInContainer(ctx context.Context, containerName string
 	// Delete planEntry blob (lightweight, with metadata)
 	entryBlob := planEntryBlobName(plan.ID)
 	if err := d.deleteBlob(ctx, containerName, entryBlob); err != nil {
-		if !isNotFound(err) {
+		if !blobops.IsNotFound(err) {
 			return fmt.Errorf("failed to delete planEntry blob: %w", err)
 		}
 	}
@@ -75,7 +75,7 @@ func (d deleter) deletePlanInContainer(ctx context.Context, containerName string
 	for _, checks := range []*workflow.Checks{plan.BypassChecks, plan.PreChecks, plan.PostChecks, plan.ContChecks, plan.DeferredChecks} {
 		if checks != nil {
 			if err := d.deleteChecksBlobs(ctx, containerName, plan.ID, checks); err != nil {
-				if !isNotFound(err) {
+				if !blobops.IsNotFound(err) {
 					return err
 				}
 			}
@@ -85,7 +85,7 @@ func (d deleter) deletePlanInContainer(ctx context.Context, containerName string
 	// Delete all block-related blobs
 	for _, block := range plan.Blocks {
 		if err := d.deleteBlockBlobs(ctx, containerName, plan.ID, block); err != nil {
-			if !isNotFound(err) {
+			if !blobops.IsNotFound(err) {
 				return err
 			}
 		}
@@ -94,7 +94,7 @@ func (d deleter) deletePlanInContainer(ctx context.Context, containerName string
 	// Delete workflow.Plan object blob (full embedded hierarchy)
 	objectBlob := planObjectBlobName(plan.ID)
 	if err := d.deleteBlob(ctx, containerName, objectBlob); err != nil {
-		if !isNotFound(err) {
+		if !blobops.IsNotFound(err) {
 			return fmt.Errorf("failed to delete plan object blob: %w", err)
 		}
 	}
@@ -107,7 +107,7 @@ func (d deleter) deleteBlockBlobs(ctx context.Context, containerName string, pla
 	// Delete block blob
 	blockBlob := blockBlobName(planID, block.ID)
 	if err := d.deleteBlob(ctx, containerName, blockBlob); err != nil {
-		if !isNotFound(err) {
+		if !blobops.IsNotFound(err) {
 			return fmt.Errorf("failed to delete block blob: %w", err)
 		}
 	}
@@ -136,7 +136,7 @@ func (d deleter) deleteSequenceBlobs(ctx context.Context, containerName string, 
 	// Delete sequence blob
 	seqBlob := sequenceBlobName(planID, seq.ID)
 	if err := d.deleteBlob(ctx, containerName, seqBlob); err != nil {
-		if !isNotFound(err) {
+		if !blobops.IsNotFound(err) {
 			return fmt.Errorf("failed to delete sequence blob: %w", err)
 		}
 	}
@@ -156,7 +156,7 @@ func (d deleter) deleteChecksBlobs(ctx context.Context, containerName string, pl
 	// Delete checks blob
 	checksBlob := checksBlobName(planID, checks.ID)
 	if err := d.deleteBlob(ctx, containerName, checksBlob); err != nil {
-		if !isNotFound(err) {
+		if !blobops.IsNotFound(err) {
 			return fmt.Errorf("failed to delete checks blob: %w", err)
 		}
 	}
@@ -175,7 +175,7 @@ func (d deleter) deleteChecksBlobs(ctx context.Context, containerName string, pl
 func (d deleter) deleteActionBlob(ctx context.Context, containerName string, planID, actionID uuid.UUID) error {
 	actionBlob := actionBlobName(planID, actionID)
 	if err := d.deleteBlob(ctx, containerName, actionBlob); err != nil {
-		if !isNotFound(err) {
+		if !blobops.IsNotFound(err) {
 			return fmt.Errorf("failed to delete action blob: %w", err)
 		}
 	}
@@ -184,7 +184,5 @@ func (d deleter) deleteActionBlob(ctx context.Context, containerName string, pla
 
 // deleteBlob deletes a single blob.
 func (d deleter) deleteBlob(ctx context.Context, containerName, blobName string) error {
-	blobClient := d.client.ServiceClient().NewContainerClient(containerName).NewBlobClient(blobName)
-	_, err := blobClient.Delete(ctx, nil)
-	return err
+	return d.client.DeleteBlob(ctx, containerName, blobName)
 }

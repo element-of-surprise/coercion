@@ -2,8 +2,6 @@ package azblob
 
 import (
 	"fmt"
-	"io"
-	"log"
 	"reflect"
 
 	"github.com/go-json-experiment/json"
@@ -13,6 +11,7 @@ import (
 	"github.com/element-of-surprise/coercion/workflow"
 	"github.com/element-of-surprise/coercion/workflow/errors"
 	"github.com/element-of-surprise/coercion/workflow/storage"
+	"github.com/element-of-surprise/coercion/workflow/storage/azblob/internal/blobops"
 	"github.com/element-of-surprise/coercion/workflow/utils/walk"
 )
 
@@ -24,7 +23,7 @@ type setPlanIDer interface {
 func (r reader) fetchPlan(ctx context.Context, id uuid.UUID) (*workflow.Plan, error) {
 	plan, err := r.fetchPlanFromContainer(ctx, id)
 	if err != nil {
-		if isNotFound(err) {
+		if blobops.IsNotFound(err) {
 			return nil, errors.E(ctx, errors.CatUser, errors.TypeParameter, fmt.Errorf("plan with ID %s not found", id))
 		}
 		return nil, errors.E(ctx, errors.CatInternal, errors.TypeStorageGet, err)
@@ -37,26 +36,50 @@ func (r reader) fetchPlan(ctx context.Context, id uuid.UUID) (*workflow.Plan, er
 // workflow.Plan object blob directly. If the plan is running, we reconstruct it from planEntry and sub-objects.
 // Recovery: If planEntry exists but planObject doesn't, we delete the planEntry (incomplete write) and return not found.
 func (r reader) fetchPlanFromContainer(ctx context.Context, id uuid.UUID) (*workflow.Plan, error) {
+	pm, err := r.fetchPlanEntryMeta(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+
 	containerName := containerForPlan(r.prefix, id)
-	entryBlobName := planEntryBlobName(id)
-	blobClient := r.client.ServiceClient().NewContainerClient(containerName).NewBlobClient(entryBlobName)
-	props, err := blobClient.GetProperties(ctx, nil)
-	if err != nil {
-		if isNotFound(err) {
-			return nil, err
-		}
-		return nil, errors.E(ctx, errors.CatInternal, errors.TypeStorageGet, fmt.Errorf("failed to get planEntry blob properties: %w", err))
-	}
-
-	pm, err := mapToPlanMeta(props.Metadata)
-	if err != nil {
-		return nil, errors.E(ctx, errors.CatInternal, errors.TypeStorageGet, fmt.Errorf("failed to parse planEntry metadata: %w", err))
-	}
-
 	if pm.State.Status == workflow.Running {
 		return r.fetchRunningPlan(ctx, containerName, id, pm.ListResult)
 	}
 	return r.fetchNonRunningPlan(ctx, containerName, id)
+}
+
+func (r reader) fetchPlanEntryMeta(ctx context.Context, id uuid.UUID) (planMeta, error) {
+	containerName := containerForPlan(r.prefix, id)
+	entryBlobName := planEntryBlobName(id)
+	md, err := r.client.GetMetadata(ctx, containerName, entryBlobName)
+	if err != nil {
+		if blobops.IsNotFound(err) {
+			return planMeta{}, err
+		}
+		return planMeta{}, errors.E(ctx, errors.CatInternal, errors.TypeStorageGet, fmt.Errorf("failed to get planEntry blob metadata: %w", err))
+	}
+	pm, err := mapToPlanMeta(md)
+	if err != nil {
+		return planMeta{}, errors.E(ctx, errors.CatInternal, errors.TypeStorageGet, fmt.Errorf("failed to parse planEntry metadata: %w", err))
+	}
+	return pm, nil
+}
+
+func (r reader) fetchPlanObjectMeta(ctx context.Context, id uuid.UUID) (planMeta, error) {
+	containerName := containerForPlan(r.prefix, id)
+	objBlobName := planObjectBlobName(id)
+	md, err := r.client.GetMetadata(ctx, containerName, objBlobName)
+	if err != nil {
+		if blobops.IsNotFound(err) {
+			return planMeta{}, err
+		}
+		return planMeta{}, errors.E(ctx, errors.CatInternal, errors.TypeStorageGet, fmt.Errorf("failed to get planEntry blob metadata: %w", err))
+	}
+	pm, err := mapToPlanMeta(md)
+	if err != nil {
+		return planMeta{}, errors.E(ctx, errors.CatInternal, errors.TypeStorageGet, fmt.Errorf("failed to parse planEntry metadata: %w", err))
+	}
+	return pm, nil
 }
 
 // fetchNonRunningPlan fetches a non-running plan by downloading the full workflow.Plan object blob.
@@ -64,19 +87,12 @@ func (r reader) fetchNonRunningPlan(ctx context.Context, containerName string, i
 	// Not running - read the workflow.Plan object blob directly
 	objectBlobName := planObjectBlobName(id)
 
-	resp, err := r.client.DownloadStream(ctx, containerName, objectBlobName, nil)
+	data, err := r.client.GetBlob(ctx, containerName, objectBlobName)
 	if err != nil {
-		if isNotFound(err) {
+		if blobops.IsNotFound(err) {
 			return nil, err
 		}
 		return nil, errors.E(ctx, errors.CatInternal, errors.TypeStorageGet, fmt.Errorf("failed to download plan object blob: %w", err))
-	}
-	defer resp.Body.Close()
-
-	// Read the blob data
-	data, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, errors.E(ctx, errors.CatInternal, errors.TypeStorageGet, fmt.Errorf("failed to read plan object blob: %w", err))
 	}
 
 	// Unmarshal the full workflow.Plan object
@@ -170,15 +186,12 @@ func (r reader) fetchRunningPlan(ctx context.Context, containerName string, id u
 // fetchPlanEntry downloads and unmarshals a planEntry.
 func (r reader) fetchPlanEntry(ctx context.Context, containerName string, planID uuid.UUID) (planEntry, error) {
 	blobName := planEntryBlobName(planID)
-	resp, err := r.client.DownloadStream(ctx, containerName, blobName, nil)
+	data, err := r.client.GetBlob(ctx, containerName, blobName)
 	if err != nil {
+		if blobops.IsNotFound(err) {
+			return planEntry{}, err
+		}
 		return planEntry{}, errors.E(ctx, errors.CatInternal, errors.TypeStorageGet, fmt.Errorf("failed to download planEntry blob: %w", err))
-	}
-	defer resp.Body.Close()
-
-	data, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return planEntry{}, errors.E(ctx, errors.CatInternal, errors.TypeStorageGet, fmt.Errorf("failed to read planEntry blob: %w", err))
 	}
 
 	var entry planEntry
@@ -192,18 +205,14 @@ func (r reader) fetchPlanEntry(ctx context.Context, containerName string, planID
 // fetchChecks downloads a Checks object and all its Actions.
 func (r reader) fetchChecks(ctx context.Context, containerName string, planID, checksID uuid.UUID) (*workflow.Checks, error) {
 	blobName := checksBlobName(planID, checksID)
-	resp, err := r.client.DownloadStream(ctx, containerName, blobName, nil)
+	data, err := r.client.GetBlob(ctx, containerName, blobName)
 	if err != nil {
+		if blobops.IsNotFound(err) {
+			return nil, err
+		}
 		return nil, errors.E(ctx, errors.CatInternal, errors.TypeStorageGet, fmt.Errorf("failed to download checks blob: %w", err))
 	}
-	defer resp.Body.Close()
 
-	data, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, errors.E(ctx, errors.CatInternal, errors.TypeStorageGet, fmt.Errorf("failed to read checks blob: %w", err))
-	}
-
-	log.Println(string(data))
 	var entry checksEntry
 	if err := json.Unmarshal(data, &entry); err != nil {
 		return nil, errors.E(ctx, errors.CatInternal, errors.TypeStorageGet, fmt.Errorf("failed to unmarshal checks: %w", err))
@@ -230,15 +239,12 @@ func (r reader) fetchChecks(ctx context.Context, containerName string, planID, c
 // fetchBlock downloads a Block object and all its sub-objects (Checks and Sequences).
 func (r reader) fetchBlock(ctx context.Context, containerName string, planID, blockID uuid.UUID) (*workflow.Block, error) {
 	blobName := blockBlobName(planID, blockID)
-	resp, err := r.client.DownloadStream(ctx, containerName, blobName, nil)
+	data, err := r.client.GetBlob(ctx, containerName, blobName)
 	if err != nil {
+		if blobops.IsNotFound(err) {
+			return nil, err
+		}
 		return nil, errors.E(ctx, errors.CatInternal, errors.TypeStorageGet, fmt.Errorf("failed to download block blob: %w", err))
-	}
-	defer resp.Body.Close()
-
-	data, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, errors.E(ctx, errors.CatInternal, errors.TypeStorageGet, fmt.Errorf("failed to read block blob: %w", err))
 	}
 
 	var entry blocksEntry
@@ -299,15 +305,12 @@ func (r reader) fetchBlock(ctx context.Context, containerName string, planID, bl
 // fetchSequence downloads a Sequence object and all its Actions.
 func (r reader) fetchSequence(ctx context.Context, containerName string, planID, sequenceID uuid.UUID) (*workflow.Sequence, error) {
 	blobName := sequenceBlobName(planID, sequenceID)
-	resp, err := r.client.DownloadStream(ctx, containerName, blobName, nil)
+	data, err := r.client.GetBlob(ctx, containerName, blobName)
 	if err != nil {
+		if blobops.IsNotFound(err) {
+			return nil, err
+		}
 		return nil, errors.E(ctx, errors.CatInternal, errors.TypeStorageGet, fmt.Errorf("failed to download sequence blob: %w", err))
-	}
-	defer resp.Body.Close()
-
-	data, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, errors.E(ctx, errors.CatInternal, errors.TypeStorageGet, fmt.Errorf("failed to read sequence blob: %w", err))
 	}
 
 	var entry sequencesEntry
@@ -336,15 +339,12 @@ func (r reader) fetchSequence(ctx context.Context, containerName string, planID,
 // fetchAction downloads a single Action object.
 func (r reader) fetchAction(ctx context.Context, containerName string, planID, actionID uuid.UUID) (*workflow.Action, error) {
 	blobName := actionBlobName(planID, actionID)
-	resp, err := r.client.DownloadStream(ctx, containerName, blobName, nil)
+	data, err := r.client.GetBlob(ctx, containerName, blobName)
 	if err != nil {
+		if blobops.IsNotFound(err) {
+			return nil, err
+		}
 		return nil, errors.E(ctx, errors.CatInternal, errors.TypeStorageGet, fmt.Errorf("failed to download action blob: %w", err))
-	}
-	defer resp.Body.Close()
-
-	data, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, errors.E(ctx, errors.CatInternal, errors.TypeStorageGet, fmt.Errorf("failed to read action blob: %w", err))
 	}
 
 	action, err := entryToAction(ctx, r.reg, data)

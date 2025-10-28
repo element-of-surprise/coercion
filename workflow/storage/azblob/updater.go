@@ -3,7 +3,6 @@ package azblob
 import (
 	"fmt"
 
-	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob"
 	"github.com/go-json-experiment/json"
 	"github.com/gostdlib/base/context"
 
@@ -11,6 +10,7 @@ import (
 	"github.com/element-of-surprise/coercion/workflow"
 	"github.com/element-of-surprise/coercion/workflow/errors"
 	"github.com/element-of-surprise/coercion/workflow/storage"
+	"github.com/element-of-surprise/coercion/workflow/storage/azblob/internal/blobops"
 	"github.com/element-of-surprise/coercion/workflow/storage/azblob/internal/planlocks"
 )
 
@@ -29,7 +29,7 @@ type updater struct {
 	private.Storage
 }
 
-func newUpdater(mu *planlocks.Group, prefix string, client *azblob.Client, endpoint string, uploader *uploader) updater {
+func newUpdater(mu *planlocks.Group, prefix string, client blobops.Ops, endpoint string, uploader *uploader) updater {
 	u := updater{}
 
 	u.planUpdater = planUpdater{
@@ -71,7 +71,7 @@ func newUpdater(mu *planlocks.Group, prefix string, client *azblob.Client, endpo
 type planUpdater struct {
 	mu       *planlocks.Group
 	prefix   string
-	client   *azblob.Client
+	client   blobops.Ops
 	endpoint string
 	uploader *uploader
 
@@ -98,7 +98,7 @@ func (u planUpdater) UpdatePlan(ctx context.Context, plan *workflow.Plan) error 
 type blockUpdater struct {
 	mu       *planlocks.Group
 	prefix   string
-	client   *azblob.Client
+	client   blobops.Ops
 	creator  creator
 	endpoint string
 
@@ -123,7 +123,7 @@ func (u blockUpdater) UpdateBlock(ctx context.Context, block *workflow.Block) er
 type checksUpdater struct {
 	mu       *planlocks.Group
 	prefix   string
-	client   *azblob.Client
+	client   blobops.Ops
 	endpoint string
 
 	private.Storage
@@ -147,7 +147,7 @@ func (u checksUpdater) UpdateChecks(ctx context.Context, checks *workflow.Checks
 type sequenceUpdater struct {
 	mu       *planlocks.Group
 	prefix   string
-	client   *azblob.Client
+	client   blobops.Ops
 	endpoint string
 
 	private.Storage
@@ -171,7 +171,7 @@ func (u sequenceUpdater) UpdateSequence(ctx context.Context, seq *workflow.Seque
 type actionUpdater struct {
 	mu       *planlocks.Group
 	prefix   string
-	client   *azblob.Client
+	client   blobops.Ops
 	endpoint string
 
 	private.Storage
@@ -207,7 +207,7 @@ func (u blockUpdater) updateObject(ctx context.Context, obj workflow.Object, mar
 
 	// Upload updated blob
 	blobName := blobNameForObject(obj)
-	if err := uploadBlob(ctx, u.client, containerName, blobName, nil, data); err != nil {
+	if err := u.client.UploadBlob(ctx, containerName, blobName, nil, data); err != nil {
 		return errors.E(ctx, errors.CatInternal, errors.TypeStoragePut, fmt.Errorf("failed to update object blob: %w", err))
 	}
 

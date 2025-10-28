@@ -26,7 +26,6 @@ import (
 
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
 	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob"
-	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob/blob"
 	"github.com/google/uuid"
 	"github.com/gostdlib/base/context"
 	"github.com/gostdlib/base/retry/exponential"
@@ -38,6 +37,7 @@ import (
 	"github.com/element-of-surprise/coercion/workflow"
 	"github.com/element-of-surprise/coercion/workflow/errors"
 	"github.com/element-of-surprise/coercion/workflow/storage"
+	"github.com/element-of-surprise/coercion/workflow/storage/azblob/internal/blobops"
 	"github.com/element-of-surprise/coercion/workflow/storage/azblob/internal/planlocks"
 
 	_ "embed"
@@ -68,6 +68,7 @@ type Vault struct {
 	private.Storage
 }
 
+// Mark for delete
 var backoff *exponential.Backoff
 
 func init() {
@@ -116,9 +117,10 @@ func New(ctx context.Context, prefix, endpoint string, cred azcore.TokenCredenti
 		return nil, errors.E(ctx, errors.CatInternal, errors.TypeConn, fmt.Errorf("failed to create blob client: %w", err))
 	}
 	v.client = client
+	opsClient := &blobops.Real{Client: client}
 
 	uploader := &uploader{
-		client: v.client,
+		client: opsClient,
 		mu:     v.mu,
 		prefix: v.prefix,
 		pool:   context.Pool(ctx).Limited(20),
@@ -129,23 +131,22 @@ func New(ctx context.Context, prefix, endpoint string, cred azcore.TokenCredenti
 		readFlight:   &singleflight.Group{},
 		existsFlight: &singleflight.Group{},
 		prefix:       prefix,
-		client:       client,
+		client:       opsClient,
 		endpoint:     endpoint,
 		reg:          reg,
 	}
 	v.creator = creator{
 		mu:       v.mu,
 		prefix:   prefix,
-		client:   client,
 		endpoint: endpoint,
 		reader:   v.reader,
 		uploader: uploader,
 	}
-	v.updater = newUpdater(v.mu, prefix, client, endpoint, uploader)
+	v.updater = newUpdater(v.mu, prefix, opsClient, endpoint, uploader)
 	v.deleter = deleter{
 		mu:       v.mu,
 		prefix:   prefix,
-		client:   client,
+		client:   opsClient,
 		endpoint: endpoint,
 		reader:   v.reader,
 	}
@@ -185,75 +186,6 @@ func Teardown(ctx context.Context, endpoint, prefix string, cred azcore.TokenCre
 		}
 	}
 	return nil
-}
-
-// containerExists checks if a container exists.
-func containerExists(ctx context.Context, client *azblob.Client, containerName string) (bool, error) {
-	containerClient := client.ServiceClient().NewContainerClient(containerName)
-	_, err := containerClient.GetProperties(ctx, nil)
-	if err != nil {
-		if isNotFound(err) {
-			return false, nil
-		}
-		return false, fmt.Errorf("failed to check container existence: %w", err)
-	}
-	return true, nil
-}
-
-// createContainer creates a container if it doesn't exist.
-func createContainer(ctx context.Context, client *azblob.Client, containerName string) error {
-	containerClient := client.ServiceClient().NewContainerClient(containerName)
-	_, err := containerClient.Create(ctx, nil)
-	if err != nil {
-		if isConflict(err) {
-			context.Log(ctx).Debug(fmt.Sprintf("container(%s) already exists", containerName))
-			return nil
-		}
-		return fmt.Errorf("failed to create container(%s): %w", containerName, err)
-	}
-	return nil
-}
-
-// ensureContainer creates a container if it doesn't exist.
-func ensureContainer(ctx context.Context, client *azblob.Client, containerName string) error {
-	exists, err := containerExists(ctx, client, containerName)
-	if err != nil {
-		return err
-	}
-	if !exists {
-		return createContainer(ctx, client, containerName)
-	}
-	return nil
-}
-
-// uploadBlob uploads a blob with retry logic.
-func uploadBlob(ctx context.Context, client *azblob.Client, containerName, blobName string, md map[string]*string, data []byte) error {
-	uploadOp := func(ctx context.Context, r exponential.Record) error {
-		opts := &azblob.UploadBufferOptions{
-			Metadata: md,
-		}
-		_, err := client.UploadBuffer(ctx, containerName, blobName, data, opts)
-		if err != nil {
-			if !isRetriableError(err) {
-				return fmt.Errorf("%w: %w", err, exponential.ErrPermanent)
-			}
-			return err
-		}
-		return nil
-	}
-
-	if err := backoff.Retry(context.WithoutCancel(ctx), uploadOp); err != nil {
-		return fmt.Errorf("failed to upload blob %s: %w", blobName, err)
-	}
-
-	return nil
-}
-
-// deleteBlob deletes a blob (used for cleanup on failure).
-func deleteBlob(ctx context.Context, client *azblob.Client, containerName, blobName string) error {
-	blobClient := client.ServiceClient().NewContainerClient(containerName).NewBlobClient(blobName)
-	_, err := blobClient.Delete(ctx, &blob.DeleteOptions{})
-	return err
 }
 
 // findObjectContainer finds the container where an object blob exists.

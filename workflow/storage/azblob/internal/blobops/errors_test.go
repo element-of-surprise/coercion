@@ -1,4 +1,4 @@
-package azblob
+package blobops
 
 import (
 	"errors"
@@ -46,7 +46,7 @@ func TestIsNotFound(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			got := isNotFound(test.err)
+			got := IsNotFound(test.err)
 			if got != test.want {
 				t.Errorf("TestIsNotFound(%s): got %v, want %v", test.name, got, test.want)
 			}
@@ -91,7 +91,7 @@ func TestIsConflict(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			got := isConflict(test.err)
+			got := IsConflict(test.err)
 			if got != test.want {
 				t.Errorf("TestIsConflict(%s): got %v, want %v", test.name, got, test.want)
 			}
@@ -176,7 +176,7 @@ func TestIsRetriableError(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			got := isRetriableError(test.err)
+			got := IsRetriableError(test.err)
 			if got != test.want {
 				t.Errorf("TestIsRetriableError(%s): got %v, want %v", test.name, got, test.want)
 			}

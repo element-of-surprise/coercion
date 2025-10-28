@@ -17,6 +17,7 @@ import (
 	"github.com/element-of-surprise/coercion/workflow"
 	"github.com/element-of-surprise/coercion/workflow/errors"
 	"github.com/element-of-surprise/coercion/workflow/storage"
+	"github.com/element-of-surprise/coercion/workflow/storage/azblob/internal/blobops"
 	"github.com/element-of-surprise/coercion/workflow/storage/azblob/internal/planlocks"
 )
 
@@ -28,7 +29,7 @@ type reader struct {
 	readFlight   *singleflight.Group
 	existsFlight *singleflight.Group
 	prefix       string
-	client       *azblob.Client
+	client       blobops.Ops
 	endpoint     string
 	reg          *registry.Register
 
@@ -53,16 +54,12 @@ func (r reader) Exists(ctx context.Context, id uuid.UUID) (bool, error) {
 }
 
 func (r reader) exists(ctx context.Context, id uuid.UUID) (bool, error) {
-	// Get the container for this plan based on its ID
-	containerName := containerForPlan(r.prefix, id)
-	blobName := planEntryBlobName(id)
-	blobClient := r.client.ServiceClient().NewContainerClient(containerName).NewBlobClient(blobName)
-
-	_, err := blobClient.GetProperties(ctx, nil)
+	_, err := r.fetchPlanEntryMeta(ctx, id)
 	if err == nil {
 		return true, nil
 	}
-	if isNotFound(err) {
+
+	if blobops.IsNotFound(err) {
 		return false, nil
 	}
 	return false, errors.E(ctx, errors.CatInternal, errors.TypeStorageGet, fmt.Errorf("failed to check plan existence: %w", err))
@@ -128,7 +125,7 @@ func (r reader) search(ctx context.Context, filters storage.Filters, ch chan sto
 	for _, containerName := range containers {
 		containerResults, err := r.listPlansInContainer(ctx, containerName)
 		if err != nil {
-			if !isNotFound(err) {
+			if !blobops.IsNotFound(err) {
 				select {
 				case ch <- storage.Stream[storage.ListResult]{Err: err}:
 				case <-ctx.Done():
@@ -199,7 +196,7 @@ func (r reader) list(ctx context.Context, limit int, ch chan storage.Stream[stor
 
 		containerResults, err := r.listPlansInContainer(ctx, containerName)
 		if err != nil {
-			if !isNotFound(err) {
+			if !blobops.IsNotFound(err) {
 				select {
 				case ch <- storage.Stream[storage.ListResult]{Err: err}:
 				case <-ctx.Done():
@@ -237,7 +234,6 @@ func (r reader) list(ctx context.Context, limit int, ch chan storage.Stream[stor
 func (r reader) listPlansInContainer(ctx context.Context, containerName string) ([]storage.ListResult, error) {
 	var results []storage.ListResult
 
-	// List blobs with the plans prefix
 	pager := r.client.NewListBlobsFlatPager(containerName, &azblob.ListBlobsFlatOptions{
 		Prefix:  toPtr(planBlobPrefix()),
 		Include: container.ListBlobsInclude{Metadata: true},

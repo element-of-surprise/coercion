@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"maps"
 
-	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob"
 	"github.com/go-json-experiment/json"
 	"github.com/google/uuid"
 	"github.com/gostdlib/base/concurrency/worker"
@@ -12,13 +11,14 @@ import (
 
 	"github.com/element-of-surprise/coercion/workflow"
 	"github.com/element-of-surprise/coercion/workflow/errors"
+	"github.com/element-of-surprise/coercion/workflow/storage/azblob/internal/blobops"
 	"github.com/element-of-surprise/coercion/workflow/storage/azblob/internal/planlocks"
 )
 
 // uploader uploads a plan and its sub-objects to blob storage.
 type uploader struct {
 	mu     *planlocks.Group
-	client *azblob.Client
+	client blobops.Ops
 	prefix string
 	pool   *worker.Limited
 }
@@ -45,12 +45,12 @@ func (u *uploader) uploadPlan(ctx context.Context, p *workflow.Plan, uploadPlanT
 		return errors.E(ctx, errors.CatInternal, errors.TypeParameter, fmt.Errorf("commitPlan: uploadPlanType cannot be unknown"))
 	}
 
-	// Use Plan.SubmitTime to determine container name
-	// This ensures the plan and all sub-objects are in the same container
 	containerName := containerForPlan(u.prefix, p.ID)
 
-	if err := ensureContainer(ctx, u.client, containerName); err != nil {
-		return errors.E(ctx, errors.CatInternal, errors.TypeStorageCreate, fmt.Errorf("failed to create container: %w", err))
+	if uploadPlanType == uptCreate {
+		if err := u.client.EnsureContainer(ctx, containerName); err != nil {
+			return errors.E(ctx, errors.CatInternal, errors.TypeStorageCreate, fmt.Errorf("failed to create container: %w", err))
+		}
 	}
 
 	md, err := planToMetadata(ctx, p)
@@ -66,7 +66,7 @@ func (u *uploader) uploadPlan(ctx context.Context, p *workflow.Plan, uploadPlanT
 	// do consistency checks since we don't have transactions.
 	if err := u.uploadPlanEntry(ctx, p, md); err != nil {
 		if uploadPlanType == uptCreate {
-			_ = deleteBlob(ctx, u.client, containerName, planObjectBlobName(p.ID))
+			_ = u.client.DeleteBlob(ctx, containerName, planObjectBlobName(p.ID))
 		}
 		return err
 	}
@@ -76,8 +76,8 @@ func (u *uploader) uploadPlan(ctx context.Context, p *workflow.Plan, uploadPlanT
 	// plan object.
 	if uploadPlanType == uptCreate {
 		if err := u.uploadSubObjects(ctx, containerName, p); err != nil {
-			_ = deleteBlob(ctx, u.client, containerName, planObjectBlobName(p.ID))
-			_ = deleteBlob(ctx, u.client, containerName, planEntryBlobName(p.ID))
+			_ = u.client.DeleteBlob(ctx, containerName, planObjectBlobName(p.ID))
+			_ = u.client.DeleteBlob(ctx, containerName, planEntryBlobName(p.ID))
 			return err
 		}
 	}
@@ -93,7 +93,7 @@ func (u *uploader) uploadPlan(ctx context.Context, p *workflow.Plan, uploadPlanT
 func (u *uploader) uploadPlanEntry(ctx context.Context, p *workflow.Plan, md map[string]*string) error {
 	containerName := containerForPlan(u.prefix, p.ID)
 
-	if err := ensureContainer(ctx, u.client, containerName); err != nil {
+	if err := u.client.EnsureContainer(ctx, containerName); err != nil {
 		return errors.E(ctx, errors.CatInternal, errors.TypeStorageCreate, fmt.Errorf("failed to create container: %w", err))
 	}
 
@@ -110,7 +110,7 @@ func (u *uploader) uploadPlanEntry(ctx context.Context, p *workflow.Plan, md map
 	entryBlobName := planEntryBlobName(p.ID)
 	md = maps.Clone(md)
 	md[mdPlanType] = toPtr(ptEntry)
-	if err := uploadBlob(ctx, u.client, containerName, entryBlobName, md, planEntryData); err != nil {
+	if err := u.client.UploadBlob(ctx, containerName, entryBlobName, md, planEntryData); err != nil {
 		return errors.E(ctx, errors.CatInternal, errors.TypeStoragePut, fmt.Errorf("failed to upload planEntry blob: %w", err))
 	}
 	return nil
@@ -122,15 +122,15 @@ func (u *uploader) uploadPlanObject(ctx context.Context, p *workflow.Plan, md ma
 
 	planObjectData, err := json.Marshal(p)
 	if err != nil {
-		_ = deleteBlob(ctx, u.client, containerName, planEntryBlobName(p.ID))
+		_ = u.client.DeleteBlob(ctx, containerName, planEntryBlobName(p.ID))
 		return errors.E(ctx, errors.CatInternal, errors.TypeStoragePut, fmt.Errorf("failed to marshal plan object: %w", err))
 	}
 
 	objectBlobName := planObjectBlobName(p.ID)
 	md = maps.Clone(md)
 	md[mdPlanType] = toPtr(string(ptObject))
-	if err := uploadBlob(ctx, u.client, containerName, objectBlobName, md, planObjectData); err != nil {
-		_ = deleteBlob(ctx, u.client, containerName, planEntryBlobName(p.ID))
+	if err := u.client.UploadBlob(ctx, containerName, objectBlobName, md, planObjectData); err != nil {
+		_ = u.client.DeleteBlob(ctx, containerName, planEntryBlobName(p.ID))
 		return errors.E(ctx, errors.CatInternal, errors.TypeStoragePut, fmt.Errorf("failed to upload plan object blob: %w", err))
 	}
 	return nil
@@ -181,7 +181,7 @@ func (u *uploader) uploadBlockBlob(ctx context.Context, containerName string, pl
 	_ = g.Go(
 		ctx,
 		func(ctx context.Context) error {
-			if err := uploadBlob(ctx, u.client, containerName, blockBlobName, nil, blockData); err != nil {
+			if err := u.client.UploadBlob(ctx, containerName, blockBlobName, nil, blockData); err != nil {
 				return fmt.Errorf("failed to upload block blob: %w", err)
 			}
 			return nil
@@ -229,7 +229,7 @@ func (u *uploader) uploadSequenceBlob(ctx context.Context, containerName string,
 	_ = g.Go(
 		ctx,
 		func(ctx context.Context) error {
-			if err := uploadBlob(ctx, u.client, containerName, seqBlobName, nil, seqData); err != nil {
+			if err := u.client.UploadBlob(ctx, containerName, seqBlobName, nil, seqData); err != nil {
 				return fmt.Errorf("failed to upload sequence blob: %w", err)
 			}
 			return nil
@@ -266,7 +266,7 @@ func (u *uploader) uploadChecksBlob(ctx context.Context, containerName string, p
 	_ = g.Go(
 		ctx,
 		func(ctx context.Context) error {
-			if err := uploadBlob(ctx, u.client, containerName, checksBlobName, nil, checksData); err != nil {
+			if err := u.client.UploadBlob(ctx, containerName, checksBlobName, nil, checksData); err != nil {
 				return fmt.Errorf("failed to upload checks blob: %w", err)
 			}
 			return nil
@@ -300,7 +300,7 @@ func (u *uploader) uploadActionBlob(ctx context.Context, containerName string, p
 	}
 
 	actionBlobName := actionBlobName(planID, action.ID)
-	if err := uploadBlob(ctx, u.client, containerName, actionBlobName, nil, actionData); err != nil {
+	if err := u.client.UploadBlob(ctx, containerName, actionBlobName, nil, actionData); err != nil {
 		return fmt.Errorf("failed to upload action blob: %w", err)
 	}
 
