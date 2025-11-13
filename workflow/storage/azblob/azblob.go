@@ -20,6 +20,7 @@ package azblob
 
 import (
 	"fmt"
+	"log"
 	"strings"
 	"time"
 	"unsafe"
@@ -85,6 +86,7 @@ type Option func(*Vault) error
 // (e.g., https://mystorageaccount.blob.core.windows.net). cred is the Azure token credential.
 // reg is the coercion registry.
 func New(ctx context.Context, prefix, endpoint string, cred azcore.TokenCredential, reg *registry.Register, options ...Option) (*Vault, error) {
+	log.Println("new called")
 	ctx = context.WithoutCancel(ctx)
 
 	if prefix == "" {
@@ -105,6 +107,7 @@ func New(ctx context.Context, prefix, endpoint string, cred azcore.TokenCredenti
 		endpoint: endpoint,
 		mu:       planlocks.New(ctx),
 	}
+	log.Printf("Vault create: %s|%s", prefix, endpoint)
 
 	for _, o := range options {
 		if err := o(v); err != nil {

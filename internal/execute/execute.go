@@ -157,7 +157,7 @@ func (e *Plans) initPlugins(ctx context.Context) error {
 }
 
 // Start starts a previously Submitted Plan by its ID. Cancelling the Context will not Stop execution.
-// Please use Stop to stop execution of a Plan.
+// Please use Stop to stop execution of a Plan. If the plan has already been started, this will return nil.
 func (e *Plans) Start(ctx context.Context, id uuid.UUID) error {
 	plan, err := e.store.Read(ctx, id)
 	if err != nil {
@@ -165,10 +165,16 @@ func (e *Plans) Start(ctx context.Context, id uuid.UUID) error {
 	}
 
 	if err := e.validateStartState(ctx, plan); err != nil {
-		return errors.E(ctx, errors.CatInternal, errors.TypeBug, err)
+		return nil
 	}
 
-	e.runPlan(ctx, plan)
+	// This ensures that before we return that this will be running.
+	plan.State.Status = workflow.Running
+	if err := e.store.UpdatePlan(ctx, plan); err != nil {
+		return err
+	}
+
+	e.runPlan(ctx, plan, nil)
 
 	return nil
 }
@@ -191,18 +197,26 @@ func (e *Plans) recover(ctx context.Context) error {
 
 	if len(req.Data.plans) == 0 {
 		context.Log(ctx).Info("no plans to recover")
+		return nil
 	}
 
+	waiters := make([]chan struct{}, 0, len(req.Data.plans))
 	for _, plan := range req.Data.plans {
 		context.Log(ctx).Info("recovered plan", "id", plan.ID, "status", plan.State.Status)
-		e.runPlan(ctx, plan)
+		w := make(chan struct{})
+		waiters = append(waiters, w)
+		e.runPlan(ctx, plan, w)
+	}
+
+	for _, w := range waiters {
+		<-w
 	}
 
 	return nil
 }
 
 // runPlan runs a Plan through the statemachine. This is a non-blocking call.
-func (e *Plans) runPlan(ctx context.Context, plan *workflow.Plan) {
+func (e *Plans) runPlan(ctx context.Context, plan *workflow.Plan, recoveryStarted chan struct{}) {
 	runCtx, cancel := context.WithCancel(context.WithoutCancel(ctx))
 
 	e.stoppers.Set(plan.ID, cancel)
@@ -220,14 +234,15 @@ func (e *Plans) runPlan(ctx context.Context, plan *workflow.Plan) {
 			}()
 
 			next := e.states.Start
-			if plan.State.Status == workflow.Running {
+			if recoveryStarted != nil {
 				next = e.states.Recovery
 			}
 
 			req := statemachine.Request[sm.Data]{
 				Ctx: runCtx,
 				Data: sm.Data{
-					Plan: plan,
+					Plan:            plan,
+					RecoveryStarted: recoveryStarted,
 				},
 				Next: next,
 			}
@@ -244,11 +259,22 @@ func (e *Plans) now() time.Time {
 }
 
 // Wait waits for a Plan to finish execution. Cancelling the Context will stop waiting and
-// return context.Canceled. If the Plan is not found, this will return ErrNotFound.
+// return context.Canceled.
 func (e *Plans) Wait(ctx context.Context, id uuid.UUID) error {
 	waiter, ok := e.waiters.Get(id)
 	if !ok {
-		return ErrNotFound
+		// Plan is not running, check if it exists.
+		plan, err := e.store.Read(ctx, id)
+		if err != nil {
+			return err
+		}
+		switch plan.GetState().Status {
+		case workflow.NotStarted:
+			return fmt.Errorf("plan(%s) is not running", id)
+		case workflow.Running:
+			return fmt.Errorf("bug: plan(%s) has a running state, but isn't in the waiters", id)
+		}
+		return nil
 	}
 
 	select {

@@ -4,6 +4,7 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"log/slog"
 	"net/url"
 	"os"
 	"strconv"
@@ -43,13 +44,14 @@ var (
 	vaultType = flag.String("vault", "sqlite", "The type of storage vault to use.")
 
 	// CosmosDB flags that are only used if vault is set to "cosmosdb".
-	swarm     = flag.String("swarm", os.Getenv("AZURE_COSMOSDB_SWARM"), "The name of the coercion swarm.")
-	endpoint  = flag.String("cosmos_url", fmt.Sprintf("https://%s.documents.azure.com:443/", os.Getenv("AZURE_COSMOSDB_ACCOUNT")), "The endpoint of the cosmosdb account.")
-	azblobURL = flag.String("azblob_url", fmt.Sprintf("https://%s.blob.core.windows.net", os.Getenv("AZURE_BLOB_ACCOUNT")), "The endpoint of the azblob account.")
-	db        = flag.String("db", os.Getenv("AZURE_COSMOSDB_DBNAME"), "The name of the cosmosdb database.")
-	container = flag.String("container", os.Getenv("AZURE_COSMOSDB_CNAME"), "The name of the cosmosdb container.")
-	msi       = flag.String("msi", "", "The identity with vmss contributor role. If empty, az login is used.")
-	teardown  = flag.Bool("teardown", false, "Teardown the cosmosdb container.")
+	swarm      = flag.String("swarm", os.Getenv("AZURE_COSMOSDB_SWARM"), "The name of the coercion swarm.")
+	endpoint   = flag.String("cosmos_url", fmt.Sprintf("https://%s.documents.azure.com:443/", os.Getenv("AZURE_COSMOSDB_ACCOUNT")), "The endpoint of the cosmosdb account.")
+	azblobURL  = flag.String("azblob_url", fmt.Sprintf("https://%s.blob.core.windows.net", os.Getenv("AZURE_BLOB_ACCOUNT")), "The endpoint of the azblob account.")
+	blobPrefix = flag.String("blob_prefix", "coercion", "The prefix for blob containers in recovery tests.")
+	db         = flag.String("db", os.Getenv("AZURE_COSMOSDB_DBNAME"), "The name of the cosmosdb database.")
+	container  = flag.String("container", os.Getenv("AZURE_COSMOSDB_CNAME"), "The name of the cosmosdb container.")
+	msi        = flag.String("msi", "", "The identity with vmss contributor role. If empty, az login is used.")
+	teardown   = flag.Bool("teardown", false, "Teardown the cosmosdb container.")
 )
 
 // These are captured in the TestEtoE and used to test recovery scenarios.
@@ -76,31 +78,44 @@ var reg *registry.Register
 var initOnce sync.Once
 
 func initGlobals() {
+	initOnce.Do(
+		func() {
+			var err error
+
+			plugCheck := &testplugin.Plugin{
+				AlwaysRespond: true,
+				IsCheckPlugin: true,
+				PlugName:      "check",
+			}
+
+			plugAction := &testplugin.Plugin{
+				AlwaysRespond: true,
+			}
+
+			reg = registry.New()
+			reg.Register(plugCheck)
+			reg.Register(plugAction)
+
+			ctx := context.Background()
+			switch *vaultType {
+			case "azblob", "cosmosdb":
+				cred, err = msiCred(*msi)
+				if err != nil {
+					panic(err)
+				}
+			}
+
+			if err = createVault(ctx); err != nil {
+				panic(err)
+			}
+		})
+}
+
+func createVault(ctx context.Context) error {
+	if context.Log(ctx).Enabled(ctx, slog.LevelInfo) {
+		log.Println("log level info enabled")
+	}
 	var err error
-
-	plugCheck := &testplugin.Plugin{
-		AlwaysRespond: true,
-		IsCheckPlugin: true,
-		PlugName:      "check",
-	}
-
-	plugAction := &testplugin.Plugin{
-		AlwaysRespond: true,
-	}
-
-	reg = registry.New()
-	reg.Register(plugCheck)
-	reg.Register(plugAction)
-
-	ctx := context.Background()
-	switch *vaultType {
-	case "azblob", "cosmosdb":
-		cred, err = msiCred(*msi)
-		if err != nil {
-			panic(err)
-		}
-	}
-
 	switch *vaultType {
 	case "sqlite":
 		vault, err = sqlite.New(ctx, "", reg, sqlite.WithInMemory(), sqlite.WithCapture(capture))
@@ -109,30 +124,11 @@ func initGlobals() {
 		vault, err = cosmosdb.New(ctx, *swarm, *endpoint, *db, *container, cred, reg)
 	case "azblob":
 		context.Log(ctx).Info(fmt.Sprintf("TestEtoE: Using azblob: %s", *azblobURL))
-		vault, err = azblob.New(ctx, "coercion", *azblobURL, cred, reg)
+		vault, err = azblob.New(ctx, *blobPrefix, *azblobURL, cred, reg)
 	default:
 		panic(fmt.Errorf("TestEtoE: unknown storage vault type: %s", *vaultType))
 	}
-	if err != nil {
-		panic(err)
-	}
-
-	if *teardown == true {
-		defer func() {
-			switch *vaultType {
-			case "azblob":
-				/*
-					if err := azblob.Teardown(ctx, "coercion", *azblobURL, cred); err != nil {
-						panic(err)
-					}
-				*/
-			case "cosmosdb":
-				if err := cosmosdb.Teardown(ctx, *endpoint, *db, *container, cred, nil); err != nil {
-					panic(err)
-				}
-			}
-		}()
-	}
+	return err
 }
 
 func TestEtoE(t *testing.T) {

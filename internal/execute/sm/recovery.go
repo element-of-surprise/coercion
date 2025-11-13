@@ -8,19 +8,38 @@ import (
 	"github.com/element-of-surprise/coercion/workflow/context"
 	"github.com/gostdlib/base/statemachine"
 	"github.com/gostdlib/base/telemetry/log"
+	"github.com/kylelemons/godebug/pretty"
 )
 
 // Recovery restarts execution of a Plan that has already started running, but the service crashed before it completed.
 func (s *States) Recovery(req statemachine.Request[Data]) statemachine.Request[Data] {
-	plan := req.Data.Plan
+	log.Println("recovery state started")
+	defer func() {
+		log.Println("recovery state completed")
+		if req.Data.RecoveryStarted != nil {
+			log.Println("closing recovery started channel")
+			close(req.Data.RecoveryStarted)
+		}
+	}()
 
+	plan := req.Data.Plan
+	req.Data.recovered = true
+
+	log.Printf("fixing plan for recovery: %s|%s", plan.ID, plan.GetState().Status)
 	s.fixPlan(plan)
+	if err := s.store.UpdatePlan(req.Ctx, plan); err != nil {
+		log.Fatalf("failed to write Plan: %v", err)
+	}
+	log.Printf("plan fixed for recovery: %s|%s", plan.ID, plan.GetState().Status)
+	log.Println("===========================Fix Plan Complete===========================")
 	switch plan.State.Status {
 	case workflow.NotStarted:
-		req.Next = s.Start
+		req.Next = nil
+		log.Println("plan not started, not recovering")
 		return req
 	case workflow.Completed, workflow.Failed, workflow.Stopped:
 		req.Next = s.End
+		log.Println("plan already completed, failed, or stopped, moving to end state")
 		return req
 	}
 	// Okay, we are in the running state. Let's setup to run.
@@ -32,12 +51,18 @@ func (s *States) Recovery(req statemachine.Request[Data]) statemachine.Request[D
 		req.Data.blocks = append(req.Data.blocks, block{block: b, contCheckResult: make(chan error, 1)})
 	}
 	req.Data.contCheckResult = make(chan error, 1)
+	log.Println("plan recovery setup complete, updating plan in store")
 
-	if err := s.store.UpdatePlan(req.Ctx, plan); err != nil {
-		log.Fatalf("failed to write Plan: %v", err)
+	var pConfig = pretty.Config{
+		IncludeUnexported: false,
+		PrintStringers:    true,
+		SkipZeroFields:    true,
 	}
 
+	log.Println("plan before we run again: ", pConfig.Sprint("Plan in vault: \n", req.Data.Plan))
+
 	req.Next = s.PlanBypassChecks
+	log.Println("moving to plan bypass checks state")
 	return req
 }
 
@@ -77,22 +102,70 @@ func resetAction(a *workflow.Action) {
 	a.Attempts = nil
 }
 
-// fixChecks looks at a Checks object and if it is in the Running state, resets it as
-// if it had not started. All actions are reset as well.
+// fixChecks looks at a Checks object and if it is in the Running state (or has started),
+// examines the action states and sets the Checks state accordingly.
 func fixChecks(c *workflow.Checks) {
 	if c == nil {
 		return
 	}
+
 	if c.State.Status != workflow.Running {
 		return
 	}
 
-	c.State.Status = workflow.NotStarted
-	c.State.Start = time.Time{}
-	c.State.End = time.Time{}
-
+	// First pass: check for stopped actions. We end up looping twice because we don't want to
+	// fix actions if we are going to stop everything.
+	stopped := 0
 	for _, a := range c.Actions {
-		resetAction(a)
+		if a.State.Status == workflow.Stopped {
+			stopped++
+		}
+	}
+	if stopped > 0 {
+		for _, a := range c.Actions {
+			if a.State.Status == workflow.Running {
+				a.State.Status = workflow.Stopped
+				a.State.End = time.Now()
+			}
+		}
+		c.State.Status = workflow.Stopped
+		c.State.End = time.Now()
+		return
+	}
+
+	// Fix all actions and count their states
+	completed := 0
+	running := 0
+	failed := 0
+	for _, a := range c.Actions {
+		fixAction(a)
+		switch a.State.Status {
+		case workflow.Completed:
+			completed++
+		case workflow.Running:
+			running++
+		case workflow.Failed:
+			failed++
+		case workflow.Stopped:
+			stopped++
+		}
+	}
+
+	// Set Checks state based on action states
+	switch {
+	case stopped > 0:
+		c.State.Status = workflow.Stopped
+		c.State.End = time.Now()
+	case failed > 0:
+		c.State.Status = workflow.Failed
+		c.State.End = time.Now()
+	case completed == 0 && running == 0 && failed == 0:
+		c.State.Status = workflow.NotStarted
+		c.State.Start = time.Time{}
+		c.State.End = time.Time{}
+	case completed == len(c.Actions):
+		c.State.Status = workflow.Completed
+		c.State.End = time.Now()
 	}
 }
 
@@ -154,9 +227,11 @@ func fixSeq(s *workflow.Sequence) {
 }
 
 func (s *States) fixBlock(b *workflow.Block) {
+	log.Println("====fixBlock====")
 	if b.State.Status != workflow.Running {
 		return
 	}
+	log.Println("fixing bypass checks")
 	if b.BypassChecks != nil {
 		fixChecks(b.BypassChecks)
 		if b.BypassChecks.State.Status == workflow.Completed {
@@ -164,6 +239,7 @@ func (s *States) fixBlock(b *workflow.Block) {
 			return
 		}
 	}
+	log.Println("fixing pre checks")
 	if b.PreChecks != nil {
 		if b.PreChecks.State.Status == workflow.Failed {
 			b.State.Status = workflow.Failed
@@ -171,6 +247,7 @@ func (s *States) fixBlock(b *workflow.Block) {
 		}
 		fixChecks(b.PreChecks)
 	}
+	log.Println("fixing cont checks")
 	if b.ContChecks != nil {
 		if b.ContChecks.State.Status == workflow.Failed {
 			b.State.Status = workflow.Failed
@@ -178,6 +255,7 @@ func (s *States) fixBlock(b *workflow.Block) {
 		}
 		fixChecks(b.ContChecks)
 	}
+	log.Println("fixing post checks")
 	if b.PostChecks != nil {
 		if b.PostChecks.State.Status == workflow.Failed {
 			b.State.Status = workflow.Failed
@@ -186,37 +264,57 @@ func (s *States) fixBlock(b *workflow.Block) {
 		fixChecks(b.PostChecks)
 	}
 
-	g := context.Pool(context.Background()).Group()
-	completed := 0
-	var failed atomic.Int32
-	stopped := 0
-	seqs := make([]*workflow.Sequence, 0)
+	// DOAK - remove this before submit
+	//g := context.Pool(context.Background()).Group()
+	var completed, failed, stopped, running atomic.Int32
+	// DOAK - remove this before submit
+	//seqs := make([]*workflow.Sequence, 0)
+	log.Println("fixing sequences")
 	for _, seq := range b.Sequences {
 		fixSeq(seq)
 		switch seq.State.Status {
 		case workflow.Completed:
-			completed++
+			completed.Add(1)
 		case workflow.Failed:
 			failed.Add(1)
 		case workflow.Stopped:
-			stopped++
+			stopped.Add(1)
 		case workflow.Running:
-			seqs = append(seqs, seq)
-			g.Go(
-				context.Background(),
-				func(ctx context.Context) error {
-					err := s.execSeq(ctx, seq)
-					if err != nil {
-						failed.Add(1)
-					}
-					return err
-				},
-			)
+			running.Add(1)
+			// DOAK - remove this before submit
+			/*
+				seqs = append(seqs, seq)
+				g.Go(
+					context.Background(),
+					func(ctx context.Context) error {
+						log.Println("executing seq: ", seq.ID)
+						err := s.execSeq(ctx, seq)
+						log.Println("finished seq: ", seq.ID)
+						switch seq.GetState().Status {
+						case workflow.Completed:
+							completed.Add(1)
+						case workflow.Failed:
+							failed.Add(1)
+						case workflow.Stopped:
+							stopped.Add(1)
+						default:
+							panic("unexpected seq state after execSeq: " + seq.GetState().Status.String())
+
+						}
+						return err
+					},
+				)
+			*/
 		}
 	}
-	g.Wait(context.Background())
+	// DOAK - remove this before submit
+	/*
+		log.Println("waiting for running sequences to complete")
+		_ = g.Wait(context.Background())
+		log.Println("all sequences fixed and running sequences completed")
+	*/
 
-	if stopped > 0 {
+	if stopped.Load() > 0 {
 		for _, s := range b.Sequences {
 			if s.State.Status == workflow.Running {
 				s.State.Status = workflow.Stopped
@@ -227,7 +325,7 @@ func (s *States) fixBlock(b *workflow.Block) {
 	}
 
 	switch {
-	case completed == 0 && failed.Load() == 0:
+	case completed.Load() == 0 && failed.Load() == 0 && running.Load() == 0:
 		b.State.Status = workflow.NotStarted
 		b.State.Start = time.Time{}
 		b.State.End = time.Time{}
@@ -235,9 +333,11 @@ func (s *States) fixBlock(b *workflow.Block) {
 }
 
 func (s *States) fixPlan(p *workflow.Plan) {
+	defer log.Println("plan fix complete")
 	if p.State.Status != workflow.Running {
 		return
 	}
+	log.Println("fixing BypassChecks")
 	if p.BypassChecks != nil {
 		fixChecks(p.BypassChecks)
 		if checksCompleted(p.BypassChecks) {
@@ -245,23 +345,28 @@ func (s *States) fixPlan(p *workflow.Plan) {
 			return
 		}
 	}
+	log.Println("fixing PreChecks")
 	if checksFailed(p.PreChecks) {
 		p.State.Status = workflow.Failed
 		return
 	}
 	fixChecks(p.PreChecks)
 
+	log.Println("fixing PostChecks")
 	if checksFailed(p.PostChecks) {
 		p.State.Status = workflow.Failed
 		return
 	}
 	fixChecks(p.PostChecks)
 
+	log.Println("fixing ContChecks")
 	if checksFailed(p.ContChecks) {
 		p.State.Status = workflow.Failed
+		return
 	}
 	fixChecks(p.ContChecks)
 
+	log.Println("fixing DeferredChecks")
 	if p.DeferredChecks != nil {
 		fixChecks(p.DeferredChecks)
 	}
@@ -269,8 +374,11 @@ func (s *States) fixPlan(p *workflow.Plan) {
 	running := 0
 	completed := 0
 	failed := 0
+	log.Println("fixing Blocks")
 	for _, b := range p.Blocks {
+		log.Println("fixing Block:", b.ID)
 		s.fixBlock(b)
+		log.Println("fixed Block:", b.ID, "Status:", b.State.Status)
 		if b.State.Status == workflow.Stopped {
 			p.State.Status = workflow.Stopped
 			return
@@ -284,17 +392,18 @@ func (s *States) fixPlan(p *workflow.Plan) {
 			failed++
 		}
 	}
+	log.Println("evaluating plan state after fix")
 	if failed > 0 {
 		p.State.Status = workflow.Failed
 		p.State.End = time.Now()
 		return
 	}
 	if completed == 0 && running == 0 && failed == 0 {
-		p.State.Status = workflow.NotStarted
 		p.State.Start = time.Time{}
 		p.State.End = time.Time{}
 		return
 	}
+	log.Println("checking if plan is completed")
 	if completed == len(p.Blocks) {
 		if checksCompleted(p.PostChecks) && checksCompleted(p.DeferredChecks) {
 			p.State.Status = workflow.Completed
@@ -324,12 +433,15 @@ func checksCompleted(c *workflow.Checks) bool {
 	return false
 }
 
+// skipRecoveredChecks returns if we should skip execution of recovered checks. This is only
+// valid for PreChecks and BypassChecks. Returns true if checks have already completed execution.
 func skipRecoveredChecks(c *workflow.Checks) bool {
 	if c == nil {
 		return true
 	}
-	if c.State.Status != workflow.NotStarted {
-		return false
+	// Skip checks that have already completed execution (including failures)
+	if c.State.Status == workflow.Completed || c.State.Status == workflow.Failed || c.State.Status == workflow.Stopped {
+		return true
 	}
 	return false
 }

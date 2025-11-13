@@ -189,14 +189,8 @@ func (w *Workstream) Plan(ctx context.Context, id uuid.UUID) (*workflow.Plan, er
 // If the plan does not exist, an error is returned. If the context is canceled, the error
 // will be context.Canceled.
 func (w *Workstream) Wait(ctx context.Context, id uuid.UUID) (*workflow.Plan, error) {
-	err := w.exec.Wait(ctx, id)
-	if err != nil {
-		if err == context.Canceled || err == context.DeadlineExceeded {
-			return nil, context.Canceled
-		}
-		if err != execute.ErrNotFound {
-			return nil, err
-		}
+	if err := w.exec.Wait(ctx, id); err != nil {
+		return nil, err
 	}
 	return w.store.Read(ctx, id)
 }

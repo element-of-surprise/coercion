@@ -16,6 +16,8 @@ import (
 )
 
 // SEE recoveryTestStage for a way to do a single stage.
+// This test cannot be run in isolation, as it depends on the captured stages from
+// the etoe end-to-end test.
 
 func TestRecovery(t *testing.T) {
 	log.Println("TestRecovery")
@@ -46,7 +48,9 @@ func TestRecovery(t *testing.T) {
 				g2.Go(
 					ctx,
 					func(ctx context.Context) error {
+						log.Println("before test state: ", i)
 						recoveryTestStage(ctx, i, reg, results)
+						log.Println("after test state: ", i)
 						return nil
 					},
 				)

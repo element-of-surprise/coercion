@@ -34,6 +34,13 @@ type Data struct {
 	// Plan is the workflow.Plan that is being executed.
 	Plan *workflow.Plan
 
+	// RecoveryStarted is the channel that will complete once recovery has finished updating the data store
+	// with the fixed state of the Plan and is off to execute the next state.
+	RecoveryStarted chan struct{}
+
+	// recovered indicates whether we are recovering a Plan after a crash.
+	recovered bool
+
 	// blocks is a list of blocks that are being executed. These are removed as each block is completed.
 	blocks []block
 	// contCancel is the context.CancelFunc that will cancel the continuous check for the Plan.
@@ -228,17 +235,64 @@ func (s *States) ExecuteBlock(req statemachine.Request[Data]) statemachine.Reque
 		return req
 	}
 
-	if err := after(req.Ctx, h.block.EntranceDelay); err != nil {
-		h.block.State.Status = workflow.Stopped
-		req.Data.err = err
-		req.Next = s.PlanDeferredChecks
-		return req
+	if req.Data.recovered && h.block.GetState().Status == workflow.Running {
+		s.handleRecoveredSeqs(req, h.block)
+		if h.block.State.Status != workflow.Running {
+			req.Next = s.BlockDeferredChecks
+		}
+	} else {
+		if err := after(req.Ctx, h.block.EntranceDelay); err != nil {
+			h.block.State.Status = workflow.Stopped
+			req.Data.err = err
+			req.Next = s.PlanDeferredChecks
+			return req
+		}
+		h.block.State.Status = workflow.Running
+		h.block.State.Start = s.now()
 	}
 
-	h.block.State.Status = workflow.Running
-	h.block.State.Start = s.now()
 	req.Next = s.BlockBypassChecks
 	return req
+}
+
+func (s *States) handleRecoveredSeqs(req statemachine.Request[Data], b *workflow.Block) {
+	seqs := []*workflow.Sequence{}
+	g := context.Pool(context.Background()).Group()
+	var completed, failed, stopped atomic.Int64
+
+	for _, seq := range b.Sequences {
+		if seq.GetState().Status == workflow.Running {
+			seqs = append(seqs, seq)
+			g.Go(
+				context.Background(),
+				func(ctx context.Context) error {
+					log.Println("executing seq: ", seq.ID)
+					err := s.execSeq(ctx, seq)
+					log.Println("finished seq: ", seq.ID)
+					switch seq.GetState().Status {
+					case workflow.Completed:
+						completed.Add(1)
+					case workflow.Failed:
+						failed.Add(1)
+					case workflow.Stopped:
+						stopped.Add(1)
+					default:
+						panic("unexpected seq state after execSeq: " + seq.GetState().Status.String())
+
+					}
+					return err
+				},
+			)
+		}
+	}
+	log.Println("waiting for recovered running sequences to complete")
+	_ = g.Wait(context.Background())
+	log.Println("all recovered sequences fixed and running sequences completed")
+
+	if s.exceededFailures(b, &failed) {
+		b.State.Status = workflow.Failed
+		req.Data.err = fmt.Errorf("block(%s) has exceeded the tolerated failures", b.Name)
+	}
 }
 
 // BlockBypassChecks runs all the gates on the Block. If any of the gates fail,
@@ -335,12 +389,6 @@ func (s *States) ExecuteSequences(req statemachine.Request[Data]) statemachine.R
 	h := req.Data.blocks[0]
 
 	failures := atomic.Int64{}
-	exceededFailures := func() bool {
-		if h.block.ToleratedFailures >= 0 && failures.Load() > int64(h.block.ToleratedFailures) {
-			return true
-		}
-		return false
-	}
 
 	for _, seq := range h.block.Sequences {
 		if seq.State.Status == workflow.Failed {
@@ -369,7 +417,7 @@ func (s *States) ExecuteSequences(req statemachine.Request[Data]) statemachine.R
 			return req
 		}
 
-		if exceededFailures() {
+		if s.exceededFailures(h.block, &failures) {
 			h.block.State.Status = workflow.Failed
 			req.Data.err = fmt.Errorf("block(%s) has exceeded the tolerated failures", h.block.Name)
 			req.Next = s.BlockDeferredChecks
@@ -383,7 +431,7 @@ func (s *States) ExecuteSequences(req statemachine.Request[Data]) statemachine.R
 				defer func() { <-limiter }()
 
 				// Defense in depth to make sure we don't run more than we should.
-				if exceededFailures() {
+				if s.exceededFailures(h.block, &failures) {
 					return fmt.Errorf("exceeded tolerated failures")
 				}
 
@@ -408,6 +456,13 @@ func (s *States) ExecuteSequences(req statemachine.Request[Data]) statemachine.R
 
 	req.Next = s.BlockPostChecks
 	return req
+}
+
+func (s *States) exceededFailures(block *workflow.Block, failures *atomic.Int64) bool {
+	if block.ToleratedFailures >= 0 && failures.Load() > int64(block.ToleratedFailures) {
+		return true
+	}
+	return false
 }
 
 // BlockPostChecks runs all PostChecks on the current block.
@@ -776,6 +831,8 @@ func (s *States) execSeq(ctx context.Context, seq *workflow.Sequence) error {
 		}
 	}()
 
+	log.Printf("there are %d actions in this sequence: ", len(seq.Actions))
+
 	switch seq.State.Status {
 	case workflow.Completed:
 		return nil
@@ -799,10 +856,13 @@ func (s *States) execSeq(ctx context.Context, seq *workflow.Sequence) error {
 	}()
 
 	for _, action := range seq.Actions {
+		log.Printf("==running action(%s) in seq(%s)==: %s", action.ID, seq.ID, action.Name)
 		if err := s.runAction(ctx, action, s.store); err != nil {
+			log.Println("action error: ", err)
 			seq.State.Status = workflow.Failed
 			return err
 		}
+		log.Println("action done")
 	}
 
 	seq.State.Status = workflow.Completed
@@ -864,7 +924,7 @@ func resetActions(actions []*workflow.Action) {
 	}
 }
 
-func isType(a, b interface{}) bool {
+func isType(a, b any) bool {
 	return reflect.TypeOf(a) == reflect.TypeOf(b)
 }
 
