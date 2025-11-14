@@ -8,7 +8,6 @@ import (
 	"github.com/element-of-surprise/coercion/workflow/context"
 	"github.com/gostdlib/base/statemachine"
 	"github.com/gostdlib/base/telemetry/log"
-	"github.com/kylelemons/godebug/pretty"
 )
 
 // Recovery restarts execution of a Plan that has already started running, but the service crashed before it completed.
@@ -17,7 +16,6 @@ func (s *States) Recovery(req statemachine.Request[Data]) statemachine.Request[D
 	defer func() {
 		log.Println("recovery state completed")
 		if req.Data.RecoveryStarted != nil {
-			log.Println("closing recovery started channel")
 			close(req.Data.RecoveryStarted)
 		}
 	}()
@@ -25,21 +23,16 @@ func (s *States) Recovery(req statemachine.Request[Data]) statemachine.Request[D
 	plan := req.Data.Plan
 	req.Data.recovered = true
 
-	log.Printf("fixing plan for recovery: %s|%s", plan.ID, plan.GetState().Status)
 	s.fixPlan(plan)
 	if err := s.store.UpdatePlan(req.Ctx, plan); err != nil {
 		log.Fatalf("failed to write Plan: %v", err)
 	}
-	log.Printf("plan fixed for recovery: %s|%s", plan.ID, plan.GetState().Status)
-	log.Println("===========================Fix Plan Complete===========================")
 	switch plan.State.Status {
 	case workflow.NotStarted:
 		req.Next = nil
-		log.Println("plan not started, not recovering")
 		return req
 	case workflow.Completed, workflow.Failed, workflow.Stopped:
 		req.Next = s.End
-		log.Println("plan already completed, failed, or stopped, moving to end state")
 		return req
 	}
 	// Okay, we are in the running state. Let's setup to run.
@@ -51,18 +44,8 @@ func (s *States) Recovery(req statemachine.Request[Data]) statemachine.Request[D
 		req.Data.blocks = append(req.Data.blocks, block{block: b, contCheckResult: make(chan error, 1)})
 	}
 	req.Data.contCheckResult = make(chan error, 1)
-	log.Println("plan recovery setup complete, updating plan in store")
-
-	var pConfig = pretty.Config{
-		IncludeUnexported: false,
-		PrintStringers:    true,
-		SkipZeroFields:    true,
-	}
-
-	log.Println("plan before we run again: ", pConfig.Sprint("Plan in vault: \n", req.Data.Plan))
 
 	req.Next = s.PlanBypassChecks
-	log.Println("moving to plan bypass checks state")
 	return req
 }
 
@@ -233,11 +216,9 @@ func fixSeq(s *workflow.Sequence) {
 }
 
 func (s *States) fixBlock(b *workflow.Block) {
-	log.Println("====fixBlock====")
 	if b.State.Status != workflow.Running {
 		return
 	}
-	log.Println("fixing bypass checks")
 	if b.BypassChecks != nil {
 		fixChecks(b.BypassChecks)
 		if b.BypassChecks.State.Status == workflow.Completed {
@@ -245,7 +226,6 @@ func (s *States) fixBlock(b *workflow.Block) {
 			return
 		}
 	}
-	log.Println("fixing pre checks")
 	if b.PreChecks != nil {
 		if b.PreChecks.State.Status == workflow.Failed {
 			b.State.Status = workflow.Failed
@@ -253,7 +233,6 @@ func (s *States) fixBlock(b *workflow.Block) {
 		}
 		fixChecks(b.PreChecks)
 	}
-	log.Println("fixing cont checks")
 	if b.ContChecks != nil {
 		if b.ContChecks.State.Status == workflow.Failed {
 			b.State.Status = workflow.Failed
@@ -261,7 +240,6 @@ func (s *States) fixBlock(b *workflow.Block) {
 		}
 		fixChecks(b.ContChecks)
 	}
-	log.Println("fixing post checks")
 	if b.PostChecks != nil {
 		if b.PostChecks.State.Status == workflow.Failed {
 			b.State.Status = workflow.Failed
@@ -271,7 +249,6 @@ func (s *States) fixBlock(b *workflow.Block) {
 	}
 
 	var completed, failed, stopped, running atomic.Int32
-	log.Println("fixing sequences")
 	for _, seq := range b.Sequences {
 		fixSeq(seq)
 		switch seq.State.Status {
@@ -305,11 +282,9 @@ func (s *States) fixBlock(b *workflow.Block) {
 }
 
 func (s *States) fixPlan(p *workflow.Plan) {
-	defer log.Println("plan fix complete")
 	if p.State.Status != workflow.Running {
 		return
 	}
-	log.Println("fixing BypassChecks")
 	if p.BypassChecks != nil {
 		fixChecks(p.BypassChecks)
 		if checksCompleted(p.BypassChecks) {
@@ -317,28 +292,24 @@ func (s *States) fixPlan(p *workflow.Plan) {
 			return
 		}
 	}
-	log.Println("fixing PreChecks")
 	if checksFailed(p.PreChecks) {
 		p.State.Status = workflow.Failed
 		return
 	}
 	fixChecks(p.PreChecks)
 
-	log.Println("fixing PostChecks")
 	if checksFailed(p.PostChecks) {
 		p.State.Status = workflow.Failed
 		return
 	}
 	fixChecks(p.PostChecks)
 
-	log.Println("fixing ContChecks")
 	if checksFailed(p.ContChecks) {
 		p.State.Status = workflow.Failed
 		return
 	}
 	fixChecks(p.ContChecks)
 
-	log.Println("fixing DeferredChecks")
 	if p.DeferredChecks != nil {
 		fixChecks(p.DeferredChecks)
 	}
@@ -346,11 +317,8 @@ func (s *States) fixPlan(p *workflow.Plan) {
 	running := 0
 	completed := 0
 	failed := 0
-	log.Println("fixing Blocks")
 	for _, b := range p.Blocks {
-		log.Println("fixing Block:", b.ID)
 		s.fixBlock(b)
-		log.Println("fixed Block:", b.ID, "Status:", b.State.Status)
 		if b.State.Status == workflow.Stopped {
 			p.State.Status = workflow.Stopped
 			return
@@ -364,13 +332,11 @@ func (s *States) fixPlan(p *workflow.Plan) {
 			failed++
 		}
 	}
-	log.Println("evaluating plan state after fix")
 	if failed > 0 {
 		p.State.Status = workflow.Failed
 		p.State.End = time.Now()
 		return
 	}
-	log.Println("checking if plan is completed")
 	if completed == len(p.Blocks) {
 		if checksCompleted(p.PostChecks) && checksCompleted(p.DeferredChecks) {
 			p.State.Status = workflow.Completed

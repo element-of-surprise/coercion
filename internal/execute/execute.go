@@ -163,9 +163,24 @@ func (e *Plans) Start(ctx context.Context, id uuid.UUID) error {
 	if err != nil {
 		return err
 	}
+	if plan == nil {
+		return ErrNotFound
+	}
+	if plan.State == nil {
+		return fmt.Errorf("plan(%s) has nil State", id)
+	}
 
-	if err := e.validateStartState(ctx, plan); err != nil {
-		return err
+	switch {
+	case plan.State.Status == workflow.NotStarted:
+		if err := e.validateStartState(ctx, plan); err != nil {
+			return err
+		}
+	case plan.State.Status == workflow.Running:
+		// Plan is already running.
+		return nil
+	case plan.State.Status > workflow.Running:
+		// Plan is already finished.
+		return nil
 	}
 
 	// This ensures that before we return that this will be running.

@@ -165,26 +165,31 @@ func TestStart(t *testing.T) {
 	t.Parallel()
 
 	storedID := NewV7()
+	runningID := NewV7()
+	completedID := NewV7()
+	failedID := NewV7()
+	stoppedID := NewV7()
 
 	tests := []struct {
-		name    string
-		id      uuid.UUID
-		plan    *workflow.Plan
-		wantErr bool
+		name           string
+		id             uuid.UUID
+		plan           *workflow.Plan
+		wantErr        bool
+		wantRunnerCall bool
 	}{
 		{
-			name:    "no plan could be found",
+			name:    "Error: no plan could be found",
 			id:      NewV7(),
 			wantErr: true,
 		},
 		{
-			name:    "plan is invalid",
+			name:    "Error: plan has nil State",
 			id:      storedID,
-			plan:    &workflow.Plan{SubmitTime: time.Now()}, //  plan is invalid, has no ID
+			plan:    &workflow.Plan{SubmitTime: time.Now()},
 			wantErr: true,
 		},
 		{
-			name: "plan starts execution",
+			name: "Success: plan starts execution",
 			id:   storedID,
 			plan: &workflow.Plan{
 				ID: storedID,
@@ -193,19 +198,77 @@ func TestStart(t *testing.T) {
 				},
 				SubmitTime: time.Now(),
 			},
+			wantRunnerCall: true,
+		},
+		{
+			name: "Success: plan already Running returns nil without starting",
+			id:   runningID,
+			plan: &workflow.Plan{
+				ID: runningID,
+				State: &workflow.State{
+					Status: workflow.Running,
+					Start:  time.Now(),
+				},
+				SubmitTime: time.Now(),
+			},
+			wantRunnerCall: false,
+		},
+		{
+			name: "Success: plan already Completed returns nil without starting",
+			id:   completedID,
+			plan: &workflow.Plan{
+				ID: completedID,
+				State: &workflow.State{
+					Status: workflow.Completed,
+					Start:  time.Now().Add(-time.Minute),
+					End:    time.Now(),
+				},
+				SubmitTime: time.Now().Add(-time.Minute),
+			},
+			wantRunnerCall: false,
+		},
+		{
+			name: "Success: plan already Failed returns nil without starting",
+			id:   failedID,
+			plan: &workflow.Plan{
+				ID: failedID,
+				State: &workflow.State{
+					Status: workflow.Failed,
+					Start:  time.Now().Add(-time.Minute),
+					End:    time.Now(),
+				},
+				SubmitTime: time.Now().Add(-time.Minute),
+			},
+			wantRunnerCall: false,
+		},
+		{
+			name: "Success: plan already Stopped returns nil without starting",
+			id:   stoppedID,
+			plan: &workflow.Plan{
+				ID: stoppedID,
+				State: &workflow.State{
+					Status: workflow.Stopped,
+					Start:  time.Now().Add(-time.Minute),
+					End:    time.Now(),
+				},
+				SubmitTime: time.Now().Add(-time.Minute),
+			},
+			wantRunnerCall: false,
 		},
 	}
 
 	for _, test := range tests {
-		fakeStore := &fakeStore{
-			m: map[uuid.UUID]*workflow.Plan{
-				storedID: test.plan,
-			},
+		store := &fakeStore{
+			m: map[uuid.UUID]*workflow.Plan{},
 		}
+		if test.plan != nil {
+			store.m[test.id] = test.plan
+		}
+
 		fr := &fakeRunner{ran: make(chan struct{})}
 
 		p := &Plans{
-			store:     fakeStore,
+			store:     store,
 			runner:    fr.Run,
 			states:    &sm.States{},
 			stoppers:  sync.ShardedMap[uuid.UUID, context.CancelFunc]{},
@@ -226,21 +289,169 @@ func TestStart(t *testing.T) {
 			continue
 		}
 
-		select {
-		case <-time.After(2 * time.Second):
-			t.Errorf("TestStart(%s): runner was not called", test.name)
-		case <-fr.ran:
+		if test.wantRunnerCall {
+			select {
+			case <-time.After(2 * time.Second):
+				t.Errorf("TestStart(%s): runner was not called", test.name)
+			case <-fr.ran:
+			}
+
+			if diff := pretty.Compare(test.plan, fr.req.Data.Plan); diff != "" {
+				t.Errorf("TestStart(%s): Plan in Request diff: -want/+got:\n%s", test.name, diff)
+			}
+			if methodName(fr.req.Next) != methodName(p.states.Start) {
+				t.Errorf("TestStart(%s): Next method in Request is not the expected Start method", test.name)
+			}
+
+			if p.stoppers.Len() > 0 {
+				t.Errorf("TestStart(%s): did not delete the stopper entry", test.name)
+			}
+		} else {
+			// Give a brief moment to ensure runner isn't called
+			select {
+			case <-time.After(100 * time.Millisecond):
+				// Good, runner wasn't called
+			case <-fr.ran:
+				t.Errorf("TestStart(%s): runner was called but should not have been", test.name)
+			}
+		}
+	}
+}
+
+func TestWait(t *testing.T) {
+	t.Parallel()
+
+	runningID := NewV7()
+	completedID := NewV7()
+	failedID := NewV7()
+	stoppedID := NewV7()
+	notStartedID := NewV7()
+	bugRunningID := NewV7()
+	notFoundID := NewV7()
+
+	tests := []struct {
+		name        string
+		id          uuid.UUID
+		plan        *workflow.Plan
+		addWaiter   bool
+		closeWaiter bool
+		cancelCtx   bool
+		wantErr     bool
+	}{
+		{
+			name:        "Success: plan is actively running and completes",
+			id:          runningID,
+			plan:        &workflow.Plan{ID: runningID, State: &workflow.State{Status: workflow.Running}},
+			addWaiter:   true,
+			closeWaiter: true,
+		},
+		{
+			name:      "Success: plan is actively running and context cancelled",
+			id:        runningID,
+			plan:      &workflow.Plan{ID: runningID, State: &workflow.State{Status: workflow.Running}},
+			addWaiter: true,
+			cancelCtx: true,
+			wantErr:   true,
+		},
+		{
+			name: "Success: plan is Completed and not running",
+			id:   completedID,
+			plan: &workflow.Plan{
+				ID: completedID,
+				State: &workflow.State{
+					Status: workflow.Completed,
+					Start:  time.Now().Add(-time.Minute),
+					End:    time.Now(),
+				},
+			},
+		},
+		{
+			name: "Success: plan is Failed and not running",
+			id:   failedID,
+			plan: &workflow.Plan{
+				ID: failedID,
+				State: &workflow.State{
+					Status: workflow.Failed,
+					Start:  time.Now().Add(-time.Minute),
+					End:    time.Now(),
+				},
+			},
+		},
+		{
+			name: "Success: plan is Stopped and not running",
+			id:   stoppedID,
+			plan: &workflow.Plan{
+				ID: stoppedID,
+				State: &workflow.State{
+					Status: workflow.Stopped,
+					Start:  time.Now().Add(-time.Minute),
+					End:    time.Now(),
+				},
+			},
+		},
+		{
+			name: "Error: plan is NotStarted",
+			id:   notStartedID,
+			plan: &workflow.Plan{
+				ID:    notStartedID,
+				State: &workflow.State{Status: workflow.NotStarted},
+			},
+			wantErr: true,
+		},
+		{
+			name: "Error: plan is Running but not in waiters",
+			id:   bugRunningID,
+			plan: &workflow.Plan{
+				ID:    bugRunningID,
+				State: &workflow.State{Status: workflow.Running},
+			},
+			wantErr: true,
+		},
+		{
+			name:    "Error: plan does not exist",
+			id:      notFoundID,
+			wantErr: true,
+		},
+	}
+
+	for _, test := range tests {
+		fakeStore := &fakeStore{
+			m: map[uuid.UUID]*workflow.Plan{
+				runningID:    tests[0].plan,
+				completedID:  tests[2].plan,
+				failedID:     tests[3].plan,
+				stoppedID:    tests[4].plan,
+				notStartedID: tests[5].plan,
+				bugRunningID: tests[6].plan,
+			},
 		}
 
-		if diff := pretty.Compare(test.plan, fr.req.Data.Plan); diff != "" {
-			t.Errorf("TestStart(%s): Plan in Request diff: -want/+got:\n%s", test.name, diff)
-		}
-		if methodName(fr.req.Next) != methodName(p.states.Start) {
-			t.Errorf("TestStart(%s): Next method in Request is not the expected Start method", test.name)
+		p := &Plans{
+			store:   fakeStore,
+			waiters: sync.ShardedMap[uuid.UUID, chan struct{}]{},
 		}
 
-		if p.stoppers.Len() > 0 {
-			t.Errorf("TestStart(%s): did not delete the stopper entry", test.name)
+		ctx := context.Background()
+		if test.cancelCtx {
+			var cancel context.CancelFunc
+			ctx, cancel = context.WithCancel(ctx)
+			cancel()
+		}
+
+		if test.addWaiter {
+			waiter := make(chan struct{})
+			p.waiters.Set(test.id, waiter)
+			if test.closeWaiter {
+				close(waiter)
+			}
+		}
+
+		err := p.Wait(ctx, test.id)
+		switch {
+		case test.wantErr && err == nil:
+			t.Errorf("TestWait(%s): got err == nil, want err != nil", test.name)
+		case !test.wantErr && err != nil:
+			t.Errorf("TestWait(%s): got err == %v, want err == nil", test.name, err)
 		}
 	}
 }

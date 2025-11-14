@@ -48,7 +48,6 @@ func (r Runner) Start(req statemachine.Request[Data]) statemachine.Request[Data]
 	if action.State.Status != workflow.NotStarted {
 		switch action.State.Status {
 		case workflow.Running:
-			log.Println("action is already running, getting plugin")
 			req.Next = r.GetPlugin
 			return req
 		case workflow.Completed, workflow.Failed:
@@ -103,8 +102,6 @@ func (r Runner) GetPlugin(req statemachine.Request[Data]) statemachine.Request[D
 // Execute runs the action using the plugin and writes the result to the store. This
 // function will retry the action based on the plugin's retry policy.
 func (r Runner) Execute(req statemachine.Request[Data]) statemachine.Request[Data] {
-	log.Println("executing plugin")
-	defer log.Println("plugin execution complete")
 	action := req.Data.Action
 	plugin := req.Data.plugin
 	writer := req.Data.Updater
@@ -116,7 +113,6 @@ func (r Runner) Execute(req statemachine.Request[Data]) statemachine.Request[Dat
 	req.Data.err = backoff.Retry(
 		req.Ctx,
 		func(ctx context.Context, record exponential.Record) error {
-			log.Println("running action attempt")
 			return r.exec(ctx, action, plugin, writer)
 		},
 	)
@@ -137,7 +133,6 @@ func (r Runner) End(req statemachine.Request[Data]) statemachine.Request[Data] {
 
 	action.State.End = r.now()
 
-	log.Println("finalizing action state as: ", action.State.Status)
 	if err := updater.UpdateAction(req.Ctx, action); err != nil {
 		log.Fatalf("failed to write Action: %v", err)
 	}

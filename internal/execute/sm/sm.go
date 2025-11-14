@@ -266,9 +266,7 @@ func (s *States) handleRecoveredSeqs(req statemachine.Request[Data], b *workflow
 			g.Go(
 				context.Background(),
 				func(ctx context.Context) error {
-					log.Println("executing seq: ", seq.ID)
 					err := s.execSeq(ctx, seq)
-					log.Println("finished seq: ", seq.ID)
 					switch seq.GetState().Status {
 					case workflow.Completed:
 						completed.Add(1)
@@ -285,9 +283,7 @@ func (s *States) handleRecoveredSeqs(req statemachine.Request[Data], b *workflow
 			)
 		}
 	}
-	log.Println("waiting for recovered running sequences to complete")
 	_ = g.Wait(context.Background())
-	log.Println("all recovered sequences fixed and running sequences completed")
 
 	if s.exceededFailures(b, &failed) {
 		b.State.Status = workflow.Failed
@@ -840,8 +836,6 @@ func (s *States) execSeq(ctx context.Context, seq *workflow.Sequence) error {
 		}
 	}()
 
-	log.Printf("there are %d actions in this sequence: ", len(seq.Actions))
-
 	switch seq.State.Status {
 	case workflow.Completed:
 		return nil
@@ -865,13 +859,10 @@ func (s *States) execSeq(ctx context.Context, seq *workflow.Sequence) error {
 	}()
 
 	for _, action := range seq.Actions {
-		log.Printf("==running action(%s) in seq(%s)==: %s", action.ID, seq.ID, action.Name)
 		if err := s.runAction(ctx, action, s.store); err != nil {
-			log.Println("action error: ", err)
 			seq.State.Status = workflow.Failed
 			return err
 		}
-		log.Println("action done")
 	}
 
 	seq.State.Status = workflow.Completed
