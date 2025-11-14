@@ -270,11 +270,7 @@ func (s *States) fixBlock(b *workflow.Block) {
 		fixChecks(b.PostChecks)
 	}
 
-	// DOAK - remove this before submit
-	//g := context.Pool(context.Background()).Group()
 	var completed, failed, stopped, running atomic.Int32
-	// DOAK - remove this before submit
-	//seqs := make([]*workflow.Sequence, 0)
 	log.Println("fixing sequences")
 	for _, seq := range b.Sequences {
 		fixSeq(seq)
@@ -287,38 +283,8 @@ func (s *States) fixBlock(b *workflow.Block) {
 			stopped.Add(1)
 		case workflow.Running:
 			running.Add(1)
-			// DOAK - remove this before submit
-			/*
-				seqs = append(seqs, seq)
-				g.Go(
-					context.Background(),
-					func(ctx context.Context) error {
-						log.Println("executing seq: ", seq.ID)
-						err := s.execSeq(ctx, seq)
-						log.Println("finished seq: ", seq.ID)
-						switch seq.GetState().Status {
-						case workflow.Completed:
-							completed.Add(1)
-						case workflow.Failed:
-							failed.Add(1)
-						case workflow.Stopped:
-							stopped.Add(1)
-						default:
-							panic("unexpected seq state after execSeq: " + seq.GetState().Status.String())
-
-						}
-						return err
-					},
-				)
-			*/
 		}
 	}
-	// DOAK - remove this before submit
-	/*
-		log.Println("waiting for running sequences to complete")
-		_ = g.Wait(context.Background())
-		log.Println("all sequences fixed and running sequences completed")
-	*/
 
 	if stopped.Load() > 0 {
 		for _, s := range b.Sequences {
