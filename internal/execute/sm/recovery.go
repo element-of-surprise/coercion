@@ -1,7 +1,6 @@
 package sm
 
 import (
-	"sync/atomic"
 	"time"
 
 	"github.com/element-of-surprise/coercion/workflow"
@@ -248,33 +247,35 @@ func (s *States) fixBlock(b *workflow.Block) {
 		fixChecks(b.PostChecks)
 	}
 
-	var completed, failed, stopped, running atomic.Int32
+	var completed, failed, stopped, running int
 	for _, seq := range b.Sequences {
 		fixSeq(seq)
 		switch seq.State.Status {
 		case workflow.Completed:
-			completed.Add(1)
+			completed++
 		case workflow.Failed:
-			failed.Add(1)
+			failed++
 		case workflow.Stopped:
-			stopped.Add(1)
+			stopped++
 		case workflow.Running:
-			running.Add(1)
+			running++
 		}
 	}
 
-	if stopped.Load() > 0 {
+	if stopped > 0 {
 		for _, s := range b.Sequences {
 			if s.State.Status == workflow.Running {
 				s.State.Status = workflow.Stopped
+				s.State.End = time.Now()
 			}
 		}
 		b.State.Status = workflow.Stopped
+		b.State.End = time.Now()
 		return
 	}
 
 	switch {
-	case completed.Load() == 0 && failed.Load() == 0 && running.Load() == 0:
+	case completed == 0 && failed == 0 && running == 0:
 		b.State.Status = workflow.NotStarted
 		b.State.Start = time.Time{}
 		b.State.End = time.Time{}

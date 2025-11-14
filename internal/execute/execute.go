@@ -123,7 +123,9 @@ func New(ctx context.Context, store storage.Vault, reg *registry.Register, optio
 	e.addValidators()
 
 	if e.recovery {
-		e.recover(ctx)
+		if err = e.recover(ctx); err != nil {
+			return nil, errors.E(ctx, errors.CatInternal, errors.TypeBug, err)
+		}
 	}
 
 	return e, nil

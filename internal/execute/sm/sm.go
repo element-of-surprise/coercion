@@ -276,7 +276,6 @@ func (s *States) handleRecoveredSeqs(req statemachine.Request[Data], b *workflow
 						stopped.Add(1)
 					default:
 						panic("unexpected seq state after execSeq: " + seq.GetState().Status.String())
-
 					}
 					return err
 				},
