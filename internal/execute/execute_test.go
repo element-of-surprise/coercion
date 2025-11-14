@@ -135,6 +135,10 @@ func (f *fakeStore) Read(ctx context.Context, id uuid.UUID) (*workflow.Plan, err
 	return p, nil
 }
 
+func (f *fakeStore) UpdatePlan(ctx context.Context, plan *workflow.Plan) error {
+	return nil
+}
+
 type fakeRunner struct {
 	called bool
 	req    statemachine.Request[sm.Data]

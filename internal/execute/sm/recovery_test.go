@@ -123,11 +123,26 @@ func TestFixChecks(t *testing.T) {
 			},
 		},
 		{
-			name: "running checks, reset",
+			name: "running checks with completed action, marks as completed",
 			checks: &workflow.Checks{
 				State: &workflow.State{Status: workflow.Running, Start: now, End: now},
 				Actions: []*workflow.Action{
 					{State: &workflow.State{Status: workflow.Running, Start: now}, Attempts: []*workflow.Attempt{{Start: now, End: now.Add(1)}}},
+				},
+			},
+			want: &workflow.Checks{
+				State: &workflow.State{Status: workflow.Completed, Start: now, End: now},
+				Actions: []*workflow.Action{
+					{State: &workflow.State{Status: workflow.Completed, Start: now, End: now.Add(1)}, Attempts: []*workflow.Attempt{{Start: now, End: now.Add(1)}}},
+				},
+			},
+		},
+		{
+			name: "running checks with incomplete action, resets",
+			checks: &workflow.Checks{
+				State: &workflow.State{Status: workflow.Running, Start: now, End: now},
+				Actions: []*workflow.Action{
+					{State: &workflow.State{Status: workflow.Running, Start: now}, Attempts: []*workflow.Attempt{{Start: now}}},
 				},
 			},
 			want: &workflow.Checks{
@@ -140,9 +155,33 @@ func TestFixChecks(t *testing.T) {
 	}
 
 	for _, test := range tests {
+		// Save the original status to detect if fixChecks changed it
+		var originalStatus workflow.Status
+		if test.checks != nil && test.checks.State != nil {
+			originalStatus = test.checks.State.Status
+		}
+
 		fixChecks(test.checks)
-		if diff := pConfig.Compare(test.want, test.checks); diff != "" {
-			t.Errorf("TestFixChecks(%s): -want/+got):\n%s", test.name, diff)
+
+		// For checks that were Running and got marked as Completed by fixChecks, the End time is set to time.Now()
+		// We need to exclude it from comparison but verify it was set
+		if test.checks != nil && test.want != nil && originalStatus == workflow.Running && test.checks.State.Status == workflow.Completed && test.want.State.Status == workflow.Completed {
+			// Save the actual end time
+			actualEnd := test.checks.State.End
+			// Set both to zero for comparison
+			test.checks.State.End = time.Time{}
+			test.want.State.End = time.Time{}
+			if diff := pConfig.Compare(test.want, test.checks); diff != "" {
+				t.Errorf("TestFixChecks(%s): -want/+got):\n%s", test.name, diff)
+			}
+			// Verify that the End time was actually set (not zero)
+			if actualEnd.IsZero() {
+				t.Errorf("TestFixChecks(%s): Checks.State.End was not set", test.name)
+			}
+		} else {
+			if diff := pConfig.Compare(test.want, test.checks); diff != "" {
+				t.Errorf("TestFixChecks(%s): -want/+got):\n%s", test.name, diff)
+			}
 		}
 	}
 }

@@ -165,11 +165,12 @@ func (e *Plans) Start(ctx context.Context, id uuid.UUID) error {
 	}
 
 	if err := e.validateStartState(ctx, plan); err != nil {
-		return nil
+		return err
 	}
 
 	// This ensures that before we return that this will be running.
 	plan.State.Status = workflow.Running
+	plan.State.Start = e.now()
 	if err := e.store.UpdatePlan(ctx, plan); err != nil {
 		return err
 	}

@@ -33,7 +33,7 @@ func (f finalStates) bypassChecks(req statemachine.Request[Data]) statemachine.R
 }
 
 // planChecks looks through all the checks in the Plan and fails the Plan if any of the checks failed
-// and records the failure reason.
+// and records the failure reason. It does not do BypassChecks as those are handled in bypassChecks.
 func (f finalStates) planChecks(req statemachine.Request[Data]) statemachine.Request[Data] {
 	plan := req.Data.Plan
 

@@ -159,13 +159,19 @@ func fixChecks(c *workflow.Checks) {
 	case failed > 0:
 		c.State.Status = workflow.Failed
 		c.State.End = time.Now()
-	case completed == 0 && running == 0 && failed == 0:
-		c.State.Status = workflow.NotStarted
-		c.State.Start = time.Time{}
-		c.State.End = time.Time{}
 	case completed == len(c.Actions):
 		c.State.Status = workflow.Completed
 		c.State.End = time.Now()
+	default:
+		// If we get here, checks are Running but haven't completed yet (or have no actions).
+		// If there are no failures or stops, reset all actions and the checks to NotStarted
+		// so they can run fresh after recovery.
+		for _, a := range c.Actions {
+			resetAction(a)
+		}
+		c.State.Status = workflow.NotStarted
+		c.State.Start = time.Time{}
+		c.State.End = time.Time{}
 	}
 }
 
@@ -396,11 +402,6 @@ func (s *States) fixPlan(p *workflow.Plan) {
 	if failed > 0 {
 		p.State.Status = workflow.Failed
 		p.State.End = time.Now()
-		return
-	}
-	if completed == 0 && running == 0 && failed == 0 {
-		p.State.Start = time.Time{}
-		p.State.End = time.Time{}
 		return
 	}
 	log.Println("checking if plan is completed")

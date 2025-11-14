@@ -48,9 +48,7 @@ func TestRecovery(t *testing.T) {
 				g2.Go(
 					ctx,
 					func(ctx context.Context) error {
-						log.Println("before test state: ", i)
 						recoveryTestStage(ctx, i, reg, results)
-						log.Println("after test state: ", i)
 						return nil
 					},
 				)
@@ -68,6 +66,7 @@ func TestRecovery(t *testing.T) {
 					log.Printf("TestRecovery(stage %d): success", r.Stage)
 				} else {
 					t.Errorf("TestRecovery(stage %d): %v", r.Stage, r.Err)
+					// Uncomment to see plan output on failure.
 					//t.Errorf("plan final:\n%s", pConfig.Sprint(r.Result))
 				}
 			}
@@ -90,7 +89,7 @@ type testResult struct {
 func recoveryTestStage(ctx context.Context, stage int, reg *registry.Register, ch chan testResult) {
 	// Uncomment and put in the stage number you wish to debug.
 	/*
-		if stage != 70 {
+		if stage != 0 {
 			return
 		}
 	*/

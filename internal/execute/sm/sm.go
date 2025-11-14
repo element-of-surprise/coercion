@@ -747,6 +747,14 @@ func (s *States) runContChecks(ctx context.Context, checks *workflow.Checks, res
 		delay = time.Nanosecond
 	}
 
+	// Run checks immediately on start to ensure they transition to Running state,
+	// even if the plan completes before the first ticker fires.
+	err := s.runChecksOnce(context.WithoutCancel(ctx), checks)
+	resultCh <- err
+	if err != nil {
+		return
+	}
+
 	t := time.NewTicker(delay)
 	defer t.Stop()
 
@@ -773,6 +781,7 @@ func (s *States) runChecksOnce(ctx context.Context, checks *workflow.Checks) err
 
 	resetActions(checks.Actions)
 
+	checks.State.Status = workflow.Running
 	checks.State.Start = s.now()
 
 	if err := s.store.UpdateChecks(ctx, checks); err != nil {
