@@ -288,9 +288,9 @@ func (e *Plans) Wait(ctx context.Context, id uuid.UUID) error {
 		}
 		switch plan.GetState().Status {
 		case workflow.NotStarted:
-			return fmt.Errorf("plan(%s) is not running", id)
+			return errors.E(ctx, errors.CatUser, errors.TypeParameter, fmt.Errorf("plan(%s) is not started", id))
 		case workflow.Running:
-			return fmt.Errorf("bug: plan(%s) has a running state, but isn't in the waiters", id)
+			return errors.E(ctx, errors.CatInternal, errors.TypeBug, fmt.Errorf("bug: plan(%s) has a running state, but isn't in the waiters", id))
 		}
 		return nil
 	}

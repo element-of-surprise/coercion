@@ -7,8 +7,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
-	"github.com/Azure/azure-sdk-for-go/sdk/azidentity"
 	workstream "github.com/element-of-surprise/coercion"
 	"github.com/element-of-surprise/coercion/workflow"
 	"github.com/element-of-surprise/coercion/workflow/builder"
@@ -36,7 +34,6 @@ func TestStorageRecovery(t *testing.T) {
 		t.Fatalf("Failed to create workstream: %v", err)
 	}
 
-	// Create and submit multiple plans
 	plan, err := createLongRunningPlan()
 	if err != nil {
 		t.Fatalf("Failed to create plan: %v", err)
@@ -58,10 +55,8 @@ func TestStorageRecovery(t *testing.T) {
 	}
 	log.Printf("Started plan %s, waiting for execution to begin...", planID)
 
-	// Wait a short time to ensure execution has started
 	time.Sleep(5 * time.Second)
 
-	// Check that the first plan is running. Do I need to check all?
 	status := ws.Status(ctx, planID, 1*time.Second)
 
 	var lastResult *workflow.Plan
@@ -98,7 +93,6 @@ func TestStorageRecovery(t *testing.T) {
 	// Simulate system restart by creating new vault and workstream
 	log.Println("Simulating system restart - creating new vault and workstream...")
 
-	// time.Sleep(5 * time.Minute) // wait for "leader election"
 	time.Sleep(5 * time.Second)
 
 	if *vaultType != "sqlite" {
@@ -133,27 +127,15 @@ func TestStorageRecovery(t *testing.T) {
 	}
 
 	log.Println("Recovery workstream created, attempting to recover plan(5 minute sleep)...")
-
-	// Wait for the recovered first plan to complete or timeout
-	// ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
-	// defer cancel()
-	//
 	time.Sleep(5 * time.Minute)
-	log.Println("5 minute sleep complete, checking plan status...")
-
-	fetchedPlan, err := recoveryWS.Plan(ctx, planID)
-	if err != nil {
-		t.Fatalf("Failed to retrieve plan %s for recovery: %v", planID, err)
-	}
 
 	// Start plan again after recovery, if there is still work to be done.
-	if fetchedPlan.State.Status == workflow.NotStarted {
-		if err := recoveryWS.Start(ctx, planID); err != nil {
-			t.Fatalf("Failed to start plan %s: %v", planID, err)
-		}
-		log.Printf("Started plan %s after restart", planID)
+	if err := recoveryWS.Start(ctx, planID); err != nil {
+		t.Fatalf("Failed to start plan %s: %v", planID, err)
 	}
+	log.Printf("Started plan %s after restart", planID)
 
+	log.Println("Waiting for recovered plan to complete...")
 	result, err := recoveryWS.Wait(ctx, planID)
 	if err != nil {
 		t.Fatalf("Failed to wait for recovered plan: %v", err)
@@ -273,26 +255,4 @@ func createLongRunningPlan() (*workflow.Plan, error) {
 	}
 
 	return plan, nil
-}
-
-// createBlobCredential creates the appropriate Azure credential for blob storage
-func createBlobCredential(msi string) (azcore.TokenCredential, error) {
-	if msi != "" {
-		msiResc := azidentity.ResourceID(msi)
-		msiOpts := azidentity.ManagedIdentityCredentialOptions{ID: msiResc}
-		cred, err := azidentity.NewManagedIdentityCredential(&msiOpts)
-		if err != nil {
-			return nil, fmt.Errorf("failed to create managed identity credential: %w", err)
-		}
-		return cred, nil
-	}
-
-	// Use Azure CLI credential
-	azOptions := &azidentity.AzureCLICredentialOptions{}
-	azCred, err := azidentity.NewAzureCLICredential(azOptions)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create Azure CLI credential: %w", err)
-	}
-
-	return azCred, nil
 }

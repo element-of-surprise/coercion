@@ -185,7 +185,7 @@ func TestStart(t *testing.T) {
 		{
 			name:    "Error: plan has nil State",
 			id:      storedID,
-			plan:    &workflow.Plan{SubmitTime: time.Now()},
+			plan:    &workflow.Plan{ID: storedID, SubmitTime: time.Now()},
 			wantErr: true,
 		},
 		{
@@ -346,7 +346,7 @@ func TestWait(t *testing.T) {
 			closeWaiter: true,
 		},
 		{
-			name:      "Success: plan is actively running and context cancelled",
+			name:      "Error: plan is actively running and context cancelled",
 			id:        runningID,
 			plan:      &workflow.Plan{ID: runningID, State: &workflow.State{Status: workflow.Running}},
 			addWaiter: true,
