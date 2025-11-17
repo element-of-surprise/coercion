@@ -1,3 +1,27 @@
+/*
+Hey you, MIGHT WANT TO READ THIS.
+
+TestRecovery uses the run of TestEtoE() to capture all the SQL statements used by SQLite to store the workflow state.
+We then replay those statements up to each stage of the workflow in order to simulate a crash/recovery at that point.
+That means that this test also only runs the SQLite storage backend, but it is also testing how the recovery
+works, which as long as the storage works correctly, is independent of the storage backend.
+
+There is a vault_recovery_test.go that does some testing for a specific vault and the vault tests itself
+should be proving the the storage backend works correctly.
+
+You must run TestEtoE() first to generate the capture data used by this test, so if isolating to this test:
+go test -v . -run '^(TestEtoE|TestRecovery)$'
+
+Now, if you have a particular stage you want to debug, you can uncomment the check in recoveryTestStage() to only run that stage.
+This will speed up debugging since you won't have to run all stages.
+
+You will also want to uncomment the plan output line in TestRecovery() to see the final plan state on failure.
+
+//t.Errorf("plan final:\n%s", pConfig.Sprint(r.Result))
+
+Agents are not great at figuring out how to use this.
+*/
+
 package etoe
 
 import (
@@ -16,6 +40,8 @@ import (
 )
 
 // SEE recoveryTestStage for a way to do a single stage.
+// This test cannot be run in isolation, as it depends on the captured stages from
+// the etoe end-to-end test.
 
 func TestRecovery(t *testing.T) {
 	log.Println("TestRecovery")
@@ -64,6 +90,7 @@ func TestRecovery(t *testing.T) {
 					log.Printf("TestRecovery(stage %d): success", r.Stage)
 				} else {
 					t.Errorf("TestRecovery(stage %d): %v", r.Stage, r.Err)
+					// Uncomment to see plan output on failure.
 					//t.Errorf("plan final:\n%s", pConfig.Sprint(r.Result))
 				}
 			}
@@ -86,7 +113,7 @@ type testResult struct {
 func recoveryTestStage(ctx context.Context, stage int, reg *registry.Register, ch chan testResult) {
 	// Uncomment and put in the stage number you wish to debug.
 	/*
-		if stage != 70 {
+		if stage != 0 {
 			return
 		}
 	*/

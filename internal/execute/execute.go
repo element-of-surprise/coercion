@@ -123,7 +123,9 @@ func New(ctx context.Context, store storage.Vault, reg *registry.Register, optio
 	e.addValidators()
 
 	if e.recovery {
-		e.recover(ctx)
+		if err = e.recover(ctx); err != nil {
+			return nil, errors.E(ctx, errors.CatInternal, errors.TypeBug, err)
+		}
 	}
 
 	return e, nil
@@ -157,18 +159,40 @@ func (e *Plans) initPlugins(ctx context.Context) error {
 }
 
 // Start starts a previously Submitted Plan by its ID. Cancelling the Context will not Stop execution.
-// Please use Stop to stop execution of a Plan.
+// Please use Stop to stop execution of a Plan. If the plan has already been started, this will return nil.
 func (e *Plans) Start(ctx context.Context, id uuid.UUID) error {
 	plan, err := e.store.Read(ctx, id)
 	if err != nil {
 		return err
 	}
-
-	if err := e.validateStartState(ctx, plan); err != nil {
-		return errors.E(ctx, errors.CatInternal, errors.TypeBug, err)
+	if plan == nil {
+		return ErrNotFound
+	}
+	if plan.State == nil {
+		return fmt.Errorf("plan(%s) has nil State", id)
 	}
 
-	e.runPlan(ctx, plan)
+	switch {
+	case plan.State.Status == workflow.NotStarted:
+		if err := e.validateStartState(ctx, plan); err != nil {
+			return err
+		}
+	case plan.State.Status == workflow.Running:
+		// Plan is already running.
+		return nil
+	case plan.State.Status > workflow.Running:
+		// Plan is already finished.
+		return nil
+	}
+
+	// This ensures that before we return that this will be running.
+	plan.State.Status = workflow.Running
+	plan.State.Start = e.now()
+	if err := e.store.UpdatePlan(ctx, plan); err != nil {
+		return err
+	}
+
+	e.runPlan(ctx, plan, nil)
 
 	return nil
 }
@@ -191,18 +215,28 @@ func (e *Plans) recover(ctx context.Context) error {
 
 	if len(req.Data.plans) == 0 {
 		context.Log(ctx).Info("no plans to recover")
+		return nil
 	}
 
+	// recoveryStarted is used to wait for all the recovered plans to start running.
+	// runPlan starts its own goroutine and this is used to signal when the plan has started.
+	recoveryStarted := make([]chan struct{}, 0, len(req.Data.plans))
 	for _, plan := range req.Data.plans {
 		context.Log(ctx).Info("recovered plan", "id", plan.ID, "status", plan.State.Status)
-		e.runPlan(ctx, plan)
+		w := make(chan struct{})
+		recoveryStarted = append(recoveryStarted, w)
+		e.runPlan(ctx, plan, w)
+	}
+
+	for _, rs := range recoveryStarted {
+		<-rs
 	}
 
 	return nil
 }
 
 // runPlan runs a Plan through the statemachine. This is a non-blocking call.
-func (e *Plans) runPlan(ctx context.Context, plan *workflow.Plan) {
+func (e *Plans) runPlan(ctx context.Context, plan *workflow.Plan, recoveryStarted chan struct{}) {
 	runCtx, cancel := context.WithCancel(context.WithoutCancel(ctx))
 
 	e.stoppers.Set(plan.ID, cancel)
@@ -220,14 +254,15 @@ func (e *Plans) runPlan(ctx context.Context, plan *workflow.Plan) {
 			}()
 
 			next := e.states.Start
-			if plan.State.Status == workflow.Running {
+			if recoveryStarted != nil {
 				next = e.states.Recovery
 			}
 
 			req := statemachine.Request[sm.Data]{
 				Ctx: runCtx,
 				Data: sm.Data{
-					Plan: plan,
+					Plan:            plan,
+					RecoveryStarted: recoveryStarted,
 				},
 				Next: next,
 			}
@@ -244,11 +279,22 @@ func (e *Plans) now() time.Time {
 }
 
 // Wait waits for a Plan to finish execution. Cancelling the Context will stop waiting and
-// return context.Canceled. If the Plan is not found, this will return ErrNotFound.
+// return context.Canceled.
 func (e *Plans) Wait(ctx context.Context, id uuid.UUID) error {
 	waiter, ok := e.waiters.Get(id)
 	if !ok {
-		return ErrNotFound
+		// Plan is not running, check if it exists.
+		plan, err := e.store.Read(ctx, id)
+		if err != nil {
+			return err
+		}
+		switch plan.GetState().Status {
+		case workflow.NotStarted:
+			return errors.E(ctx, errors.CatUser, errors.TypeParameter, fmt.Errorf("plan(%s) is not started", id))
+		case workflow.Running:
+			return errors.E(ctx, errors.CatInternal, errors.TypeBug, fmt.Errorf("bug: plan(%s) has a running state, but isn't in the waiters", id))
+		}
+		return nil
 	}
 
 	select {

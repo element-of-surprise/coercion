@@ -121,7 +121,7 @@ func (r reader) fetchNonRunningPlan(ctx context.Context, containerName string, i
 
 // fetchRunningPlan fetches a running plan by reconstructing it from planEntry and all sub-objects.
 func (r reader) fetchRunningPlan(ctx context.Context, containerName string, id uuid.UUID, lr storage.ListResult) (*workflow.Plan, error) {
-	entry, err := r.fetchPlanEntry(ctx, containerName, id)
+	entry, err := r.fetchPlanEntry(ctx, id)
 	if err != nil {
 		return nil, errors.E(ctx, errors.CatInternal, errors.TypeStorageGet, fmt.Errorf("failed to fetch planEntry: %w", err))
 	}
@@ -184,7 +184,9 @@ func (r reader) fetchRunningPlan(ctx context.Context, containerName string, id u
 }
 
 // fetchPlanEntry downloads and unmarshals a planEntry.
-func (r reader) fetchPlanEntry(ctx context.Context, containerName string, planID uuid.UUID) (planEntry, error) {
+func (r reader) fetchPlanEntry(ctx context.Context, planID uuid.UUID) (planEntry, error) {
+	containerName := containerForPlan(r.prefix, planID)
+
 	blobName := planEntryBlobName(planID)
 	data, err := r.client.GetBlob(ctx, containerName, blobName)
 	if err != nil {

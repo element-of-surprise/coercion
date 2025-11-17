@@ -176,12 +176,6 @@ func (r reader) buildSearchQuery(filters storage.Filters) (string, []any, map[st
 func (r reader) List(ctx context.Context, limit int) (chan storage.Stream[storage.ListResult], error) {
 	const listPlans = `SELECT id, group_id, name, descr, submit_time, state_status, state_start, state_end FROM plans ORDER BY submit_time DESC`
 
-	conn, err := r.pool.Take(ctx)
-	if err != nil {
-		return nil, errors.E(ctx, errors.CatInternal, errors.TypeConn, fmt.Errorf("couldn't get a connection from the pool: %w", err))
-	}
-	defer r.pool.Put(conn)
-
 	named := map[string]any{}
 
 	q := listPlans
@@ -190,11 +184,17 @@ func (r reader) List(ctx context.Context, limit int) (chan storage.Stream[storag
 		named["$limit"] = limit
 	}
 
+	conn, err := r.pool.Take(ctx)
+	if err != nil {
+		return nil, errors.E(ctx, errors.CatInternal, errors.TypeConn, fmt.Errorf("couldn't get a connection from the pool: %w", err))
+	}
 	results := make(chan storage.Stream[storage.ListResult], 1)
 
 	context.Pool(ctx).Submit(
 		ctx,
 		func() {
+			defer r.pool.Put(conn)
+			defer close(results)
 			err := sqlitex.Execute(
 				conn,
 				q,
