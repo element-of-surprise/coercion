@@ -218,16 +218,18 @@ func (e *Plans) recover(ctx context.Context) error {
 		return nil
 	}
 
-	waiters := make([]chan struct{}, 0, len(req.Data.plans))
+	// recoveryStarted is used to wait for all the recovered plans to start running.
+	// runPlan starts its own goroutine and this is used to signal when the plan has started.
+	recoveryStarted := make([]chan struct{}, 0, len(req.Data.plans))
 	for _, plan := range req.Data.plans {
 		context.Log(ctx).Info("recovered plan", "id", plan.ID, "status", plan.State.Status)
 		w := make(chan struct{})
-		waiters = append(waiters, w)
+		recoveryStarted = append(recoveryStarted, w)
 		e.runPlan(ctx, plan, w)
 	}
 
-	for _, w := range waiters {
-		<-w
+	for _, rs := range recoveryStarted {
+		<-rs
 	}
 
 	return nil
