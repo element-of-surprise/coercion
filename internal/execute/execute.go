@@ -4,6 +4,7 @@ package execute
 
 import (
 	"fmt"
+	"testing"
 	"time"
 
 	"github.com/element-of-surprise/coercion/internal/execute/sm"
@@ -178,10 +179,8 @@ func (e *Plans) Start(ctx context.Context, id uuid.UUID) error {
 			return err
 		}
 	case plan.State.Status == workflow.Running:
-		// Plan is already running.
 		return nil
 	case plan.State.Status > workflow.Running:
-		// Plan is already finished.
 		return nil
 	}
 
@@ -214,7 +213,7 @@ func (e *Plans) recover(ctx context.Context) error {
 	}
 
 	if len(req.Data.plans) == 0 {
-		context.Log(ctx).Info("no plans to recover")
+		context.Log(ctx).Info("coercion: no plans to recover")
 		return nil
 	}
 
@@ -222,7 +221,7 @@ func (e *Plans) recover(ctx context.Context) error {
 	// runPlan starts its own goroutine and this is used to signal when the plan has started.
 	recoveryStarted := make([]chan struct{}, 0, len(req.Data.plans))
 	for _, plan := range req.Data.plans {
-		context.Log(ctx).Info("recovered plan", "id", plan.ID, "status", plan.State.Status)
+		context.Log(ctx).Info("coercion: recovered plan", "id", plan.ID, "status", plan.State.Status)
 		w := make(chan struct{})
 		recoveryStarted = append(recoveryStarted, w)
 		e.runPlan(ctx, plan, w)
@@ -269,7 +268,12 @@ func (e *Plans) runPlan(ctx context.Context, plan *workflow.Plan, recoveryStarte
 
 			// NOTE: We are not handling the error here, as we are not returning it to the caller
 			// and doesn't actually matter. All errors are encapsulated in the Plan's state.
-			e.runner(plan.Name, req)
+			if _, err := e.runner(plan.Name, req); err != nil {
+				context.Log(ctx).Error("plan execution failed", "id", plan.ID, "error", err)
+				if testing.Testing() {
+					panic(err)
+				}
+			}
 		},
 	)
 }

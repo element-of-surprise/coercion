@@ -14,6 +14,7 @@ import (
 	"slices"
 	"testing"
 
+	"github.com/google/uuid"
 	"github.com/gostdlib/base/concurrency/sync"
 
 	"github.com/gostdlib/base/context"
@@ -76,6 +77,7 @@ func WithCapture(capture *CaptureStmts) Option {
 // New is the constructor for *ReadWriter. root is the root path for the storage.
 // If the root path does not exist, it will be created.
 func New(ctx context.Context, root string, reg *registry.Register, options ...Option) (*Vault, error) {
+	const dbName = "workstream.db"
 	ctx = context.WithoutCancel(ctx)
 
 	r := &Vault{
@@ -94,7 +96,21 @@ func New(ctx context.Context, root string, reg *registry.Register, options ...Op
 		inMem = true
 	}
 
-	if !inMem {
+	var pool *sqlitex.Pool
+	if inMem {
+		dsn := fmt.Sprintf("file:%s?mode=memory&cache=shared", uuid.New().String())
+		var err error
+		pool, err = sqlitex.NewPool(dsn, sqlitex.PoolOptions{PoolSize: 1000})
+		if err != nil {
+			return nil, errors.E(ctx, nil, nil, fmt.Errorf("failed to create connection pool: %w", err))
+		}
+	} else {
+		path := filepath.Join(root, "workstream.db")
+		var flags sqlite.OpenFlags
+		for _, flag := range r.openFlags {
+			flags |= flag
+		}
+
 		_, err := os.Stat(root)
 		if err != nil {
 			if os.IsNotExist(err) {
@@ -105,19 +121,11 @@ func New(ctx context.Context, root string, reg *registry.Register, options ...Op
 				return nil, errors.E(ctx, errors.CatInternal, errors.TypeFS, fmt.Errorf("storage path(%s) could not be accessed: %w", root, err))
 			}
 		}
-	}
 
-	path := filepath.Join(root, "workstream.db")
-	var flags sqlite.OpenFlags
-	for _, flag := range r.openFlags {
-		flags |= flag
-	}
-
-	// NOTE: Pool is set to 1. I'm having a problem with multiple conns seeing the commits of each other.
-	// Such as even Pool creation. Not sure what is wrong. PoolSize 1 is a workaround for the moment.
-	pool, err := sqlitex.NewPool(path, sqlitex.PoolOptions{Flags: flags, PoolSize: 1})
-	if err != nil {
-		return nil, errors.E(ctx, errors.CatInternal, errors.TypeStorageCreate, fmt.Errorf("couldn't create sqlite pool: %w", err))
+		pool, err = sqlitex.NewPool(path, sqlitex.PoolOptions{Flags: flags, PoolSize: 1000})
+		if err != nil {
+			return nil, errors.E(ctx, errors.CatInternal, errors.TypeStorageCreate, fmt.Errorf("couldn't create sqlite pool: %w", err))
+		}
 	}
 
 	conn, err := pool.Take(ctx)
