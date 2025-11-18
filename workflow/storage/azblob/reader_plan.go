@@ -24,7 +24,7 @@ func (r reader) fetchPlan(ctx context.Context, id uuid.UUID) (*workflow.Plan, er
 	plan, err := r.fetchPlanFromContainer(ctx, id)
 	if err != nil {
 		if blobops.IsNotFound(err) {
-			return nil, errors.E(ctx, errors.CatUser, errors.TypeParameter, fmt.Errorf("plan with ID %s not found", id))
+			return nil, errors.E(ctx, errors.CatUser, errors.TypeParameter, fmt.Errorf("plan with ID %s not found: %w", id, storage.ErrNotFound))
 		}
 		return nil, errors.E(ctx, errors.CatInternal, errors.TypeStorageGet, err)
 	}

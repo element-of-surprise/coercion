@@ -14,6 +14,9 @@ import (
 	"github.com/google/uuid"
 )
 
+// ErrNotFound is returned when an object is not found in storage.
+var ErrNotFound = fmt.Errorf("plan not found")
+
 // Filters is a filter for searching Plans.
 type Filters struct {
 	// ByIDs is a list of Plan IDs to search by.

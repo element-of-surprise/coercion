@@ -6,6 +6,7 @@ import (
 	"github.com/gostdlib/base/context"
 
 	"github.com/element-of-surprise/coercion/workflow"
+	"github.com/element-of-surprise/coercion/workflow/storage"
 	"github.com/google/uuid"
 	"zombiezen.com/go/sqlite"
 	"zombiezen.com/go/sqlite/sqlitex"
@@ -21,6 +22,7 @@ func (p reader) fetchPlan(ctx context.Context, id uuid.UUID) (*workflow.Plan, er
 	}
 	defer p.pool.Put(conn)
 
+	found := false
 	err = sqlitex.Execute(
 		conn,
 		fetchPlanByID,
@@ -29,6 +31,7 @@ func (p reader) fetchPlan(ctx context.Context, id uuid.UUID) (*workflow.Plan, er
 				"$id": id.String(),
 			},
 			ResultFunc: func(stmt *sqlite.Stmt) error {
+				found = true
 				var err error
 				plan.ID, err = uuid.Parse(stmt.GetText("id"))
 				if err != nil {
@@ -88,6 +91,9 @@ func (p reader) fetchPlan(ctx context.Context, id uuid.UUID) (*workflow.Plan, er
 	defer sqlitex.Transaction(conn)(&err)
 	if err != nil {
 		return nil, fmt.Errorf("couldn't fetch plan: %w", err)
+	}
+	if !found {
+		return nil, storage.ErrNotFound
 	}
 	return plan, nil
 }
