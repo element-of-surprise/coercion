@@ -145,7 +145,7 @@ type fakeRunner struct {
 	ran    chan struct{}
 }
 
-func (r *fakeRunner) Run(name string, req statemachine.Request[sm.Data], options ...statemachine.Option[sm.Data]) (statemachine.Request[sm.Data], error) {
+func (r *fakeRunner) Run(name string, req statemachine.Request[sm.Data], options ...statemachine.Option) (statemachine.Request[sm.Data], error) {
 	defer close(r.ran)
 	r.called = true
 	r.req = req

@@ -7,6 +7,7 @@ require (
 	github.com/Azure/azure-sdk-for-go/sdk/azidentity v1.13.0
 	github.com/Azure/azure-sdk-for-go/sdk/data/azcosmos v1.2.0
 	github.com/Azure/azure-sdk-for-go/sdk/storage/azblob v1.6.3
+	github.com/Azure/retry v0.0.0-20250701224816-85c6a88f883d
 	github.com/brunoga/deep v1.2.4
 	github.com/fatih/color v1.18.0
 	github.com/go-git/go-git/v5 v5.14.0
@@ -16,7 +17,7 @@ require (
 	github.com/google/go-github/v61 v61.0.0
 	github.com/google/goexpect v0.0.0-20210430020637-ab937bf7fd6f
 	github.com/google/uuid v1.6.0
-	github.com/gostdlib/base v0.0.0-20251006165448-0ffd4328fcdd
+	github.com/gostdlib/base v0.0.0-20251121185223-2a755836ccf8
 	github.com/inancgumus/screen v0.0.0-20190314163918-06e984b86ed3
 	github.com/kylelemons/godebug v1.1.0
 	github.com/rodaine/table v1.3.0
@@ -32,7 +33,6 @@ require (
 	dario.cat/mergo v1.0.0 // indirect
 	github.com/Azure/azure-sdk-for-go v68.0.0+incompatible // indirect
 	github.com/Azure/azure-sdk-for-go/sdk/internal v1.11.2 // indirect
-	github.com/Azure/retry v0.0.0-20250701224816-85c6a88f883d // indirect
 	github.com/AzureAD/microsoft-authentication-library-for-go v1.5.0 // indirect
 	github.com/Microsoft/go-winio v0.6.2 // indirect
 	github.com/ProtonMail/go-crypto v1.1.5 // indirect
