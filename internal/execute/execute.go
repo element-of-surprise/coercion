@@ -4,7 +4,6 @@ package execute
 
 import (
 	"fmt"
-	"testing"
 	"time"
 
 	"github.com/element-of-surprise/coercion/internal/execute/sm"
@@ -26,7 +25,7 @@ var (
 
 // runner runs a Plan through the statemachine.
 // In production this is the statemachine.Run function.
-type runner func(name string, req statemachine.Request[sm.Data], options ...statemachine.Option[sm.Data]) (statemachine.Request[sm.Data], error)
+type runner func(name string, req statemachine.Request[sm.Data], options ...statemachine.Option) (statemachine.Request[sm.Data], error)
 
 // validator validates a workflow.Object.
 type validator func(walk.Item) error
@@ -270,9 +269,6 @@ func (e *Plans) runPlan(ctx context.Context, plan *workflow.Plan, recoveryStarte
 			// and doesn't actually matter. All errors are encapsulated in the Plan's state.
 			if _, err := e.runner(plan.Name, req); err != nil {
 				context.Log(ctx).Error("plan execution failed", "id", plan.ID, "error", err)
-				if testing.Testing() {
-					panic(err)
-				}
 			}
 		},
 	)
