@@ -32,12 +32,13 @@ func setupRecoveryTest(t *testing.T) (*blobops.Fake, recovery) {
 
 	// Create reader
 	r := reader{
-		mu:           planlocks.New(ctx),
-		readFlight:   &singleflight.Group{},
-		existsFlight: &singleflight.Group{},
-		prefix:       prefix,
-		client:       fakeClient,
-		reg:          reg,
+		mu:            planlocks.New(ctx),
+		readFlight:    &singleflight.Group{},
+		existsFlight:  &singleflight.Group{},
+		prefix:        prefix,
+		client:        fakeClient,
+		reg:           reg,
+		retentionDays: 14,
 	}
 
 	// Create uploader

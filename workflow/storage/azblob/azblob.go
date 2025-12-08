@@ -66,6 +66,41 @@ type Vault struct {
 	private.Storage
 }
 
+// Args are the arguments for creating a new Vault.
+type Args struct {
+	// Prefix is the container and blob prefix.
+	Prefix string
+	// Endpoint is the Azure Blob Storage account endpoint.
+	Endpoint string
+	// Cred is the Azure token credential.
+	Cred azcore.TokenCredential
+	// Reg is the coercion registry.
+	Reg *registry.Register
+	// RetentionDays is the number of days to retain plan data for recovery. This usually corresponds to
+	// automatic deletions in azblob storage lifecycle policies. However, this is used to limit recovery
+	// scope so even if not setting those, this should be set to a reasonable value.
+	RetentionDays int
+}
+
+func (a *Args) validate(ctx context.Context) error {
+	if a.RetentionDays <= 0 {
+		return errors.E(ctx, errors.CatInternal, errors.TypeBug, errors.New("retentionDays must be greater than 0"))
+	}
+	if a.Prefix == "" {
+		return errors.E(ctx, errors.CatInternal, errors.TypeBug, errors.New("prefix cannot be empty"))
+	}
+	if a.Endpoint == "" {
+		return errors.E(ctx, errors.CatInternal, errors.TypeBug, errors.New("endpoint cannot be empty"))
+	}
+	if a.Cred == nil {
+		return errors.E(ctx, errors.CatInternal, errors.TypeBug, errors.New("credential cannot be nil"))
+	}
+	if a.Reg == nil {
+		return errors.E(ctx, errors.CatInternal, errors.TypeBug, errors.New("registry cannot be nil"))
+	}
+	return nil
+}
+
 // Option is an option for configuring a Vault.
 type Option func(*Vault) error
 
@@ -73,27 +108,16 @@ type Option func(*Vault) error
 // to namespace blobs for this instance. endpoint is the Azure Blob Storage account endpoint
 // (e.g., https://mystorageaccount.blob.core.windows.net). cred is the Azure token credential.
 // reg is the coercion registry.
-func New(ctx context.Context, prefix, endpoint string, cred azcore.TokenCredential, reg *registry.Register, retentionDays int, options ...Option) (*Vault, error) {
+func New(ctx context.Context, args Args, options ...Option) (*Vault, error) {
 	ctx = context.WithoutCancel(ctx)
-	if retentionDays <= 0 {
-		return nil, errors.E(ctx, errors.CatInternal, errors.TypeBug, errors.New("retentionDays must be greater than 0"))
-	}
-	if prefix == "" {
-		return nil, errors.E(ctx, errors.CatInternal, errors.TypeBug, errors.New("prefix cannot be empty"))
-	}
-	if endpoint == "" {
-		return nil, errors.E(ctx, errors.CatInternal, errors.TypeBug, errors.New("endpoint cannot be empty"))
-	}
-	if cred == nil {
-		return nil, errors.E(ctx, errors.CatInternal, errors.TypeBug, errors.New("credential cannot be nil"))
-	}
-	if reg == nil {
-		return nil, errors.E(ctx, errors.CatInternal, errors.TypeBug, errors.New("registry cannot be nil"))
+
+	if err := args.validate(ctx); err != nil {
+		return nil, err
 	}
 
 	v := &Vault{
-		prefix:   prefix,
-		endpoint: endpoint,
+		prefix:   args.Prefix,
+		endpoint: args.Endpoint,
 		mu:       planlocks.New(ctx),
 	}
 
@@ -103,7 +127,7 @@ func New(ctx context.Context, prefix, endpoint string, cred azcore.TokenCredenti
 		}
 	}
 
-	client, err := azblob.NewClient(endpoint, cred, nil)
+	client, err := azblob.NewClient(args.Endpoint, args.Cred, nil)
 	if err != nil {
 		return nil, errors.E(ctx, errors.CatInternal, errors.TypeConn, fmt.Errorf("failed to create blob client: %w", err))
 	}
@@ -121,22 +145,22 @@ func New(ctx context.Context, prefix, endpoint string, cred azcore.TokenCredenti
 		mu:            v.mu,
 		readFlight:    &singleflight.Group{},
 		existsFlight:  &singleflight.Group{},
-		prefix:        prefix,
+		prefix:        args.Prefix,
 		client:        opsClient,
-		reg:           reg,
-		retentionDays: retentionDays,
+		reg:           args.Reg,
+		retentionDays: args.RetentionDays,
 	}
 	v.creator = creator{
 		mu:       v.mu,
-		prefix:   prefix,
-		endpoint: endpoint,
+		prefix:   args.Prefix,
+		endpoint: args.Endpoint,
 		reader:   v.reader,
 		uploader: uploader,
 	}
-	v.updater = newUpdater(v.mu, prefix, opsClient, endpoint, uploader)
+	v.updater = newUpdater(v.mu, args.Prefix, opsClient, args.Endpoint, uploader)
 	v.deleter = deleter{
 		mu:     v.mu,
-		prefix: prefix,
+		prefix: args.Prefix,
 		client: opsClient,
 		reader: v.reader,
 	}
@@ -145,7 +169,7 @@ func New(ctx context.Context, prefix, endpoint string, cred azcore.TokenCredenti
 		reader:        v.reader,
 		updater:       v.updater,
 		uploader:      uploader,
-		retentionDays: retentionDays,
+		retentionDays: args.RetentionDays,
 	}
 
 	return v, nil

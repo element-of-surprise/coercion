@@ -91,7 +91,6 @@ func recoveryContainerName(ctx context.Context, reader reader, cn string) (strin
 
 	notCompleted := 0
 	for _, lr := range results {
-		// We do the Before() check because any plan
 		if lr.State.Status == workflow.NotStarted || lr.State.Status == workflow.Running {
 			notCompleted++
 		}
