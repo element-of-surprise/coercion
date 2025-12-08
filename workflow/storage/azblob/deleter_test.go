@@ -28,12 +28,13 @@ func setupDeleterTest(t *testing.T) (*blobops.Fake, deleter) {
 
 	// Create reader
 	r := reader{
-		mu:           planlocks.New(ctx),
-		readFlight:   &singleflight.Group{},
-		existsFlight: &singleflight.Group{},
-		prefix:       prefix,
-		client:       fakeClient,
-		reg:          reg,
+		mu:            planlocks.New(ctx),
+		readFlight:    &singleflight.Group{},
+		existsFlight:  &singleflight.Group{},
+		prefix:        prefix,
+		client:        fakeClient,
+		reg:           reg,
+		retentionDays: 30,
 	}
 
 	// Create deleter

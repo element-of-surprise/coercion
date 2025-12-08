@@ -28,11 +28,9 @@ import (
 	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob"
 	"github.com/google/uuid"
 	"github.com/gostdlib/base/context"
-	"github.com/gostdlib/base/retry/exponential"
 	"golang.org/x/sync/singleflight"
 
 	"github.com/element-of-surprise/coercion/internal/private"
-	"github.com/element-of-surprise/coercion/plugins"
 	"github.com/element-of-surprise/coercion/plugins/registry"
 	"github.com/element-of-surprise/coercion/workflow"
 	"github.com/element-of-surprise/coercion/workflow/errors"
@@ -68,13 +66,39 @@ type Vault struct {
 	private.Storage
 }
 
-// Mark for delete
-var backoff *exponential.Backoff
+// Args are the arguments for creating a new Vault.
+type Args struct {
+	// Prefix is the container and blob prefix.
+	Prefix string
+	// Endpoint is the Azure Blob Storage account endpoint.
+	Endpoint string
+	// Cred is the Azure token credential.
+	Cred azcore.TokenCredential
+	// Reg is the coercion registry.
+	Reg *registry.Register
+	// RetentionDays is the number of days to retain plan data for recovery. This usually corresponds to
+	// automatic deletions in azblob storage lifecycle policies. However, this is used to limit recovery
+	// scope so even if not setting those, this should be set to a reasonable value.
+	RetentionDays int
+}
 
-func init() {
-	policy := plugins.SecondsRetryPolicy()
-	policy.MaxAttempts = 5
-	backoff = exponential.Must(exponential.New(exponential.WithPolicy(policy)))
+func (a *Args) validate(ctx context.Context) error {
+	if a.RetentionDays <= 0 {
+		return errors.E(ctx, errors.CatInternal, errors.TypeBug, errors.New("retentionDays must be greater than 0"))
+	}
+	if a.Prefix == "" {
+		return errors.E(ctx, errors.CatInternal, errors.TypeBug, errors.New("prefix cannot be empty"))
+	}
+	if a.Endpoint == "" {
+		return errors.E(ctx, errors.CatInternal, errors.TypeBug, errors.New("endpoint cannot be empty"))
+	}
+	if a.Cred == nil {
+		return errors.E(ctx, errors.CatInternal, errors.TypeBug, errors.New("credential cannot be nil"))
+	}
+	if a.Reg == nil {
+		return errors.E(ctx, errors.CatInternal, errors.TypeBug, errors.New("registry cannot be nil"))
+	}
+	return nil
 }
 
 // Option is an option for configuring a Vault.
@@ -84,25 +108,16 @@ type Option func(*Vault) error
 // to namespace blobs for this instance. endpoint is the Azure Blob Storage account endpoint
 // (e.g., https://mystorageaccount.blob.core.windows.net). cred is the Azure token credential.
 // reg is the coercion registry.
-func New(ctx context.Context, prefix, endpoint string, cred azcore.TokenCredential, reg *registry.Register, options ...Option) (*Vault, error) {
+func New(ctx context.Context, args Args, options ...Option) (*Vault, error) {
 	ctx = context.WithoutCancel(ctx)
 
-	if prefix == "" {
-		return nil, errors.E(ctx, errors.CatInternal, errors.TypeBug, errors.New("prefix cannot be empty"))
-	}
-	if endpoint == "" {
-		return nil, errors.E(ctx, errors.CatInternal, errors.TypeBug, errors.New("endpoint cannot be empty"))
-	}
-	if cred == nil {
-		return nil, errors.E(ctx, errors.CatInternal, errors.TypeBug, errors.New("credential cannot be nil"))
-	}
-	if reg == nil {
-		return nil, errors.E(ctx, errors.CatInternal, errors.TypeBug, errors.New("registry cannot be nil"))
+	if err := args.validate(ctx); err != nil {
+		return nil, err
 	}
 
 	v := &Vault{
-		prefix:   prefix,
-		endpoint: endpoint,
+		prefix:   args.Prefix,
+		endpoint: args.Endpoint,
 		mu:       planlocks.New(ctx),
 	}
 
@@ -112,7 +127,7 @@ func New(ctx context.Context, prefix, endpoint string, cred azcore.TokenCredenti
 		}
 	}
 
-	client, err := azblob.NewClient(endpoint, cred, nil)
+	client, err := azblob.NewClient(args.Endpoint, args.Cred, nil)
 	if err != nil {
 		return nil, errors.E(ctx, errors.CatInternal, errors.TypeConn, fmt.Errorf("failed to create blob client: %w", err))
 	}
@@ -127,35 +142,43 @@ func New(ctx context.Context, prefix, endpoint string, cred azcore.TokenCredenti
 	}
 
 	v.reader = reader{
-		mu:           v.mu,
-		readFlight:   &singleflight.Group{},
-		existsFlight: &singleflight.Group{},
-		prefix:       prefix,
-		client:       opsClient,
-		reg:          reg,
+		mu:            v.mu,
+		readFlight:    &singleflight.Group{},
+		existsFlight:  &singleflight.Group{},
+		prefix:        args.Prefix,
+		client:        opsClient,
+		reg:           args.Reg,
+		retentionDays: args.RetentionDays,
 	}
 	v.creator = creator{
 		mu:       v.mu,
-		prefix:   prefix,
-		endpoint: endpoint,
+		prefix:   args.Prefix,
+		endpoint: args.Endpoint,
 		reader:   v.reader,
 		uploader: uploader,
 	}
-	v.updater = newUpdater(v.mu, prefix, opsClient, endpoint, uploader)
+	v.updater = newUpdater(v.mu, args.Prefix, opsClient, args.Endpoint, uploader)
 	v.deleter = deleter{
 		mu:     v.mu,
-		prefix: prefix,
+		prefix: args.Prefix,
 		client: opsClient,
 		reader: v.reader,
 	}
 	v.closer = closer{}
 	v.recovery = recovery{
-		reader:   v.reader,
-		updater:  v.updater,
-		uploader: uploader,
+		reader:        v.reader,
+		updater:       v.updater,
+		uploader:      uploader,
+		retentionDays: args.RetentionDays,
 	}
 
 	return v, nil
+}
+
+// ReadDirect reads a plan from storage bypassing the retention check.
+// This is intended for testing purposes only.
+func (v *Vault) ReadDirect(ctx context.Context, id uuid.UUID) (*workflow.Plan, error) {
+	return v.reader.ReadDirect(ctx, id)
 }
 
 // Teardown deletes all containers and blobs with the given prefix. This is intended for use in tests only.

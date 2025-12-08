@@ -3,6 +3,7 @@ package azblob
 import (
 	"fmt"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/gostdlib/base/context"
@@ -18,9 +19,11 @@ var _ storage.Recovery = recovery{}
 
 // recovery implements the storage.Recovery interface.
 type recovery struct {
-	reader   reader
-	updater  updater
-	uploader *uploader
+	retentionDays int
+	reader        reader
+	updater       updater
+	uploader      *uploader
+	nower         func() time.Time
 
 	testRecoverPlan func(ctx context.Context, containerName string, planID uuid.UUID) error
 
@@ -37,7 +40,10 @@ type recovery struct {
 // 4. Recreate any missing blobs from the plan hierarchy
 func (r recovery) Recovery(ctx context.Context) error {
 	// List all plans in recent containers
-	containers := containerNames(r.reader.prefix)
+	containers, err := recoveryContainerNames(ctx, r.reader.prefix, r.reader, r.retentionDays)
+	if err != nil {
+		return err
+	}
 
 	for _, containerName := range containers {
 		if err := r.recoverPlansInContainer(ctx, containerName); err != nil {
@@ -46,6 +52,13 @@ func (r recovery) Recovery(ctx context.Context) error {
 	}
 
 	return nil
+}
+
+func (r recovery) now() time.Time {
+	if r.nower != nil {
+		return r.nower()
+	}
+	return time.Now().UTC()
 }
 
 // recoverPlansInContainer recovers all plans in a specific container.
@@ -66,6 +79,9 @@ func (r recovery) recoverPlansInContainer(ctx context.Context, containerName str
 	g := context.Pool(ctx).Limited(10).Group()
 
 	for _, planResult := range planBlobs {
+		if time.Unix(planResult.ID.Time().UnixTime()).Before(r.now().AddDate(0, 0, -r.reader.retentionDays)) {
+			continue
+		}
 		_ = g.Go(
 			ctx,
 			func(ctx context.Context) error {

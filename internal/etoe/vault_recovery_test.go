@@ -10,11 +10,24 @@ import (
 	workstream "github.com/element-of-surprise/coercion"
 	"github.com/element-of-surprise/coercion/workflow"
 	"github.com/element-of-surprise/coercion/workflow/builder"
+	"github.com/element-of-surprise/coercion/workflow/storage/azblob"
 	"github.com/element-of-surprise/coercion/workflow/utils/clone"
+	"github.com/element-of-surprise/coercion/workflow/utils/walk"
+	gofrsUUID "github.com/gofrs/uuid/v5"
+	"github.com/google/uuid"
 	"github.com/gostdlib/base/context"
 
 	testplugin "github.com/element-of-surprise/coercion/internal/execute/sm/testing/plugins"
 )
+
+// newV7FromTime creates a UUIDv7 with the specified timestamp.
+func newV7FromTime(t time.Time) uuid.UUID {
+	u, err := gofrsUUID.NewV7AtTime(t)
+	if err != nil {
+		panic(fmt.Sprintf("failed to create UUIDv7: %v", err))
+	}
+	return uuid.UUID(u)
+}
 
 // TestStorageRecovery tests the recovery functionality for recovery with any vault.
 // It is not as thorough as recovery_test.go, which tests the internal recovery logic using
@@ -27,6 +40,13 @@ func TestStorageRecovery(t *testing.T) {
 	ctx := context.Background()
 
 	initGlobals()
+
+	// For azblob, insert an old running plan (2 days + 1 hour old) directly via the vault.
+	// This plan should NOT be recovered because it's outside the retention period.
+	var oldPlanID uuid.UUID
+	if *vaultType == "azblob" {
+		oldPlanID = insertOldRunningPlan(t, ctx)
+	}
 
 	// Create initial workstream
 	ws, err := workstream.New(ctx, reg, vault)
@@ -168,6 +188,11 @@ func TestStorageRecovery(t *testing.T) {
 
 	pConfig.Print("Workflow result: \n", result)
 	log.Println("All validation checks passed")
+
+	// For azblob, verify that the old plan was NOT recovered
+	if *vaultType == "azblob" {
+		verifyOldPlanNotRecovered(t, ctx, oldPlanID)
+	}
 }
 
 // createLongRunningPlan creates a plan with actions that sleep for a significant duration
@@ -255,4 +280,116 @@ func createLongRunningPlan() (*workflow.Plan, error) {
 	}
 
 	return plan, nil
+}
+
+// insertOldRunningPlan creates and stores a running plan with a UUID from 2 days + 1 hour ago.
+// This plan should be outside the retention period and should NOT be recovered.
+func insertOldRunningPlan(t *testing.T, ctx context.Context) uuid.UUID {
+	t.Helper()
+
+	// Create a plan with a UUID from 2 days + 1 hour ago
+	oldTime := time.Now().UTC().AddDate(0, 0, -2).Add(-1 * time.Hour)
+
+	plan, err := createOldRunningPlan(oldTime)
+	if err != nil {
+		t.Fatalf("Failed to create old plan: %v", err)
+	}
+	oldPlanID := plan.ID
+	log.Printf("Creating old running plan with ID %s (timestamp: %s)", oldPlanID, oldTime)
+
+	// Store the plan directly in the vault (not via workstream)
+	if err := vault.Create(ctx, plan); err != nil {
+		t.Fatalf("Failed to store old plan: %v", err)
+	}
+
+	log.Printf("Stored old running plan with ID %s", oldPlanID)
+	return oldPlanID
+}
+
+// createOldRunningPlan creates a simple running plan with the specified ID and submit time.
+func createOldRunningPlan(submitTime time.Time) (*workflow.Plan, error) {
+	ctx := context.Background()
+
+	seqs := &workflow.Sequence{
+		Key:   workflow.NewV7(),
+		Name:  "old-sequence",
+		Descr: "Sequence for retention test",
+		Actions: []*workflow.Action{
+			{
+				ID:      newV7FromTime(submitTime.Add(2 * time.Second)),
+				Name:    "old-action",
+				Descr:   "Action for retention test",
+				Plugin:  testplugin.Name,
+				Timeout: 30 * time.Second,
+				Req:     testplugin.Req{Sleep: 1 * time.Second, Arg: "old"},
+			},
+		},
+	}
+
+	build, err := builder.New("old-retention-test", "Test plan for retention behavior")
+	if err != nil {
+		return nil, fmt.Errorf("failed to create builder: %w", err)
+	}
+
+	build.AddBlock(
+		builder.BlockArgs{
+			Key:         workflow.NewV7(),
+			Name:        "old-block",
+			Descr:       "Block for retention test",
+			Concurrency: 1,
+		},
+	)
+	build.AddSequence(clone.Sequence(ctx, seqs, cloneOpts...)).Up()
+
+	plan, err := build.Plan()
+	if err != nil {
+		return nil, fmt.Errorf("failed to build plan: %w", err)
+	}
+
+	type setIDer interface {
+		SetID(uuid.UUID)
+	}
+
+	i := 0
+	for item := range walk.Plan(plan) {
+		item.Value.(setIDer).SetID(newV7FromTime(submitTime.Add(time.Duration(i) * time.Second)))
+		i++
+	}
+
+	// Override the plan ID with our custom old UUID
+	plan.SubmitTime = submitTime
+	plan.State = &workflow.State{
+		Status: workflow.Running,
+		Start:  submitTime,
+	}
+
+	return plan, nil
+}
+
+// verifyOldPlanNotRecovered checks that the old plan was NOT recovered by reading it
+// directly (bypassing retention check) and verifying its state is still Running.
+func verifyOldPlanNotRecovered(t *testing.T, ctx context.Context, oldPlanID uuid.UUID) {
+	t.Helper()
+
+	log.Printf("Verifying old plan %s was NOT recovered", oldPlanID)
+
+	azblobVault, ok := vault.(*azblob.Vault)
+	if !ok {
+		t.Fatalf("Expected vault to be *azblob.Vault, got %T", vault)
+	}
+
+	// Read the plan directly (bypassing retention check)
+	readPlan, err := azblobVault.ReadDirect(ctx, oldPlanID)
+	if err != nil {
+		t.Fatalf("Failed to read old plan directly: %v", err)
+	}
+
+	// Verify the plan is still in Running state (not recovered/modified)
+	if readPlan.State.Status != workflow.Running {
+		t.Errorf("Old plan state was modified during recovery: expected Running, got %s", readPlan.State.Status)
+	} else {
+		log.Printf("Old plan %s correctly remains in Running state (not recovered)", oldPlanID)
+	}
+
+	log.Println("Azblob retention test passed: old plans are not recovered")
 }

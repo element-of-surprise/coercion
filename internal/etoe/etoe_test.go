@@ -124,7 +124,14 @@ func createVault(ctx context.Context) error {
 		vault, err = cosmosdb.New(ctx, *swarm, *endpoint, *db, *container, cred, reg)
 	case "azblob":
 		context.Log(ctx).Info(fmt.Sprintf("TestEtoE: Using azblob: %s", *azblobURL))
-		vault, err = azblob.New(ctx, *blobPrefix, *azblobURL, cred, reg)
+		args := azblob.Args{
+			Prefix:        *blobPrefix,
+			Endpoint:      *azblobURL,
+			Cred:          cred,
+			Reg:           reg,
+			RetentionDays: 14,
+		}
+		vault, err = azblob.New(ctx, args)
 	default:
 		panic(fmt.Errorf("TestEtoE: unknown storage vault type: %s", *vaultType))
 	}

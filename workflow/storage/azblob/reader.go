@@ -2,11 +2,15 @@ package azblob
 
 import (
 	"fmt"
+	"net/http"
 	"slices"
 	"sort"
 	"testing"
+	"time"
 
+	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
 	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob"
+	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob/bloberror"
 	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob/container"
 
 	"github.com/google/uuid"
@@ -26,16 +30,25 @@ var _ storage.Reader = reader{}
 
 // reader implements the storage.Reader interface.
 type reader struct {
-	mu           *planlocks.Group
-	readFlight   *singleflight.Group
-	existsFlight *singleflight.Group
-	prefix       string
-	client       blobops.Ops
-	reg          *registry.Register
+	mu            *planlocks.Group
+	readFlight    *singleflight.Group
+	existsFlight  *singleflight.Group
+	prefix        string
+	client        blobops.Ops
+	reg           *registry.Register
+	retentionDays int
+	nowf          func() time.Time
 
 	testListPlansInContainer func(ctx context.Context, containerName string) ([]storage.ListResult, error)
 
 	private.Storage
+}
+
+func (r reader) now() time.Time {
+	if r.nowf == nil {
+		return time.Now()
+	}
+	return r.now()
 }
 
 // Exists implements storage.Reader.Exists(). It returns true if the plan exists.
@@ -69,6 +82,13 @@ func (r reader) exists(ctx context.Context, id uuid.UUID) (bool, error) {
 
 // Read implements storage.Reader.Read().
 func (r reader) Read(ctx context.Context, id uuid.UUID) (*workflow.Plan, error) {
+	// We have a retention time in blob storage because of unique(read pain in the ass) way of
+	// doing storage. So even if something is in our storage still, if it is past retention we just
+	// say it is not.
+	if time.Unix(id.Time().UnixTime()).Before(r.now().AddDate(0, 0, -r.retentionDays)) {
+		return nil, &azcore.ResponseError{ErrorCode: string(bloberror.BlobNotFound), RawResponse: &http.Response{}}
+	}
+
 	r.mu.RLock(id)
 	defer r.mu.RUnlock(id)
 
@@ -83,6 +103,19 @@ func (r reader) Read(ctx context.Context, id uuid.UUID) (*workflow.Plan, error) 
 	}
 
 	return v.(*workflow.Plan), nil
+}
+
+// ReadDirect reads a plan from storage bypassing the retention check.
+// This is intended for testing purposes only.
+func (r reader) ReadDirect(ctx context.Context, id uuid.UUID) (*workflow.Plan, error) {
+	if !testing.Testing() {
+		panic("ReadDirect is only for testing")
+	}
+
+	r.mu.RLock(id)
+	defer r.mu.RUnlock(id)
+
+	return r.fetchPlan(ctx, id)
 }
 
 // Search implements storage.Reader.Search().
