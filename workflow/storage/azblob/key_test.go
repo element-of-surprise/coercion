@@ -1,10 +1,15 @@
 package azblob
 
 import (
+	"fmt"
 	"testing"
 	"time"
 
+	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
+	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob/bloberror"
 	"github.com/element-of-surprise/coercion/workflow"
+	"github.com/element-of-surprise/coercion/workflow/context"
+	"github.com/element-of-surprise/coercion/workflow/storage"
 	"github.com/google/uuid"
 	"github.com/kylelemons/godebug/pretty"
 )
@@ -326,4 +331,205 @@ func TestToPtr(t *testing.T) {
 func init() {
 	// Configure pretty to show differences more clearly
 	pretty.CompareConfig.IncludeUnexported = false
+}
+
+func TestRecoveryContainerNames(t *testing.T) {
+	t.Parallel()
+
+	notFoundErr := &azcore.ResponseError{ErrorCode: string(bloberror.ContainerNotFound)}
+
+	tests := []struct {
+		name           string
+		listResults    func(containerName string) ([]storage.ListResult, error)
+		wantContainers []string
+		wantErr        bool
+	}{
+		{
+			name: "Success: single container with running plan",
+			listResults: func(cn string) ([]storage.ListResult, error) {
+				today := containerName("test", time.Now().UTC())
+				if cn == today {
+					return []storage.ListResult{
+						{
+							ID:    uuid.New(),
+							State: &workflow.State{Status: workflow.Running},
+						},
+					}, nil
+				}
+				return nil, notFoundErr
+			},
+			wantContainers: []string{containerName("test", time.Now().UTC())},
+			wantErr:        false,
+		},
+		{
+			name: "Success: single container with NotStarted plan within 2 days",
+			listResults: func(cn string) ([]storage.ListResult, error) {
+				today := containerName("test", time.Now().UTC())
+				if cn == today {
+					return []storage.ListResult{
+						{
+							ID: uuid.New(),
+							State: &workflow.State{
+								Status: workflow.NotStarted,
+								End:    time.Now(),
+							},
+						},
+					}, nil
+				}
+				return nil, notFoundErr
+			},
+			wantContainers: []string{containerName("test", time.Now().UTC())},
+			wantErr:        false,
+		},
+		{
+			name: "Success: NotStarted plan older than 2 days is ignored",
+			listResults: func(cn string) ([]storage.ListResult, error) {
+				today := containerName("test", time.Now().UTC())
+				if cn == today {
+					return []storage.ListResult{
+						{
+							ID: uuid.New(),
+							State: &workflow.State{
+								Status: workflow.NotStarted,
+								End:    time.Now().Add(-3 * 24 * time.Hour),
+							},
+						},
+					}, nil
+				}
+				return nil, notFoundErr
+			},
+			wantContainers: []string{},
+			wantErr:        false,
+		},
+		{
+			name: "Success: no containers found after 10 not found errors",
+			listResults: func(cn string) ([]storage.ListResult, error) {
+				return nil, notFoundErr
+			},
+			wantContainers: []string{},
+			wantErr:        false,
+		},
+		{
+			name: "Success: stops after 5 containers with no uncompleted plans",
+			listResults: func(cn string) ([]storage.ListResult, error) {
+				return []storage.ListResult{
+					{
+						ID:    uuid.New(),
+						State: &workflow.State{Status: workflow.Completed},
+					},
+				}, nil
+			},
+			wantContainers: []string{},
+			wantErr:        false,
+		},
+		{
+			name: "Success: multiple containers with running plans",
+			listResults: func(cn string) ([]storage.ListResult, error) {
+				now := time.Now().UTC()
+				today := containerName("test", now)
+				yesterday := containerName("test", now.AddDate(0, 0, -1))
+
+				switch cn {
+				case today:
+					return []storage.ListResult{
+						{
+							ID:    uuid.New(),
+							State: &workflow.State{Status: workflow.Running},
+						},
+					}, nil
+				case yesterday:
+					return []storage.ListResult{
+						{
+							ID:    uuid.New(),
+							State: &workflow.State{Status: workflow.Running},
+						},
+					}, nil
+				default:
+					return nil, notFoundErr
+				}
+			},
+			wantContainers: []string{
+				containerName("test", time.Now().UTC()),
+				containerName("test", time.Now().UTC().AddDate(0, 0, -1)),
+			},
+			wantErr: false,
+		},
+		{
+			name: "Success: mix of completed and running containers",
+			listResults: func(cn string) ([]storage.ListResult, error) {
+				now := time.Now().UTC()
+				today := containerName("test", now)
+				yesterday := containerName("test", now.AddDate(0, 0, -1))
+				twoDaysAgo := containerName("test", now.AddDate(0, 0, -2))
+
+				switch cn {
+				case today:
+					return []storage.ListResult{
+						{
+							ID:    uuid.New(),
+							State: &workflow.State{Status: workflow.Completed},
+						},
+					}, nil
+				case yesterday:
+					return []storage.ListResult{
+						{
+							ID:    uuid.New(),
+							State: &workflow.State{Status: workflow.Running},
+						},
+					}, nil
+				case twoDaysAgo:
+					return []storage.ListResult{
+						{
+							ID:    uuid.New(),
+							State: &workflow.State{Status: workflow.Completed},
+						},
+					}, nil
+				default:
+					return nil, notFoundErr
+				}
+			},
+			wantContainers: []string{
+				containerName("test", time.Now().UTC().AddDate(0, 0, -1)),
+			},
+			wantErr: false,
+		},
+		{
+			name: "Error: non-NotFound error returns error",
+			listResults: func(cn string) ([]storage.ListResult, error) {
+				return nil, fmt.Errorf("some other error")
+			},
+			wantContainers: nil,
+			wantErr:        true,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			ctx := context.Background()
+
+			r := reader{
+				prefix: "test",
+				testListPlansInContainer: func(ctx context.Context, cn string) ([]storage.ListResult, error) {
+					return test.listResults(cn)
+				},
+			}
+
+			got, err := recoveryContainerNames(ctx, "test", r, 10)
+
+			switch {
+			case err == nil && test.wantErr:
+				t.Errorf("[TestRecoveryContainerNames](%s): got err == nil, want err != nil", test.name)
+				return
+			case err != nil && !test.wantErr:
+				t.Errorf("[TestRecoveryContainerNames](%s): got err == %s, want err == nil", test.name, err)
+				return
+			case err != nil:
+				return
+			}
+
+			if diff := pretty.Compare(test.wantContainers, got); diff != "" {
+				t.Errorf("[TestRecoveryContainerNames](%s): -want +got:\n%s", test.name, diff)
+			}
+		})
+	}
 }

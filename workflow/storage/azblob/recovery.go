@@ -18,9 +18,10 @@ var _ storage.Recovery = recovery{}
 
 // recovery implements the storage.Recovery interface.
 type recovery struct {
-	reader   reader
-	updater  updater
-	uploader *uploader
+	retentionDays int
+	reader        reader
+	updater       updater
+	uploader      *uploader
 
 	testRecoverPlan func(ctx context.Context, containerName string, planID uuid.UUID) error
 
@@ -37,7 +38,10 @@ type recovery struct {
 // 4. Recreate any missing blobs from the plan hierarchy
 func (r recovery) Recovery(ctx context.Context) error {
 	// List all plans in recent containers
-	containers := containerNames(r.reader.prefix)
+	containers, err := recoveryContainerNames(ctx, r.reader.prefix, r.reader, r.retentionDays)
+	if err != nil {
+		return err
+	}
 
 	for _, containerName := range containers {
 		if err := r.recoverPlansInContainer(ctx, containerName); err != nil {

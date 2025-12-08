@@ -28,11 +28,9 @@ import (
 	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob"
 	"github.com/google/uuid"
 	"github.com/gostdlib/base/context"
-	"github.com/gostdlib/base/retry/exponential"
 	"golang.org/x/sync/singleflight"
 
 	"github.com/element-of-surprise/coercion/internal/private"
-	"github.com/element-of-surprise/coercion/plugins"
 	"github.com/element-of-surprise/coercion/plugins/registry"
 	"github.com/element-of-surprise/coercion/workflow"
 	"github.com/element-of-surprise/coercion/workflow/errors"
@@ -68,15 +66,6 @@ type Vault struct {
 	private.Storage
 }
 
-// Mark for delete
-var backoff *exponential.Backoff
-
-func init() {
-	policy := plugins.SecondsRetryPolicy()
-	policy.MaxAttempts = 5
-	backoff = exponential.Must(exponential.New(exponential.WithPolicy(policy)))
-}
-
 // Option is an option for configuring a Vault.
 type Option func(*Vault) error
 
@@ -84,9 +73,11 @@ type Option func(*Vault) error
 // to namespace blobs for this instance. endpoint is the Azure Blob Storage account endpoint
 // (e.g., https://mystorageaccount.blob.core.windows.net). cred is the Azure token credential.
 // reg is the coercion registry.
-func New(ctx context.Context, prefix, endpoint string, cred azcore.TokenCredential, reg *registry.Register, options ...Option) (*Vault, error) {
+func New(ctx context.Context, prefix, endpoint string, cred azcore.TokenCredential, reg *registry.Register, retentionDays int, options ...Option) (*Vault, error) {
 	ctx = context.WithoutCancel(ctx)
-
+	if retentionDays <= 0 {
+		return nil, errors.E(ctx, errors.CatInternal, errors.TypeBug, errors.New("retentionDays must be greater than 0"))
+	}
 	if prefix == "" {
 		return nil, errors.E(ctx, errors.CatInternal, errors.TypeBug, errors.New("prefix cannot be empty"))
 	}
@@ -127,12 +118,13 @@ func New(ctx context.Context, prefix, endpoint string, cred azcore.TokenCredenti
 	}
 
 	v.reader = reader{
-		mu:           v.mu,
-		readFlight:   &singleflight.Group{},
-		existsFlight: &singleflight.Group{},
-		prefix:       prefix,
-		client:       opsClient,
-		reg:          reg,
+		mu:            v.mu,
+		readFlight:    &singleflight.Group{},
+		existsFlight:  &singleflight.Group{},
+		prefix:        prefix,
+		client:        opsClient,
+		reg:           reg,
+		retentionDays: retentionDays,
 	}
 	v.creator = creator{
 		mu:       v.mu,
@@ -150,9 +142,10 @@ func New(ctx context.Context, prefix, endpoint string, cred azcore.TokenCredenti
 	}
 	v.closer = closer{}
 	v.recovery = recovery{
-		reader:   v.reader,
-		updater:  v.updater,
-		uploader: uploader,
+		reader:        v.reader,
+		updater:       v.updater,
+		uploader:      uploader,
+		retentionDays: retentionDays,
 	}
 
 	return v, nil

@@ -5,7 +5,9 @@ import (
 	"time"
 
 	"github.com/element-of-surprise/coercion/workflow"
+	"github.com/element-of-surprise/coercion/workflow/storage/azblob/internal/blobops"
 	"github.com/google/uuid"
+	"github.com/gostdlib/base/context"
 )
 
 const (
@@ -28,6 +30,77 @@ func containerName(prefix string, date time.Time) string {
 // This ensures the plan and all its sub-objects are in the same container.
 func containerForPlan(prefix string, id uuid.UUID) string {
 	return containerName(prefix, time.Unix(id.Time().UnixTime()).UTC())
+}
+
+// recoveryContainerNames returns a list of container names to check for recovery, this will keep
+// going back in time for retentionDays.
+func recoveryContainerNames(ctx context.Context, prefix string, reader reader, retentionDays int) ([]string, error) {
+	if retentionDays <= 0 {
+		return nil, fmt.Errorf("retentionDays must be greater than 0")
+	}
+	t := time.Now().UTC().AddDate(0, 0, 1) // One day ahead.
+	containers := make([]string, retentionDays)
+
+	g := context.Pool(ctx).Limited(10).Group()
+	for i := 0; i < retentionDays; i++ {
+		t = t.AddDate(0, 0, -1)
+
+		err := g.Go(
+			ctx,
+			func(ctx context.Context) error {
+				cn, err := recoveryContainerName(ctx, reader, containerName(prefix, t))
+				if err != nil {
+					return err
+				}
+				containers[i] = cn
+				return nil
+			},
+		)
+		if err != nil {
+			return nil, err
+		}
+		if err := g.Wait(ctx); err != nil {
+			return nil, err
+		}
+	}
+	s := []string{}
+	for i := 0; i < len(containers); i++ {
+		if containers[i] != "" {
+			s = append(s, containers[i])
+		}
+	}
+	return s, nil
+}
+
+// recoveryContainerName checks if a specific container has uncompleted plans. If so it returns the container name.
+// If not, it returns an empty string. It will only return an error if it encounters an unexpected error.
+func recoveryContainerName(ctx context.Context, reader reader, cn string) (string, error) {
+	results, err := reader.listPlansInContainer(ctx, cn)
+	if err != nil {
+		// Maybe nothing happens for a day.
+		if blobops.IsNotFound(err) {
+			return "", nil
+		}
+		return "", err
+	}
+	// Maybe nothing happens for a day.
+	if len(results) == 0 {
+		return "", nil
+	}
+
+	notCompleted := 0
+	for _, lr := range results {
+		if lr.State.Status == workflow.NotStarted && !lr.State.End.Before(time.Now().Add(-2*24*time.Hour)) {
+			notCompleted++
+		}
+		if lr.State.Status == workflow.Running {
+			notCompleted++
+		}
+	}
+	if notCompleted != 0 {
+		return cn, nil
+	}
+	return "", nil
 }
 
 // containerNames returns a list of container names to check for reads,

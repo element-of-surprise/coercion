@@ -79,7 +79,7 @@ func main() {
 	}
 
 	// Assume this is the public cloud
-	vault, err := azblob.New(ctx, *prefix, *endpoint, cred, reg)
+	vault, err := azblob.New(ctx, *prefix, *endpoint, cred, reg, 14)
 
 	if err := vault.Create(ctx, plan); err != nil {
 		fatalErr(logger, "Failed to create plan entry: %v", err)
