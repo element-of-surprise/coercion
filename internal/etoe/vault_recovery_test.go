@@ -12,6 +12,7 @@ import (
 	"github.com/element-of-surprise/coercion/workflow/builder"
 	"github.com/element-of-surprise/coercion/workflow/storage/azblob"
 	"github.com/element-of-surprise/coercion/workflow/utils/clone"
+	"github.com/element-of-surprise/coercion/workflow/utils/walk"
 	gofrsUUID "github.com/gofrs/uuid/v5"
 	"github.com/google/uuid"
 	"github.com/gostdlib/base/context"
@@ -288,17 +289,16 @@ func insertOldRunningPlan(t *testing.T, ctx context.Context) uuid.UUID {
 
 	// Create a plan with a UUID from 2 days + 1 hour ago
 	oldTime := time.Now().UTC().AddDate(0, 0, -2).Add(-1 * time.Hour)
-	oldPlanID := newV7FromTime(oldTime)
 
-	log.Printf("Creating old running plan with ID %s (timestamp: %s)", oldPlanID, oldTime)
-
-	oldPlan, err := createOldRunningPlan(oldPlanID, oldTime)
+	plan, err := createOldRunningPlan(oldTime)
 	if err != nil {
 		t.Fatalf("Failed to create old plan: %v", err)
 	}
+	oldPlanID := plan.ID
+	log.Printf("Creating old running plan with ID %s (timestamp: %s)", oldPlanID, oldTime)
 
 	// Store the plan directly in the vault (not via workstream)
-	if err := vault.Create(ctx, oldPlan); err != nil {
+	if err := vault.Create(ctx, plan); err != nil {
 		t.Fatalf("Failed to store old plan: %v", err)
 	}
 
@@ -307,7 +307,7 @@ func insertOldRunningPlan(t *testing.T, ctx context.Context) uuid.UUID {
 }
 
 // createOldRunningPlan creates a simple running plan with the specified ID and submit time.
-func createOldRunningPlan(planID uuid.UUID, submitTime time.Time) (*workflow.Plan, error) {
+func createOldRunningPlan(submitTime time.Time) (*workflow.Plan, error) {
 	ctx := context.Background()
 
 	seqs := &workflow.Sequence{
@@ -316,6 +316,7 @@ func createOldRunningPlan(planID uuid.UUID, submitTime time.Time) (*workflow.Pla
 		Descr: "Sequence for retention test",
 		Actions: []*workflow.Action{
 			{
+				ID:      newV7FromTime(submitTime.Add(2 * time.Second)),
 				Name:    "old-action",
 				Descr:   "Action for retention test",
 				Plugin:  testplugin.Name,
@@ -345,8 +346,17 @@ func createOldRunningPlan(planID uuid.UUID, submitTime time.Time) (*workflow.Pla
 		return nil, fmt.Errorf("failed to build plan: %w", err)
 	}
 
+	type setIDer interface {
+		SetID(uuid.UUID)
+	}
+
+	i := 0
+	for item := range walk.Plan(plan) {
+		item.Value.(setIDer).SetID(newV7FromTime(submitTime.Add(time.Duration(i) * time.Second)))
+		i++
+	}
+
 	// Override the plan ID with our custom old UUID
-	plan.ID = planID
 	plan.SubmitTime = submitTime
 	plan.State = &workflow.State{
 		Status: workflow.Running,
