@@ -371,7 +371,6 @@ func TestRecoveryContainerNames(t *testing.T) {
 							ID: uuid.New(),
 							State: &workflow.State{
 								Status: workflow.NotStarted,
-								End:    time.Now(),
 							},
 						},
 					}, nil
@@ -379,26 +378,6 @@ func TestRecoveryContainerNames(t *testing.T) {
 				return nil, notFoundErr
 			},
 			wantContainers: []string{containerName("test", time.Now().UTC())},
-			wantErr:        false,
-		},
-		{
-			name: "Success: NotStarted plan older than 2 days is ignored",
-			listResults: func(cn string) ([]storage.ListResult, error) {
-				today := containerName("test", time.Now().UTC())
-				if cn == today {
-					return []storage.ListResult{
-						{
-							ID: uuid.New(),
-							State: &workflow.State{
-								Status: workflow.NotStarted,
-								End:    time.Now().Add(-3 * 24 * time.Hour),
-							},
-						},
-					}, nil
-				}
-				return nil, notFoundErr
-			},
-			wantContainers: []string{},
 			wantErr:        false,
 		},
 		{
@@ -505,8 +484,6 @@ func TestRecoveryContainerNames(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			ctx := context.Background()
-
 			r := reader{
 				prefix: "test",
 				testListPlansInContainer: func(ctx context.Context, cn string) ([]storage.ListResult, error) {
@@ -514,7 +491,7 @@ func TestRecoveryContainerNames(t *testing.T) {
 				},
 			}
 
-			got, err := recoveryContainerNames(ctx, "test", r, 10)
+			got, err := recoveryContainerNames(t.Context(), "test", r, 10)
 
 			switch {
 			case err == nil && test.wantErr:

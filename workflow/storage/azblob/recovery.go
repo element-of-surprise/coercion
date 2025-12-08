@@ -3,6 +3,7 @@ package azblob
 import (
 	"fmt"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/gostdlib/base/context"
@@ -22,6 +23,7 @@ type recovery struct {
 	reader        reader
 	updater       updater
 	uploader      *uploader
+	nower         func() time.Time
 
 	testRecoverPlan func(ctx context.Context, containerName string, planID uuid.UUID) error
 
@@ -52,6 +54,13 @@ func (r recovery) Recovery(ctx context.Context) error {
 	return nil
 }
 
+func (r recovery) now() time.Time {
+	if r.nower != nil {
+		return r.nower()
+	}
+	return time.Now().UTC()
+}
+
 // recoverPlansInContainer recovers all plans in a specific container.
 func (r recovery) recoverPlansInContainer(ctx context.Context, containerName string) error {
 	exists, err := r.reader.client.ContainerExists(ctx, containerName)
@@ -70,6 +79,9 @@ func (r recovery) recoverPlansInContainer(ctx context.Context, containerName str
 	g := context.Pool(ctx).Limited(10).Group()
 
 	for _, planResult := range planBlobs {
+		if time.Unix(planResult.ID.Time().UnixTime()).Before(r.now().AddDate(0, 0, -r.reader.retentionDays)) {
+			continue
+		}
 		_ = g.Go(
 			ctx,
 			func(ctx context.Context) error {

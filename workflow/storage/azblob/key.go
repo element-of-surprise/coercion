@@ -44,11 +44,11 @@ func recoveryContainerNames(ctx context.Context, prefix string, reader reader, r
 	g := context.Pool(ctx).Limited(10).Group()
 	for i := 0; i < retentionDays; i++ {
 		t = t.AddDate(0, 0, -1)
-
+		date := t
 		err := g.Go(
 			ctx,
 			func(ctx context.Context) error {
-				cn, err := recoveryContainerName(ctx, reader, containerName(prefix, t))
+				cn, err := recoveryContainerName(ctx, reader, containerName(prefix, date))
 				if err != nil {
 					return err
 				}
@@ -59,10 +59,11 @@ func recoveryContainerNames(ctx context.Context, prefix string, reader reader, r
 		if err != nil {
 			return nil, err
 		}
-		if err := g.Wait(ctx); err != nil {
-			return nil, err
-		}
 	}
+	if err := g.Wait(ctx); err != nil {
+		return nil, err
+	}
+
 	s := []string{}
 	for i := 0; i < len(containers); i++ {
 		if containers[i] != "" {
@@ -90,10 +91,8 @@ func recoveryContainerName(ctx context.Context, reader reader, cn string) (strin
 
 	notCompleted := 0
 	for _, lr := range results {
-		if lr.State.Status == workflow.NotStarted && !lr.State.End.Before(time.Now().Add(-2*24*time.Hour)) {
-			notCompleted++
-		}
-		if lr.State.Status == workflow.Running {
+		// We do the Before() check because any plan
+		if lr.State.Status == workflow.NotStarted || lr.State.Status == workflow.Running {
 			notCompleted++
 		}
 	}

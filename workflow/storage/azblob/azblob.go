@@ -151,6 +151,12 @@ func New(ctx context.Context, prefix, endpoint string, cred azcore.TokenCredenti
 	return v, nil
 }
 
+// ReadDirect reads a plan from storage bypassing the retention check.
+// This is intended for testing purposes only.
+func (v *Vault) ReadDirect(ctx context.Context, id uuid.UUID) (*workflow.Plan, error) {
+	return v.reader.ReadDirect(ctx, id)
+}
+
 // Teardown deletes all containers and blobs with the given prefix. This is intended for use in tests only.
 func Teardown(ctx context.Context, endpoint, prefix string, cred azcore.TokenCredential) error {
 	client, err := azblob.NewClient(endpoint, cred, nil)

@@ -105,6 +105,19 @@ func (r reader) Read(ctx context.Context, id uuid.UUID) (*workflow.Plan, error) 
 	return v.(*workflow.Plan), nil
 }
 
+// ReadDirect reads a plan from storage bypassing the retention check.
+// This is intended for testing purposes only.
+func (r reader) ReadDirect(ctx context.Context, id uuid.UUID) (*workflow.Plan, error) {
+	if !testing.Testing() {
+		panic("ReadDirect is only for testing")
+	}
+
+	r.mu.RLock(id)
+	defer r.mu.RUnlock(id)
+
+	return r.fetchPlan(ctx, id)
+}
+
 // Search implements storage.Reader.Search().
 func (r reader) Search(ctx context.Context, filters storage.Filters) (chan storage.Stream[storage.ListResult], error) {
 	if err := filters.Validate(); err != nil {
