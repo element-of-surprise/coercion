@@ -46,7 +46,7 @@ func setupRecoveryTest(t *testing.T) (*blobops.Fake, recovery) {
 		mu:     planlocks.New(ctx),
 		client: fakeClient,
 		prefix: prefix,
-		pool:   context.Pool(ctx).Limited(10),
+		pool:   context.Pool(ctx).Limited(ctx, "", 10),
 	}
 
 	// Create recovery
@@ -313,7 +313,7 @@ func TestRecoverPlan(t *testing.T) {
 				mu:     planlocks.New(ctx),
 				client: fakeClient,
 				prefix: "test",
-				pool:   context.Pool(ctx).Limited(10),
+				pool:   context.Pool(ctx).Limited(ctx, "", 10),
 			}
 
 			if err := u.uploadSubObjects(ctx, containerName, plan); err != nil {
@@ -542,7 +542,7 @@ func TestEnsureActionBlob(t *testing.T) {
 					mu:     planlocks.New(ctx),
 					client: fakeClient,
 					prefix: "test",
-					pool:   context.Pool(ctx).Limited(10),
+					pool:   context.Pool(ctx).Limited(ctx, "", 10),
 				}
 				if err := u.uploadActionBlob(ctx, containerName, plan.ID, action, 0); err != nil {
 					t.Fatalf("[TestEnsureActionBlob]: failed to upload action blob: %v", err)
@@ -621,7 +621,7 @@ func TestEnsureChecksBlob(t *testing.T) {
 					mu:     planlocks.New(ctx),
 					client: fakeClient,
 					prefix: "test",
-					pool:   context.Pool(ctx).Limited(10),
+					pool:   context.Pool(ctx).Limited(ctx, "", 10),
 				}
 				if err := u.uploadChecksBlob(ctx, containerName, plan.ID, checks); err != nil {
 					t.Fatalf("[TestEnsureChecksBlob]: failed to upload checks blob: %v", err)
@@ -709,7 +709,7 @@ func TestEnsureSequenceBlob(t *testing.T) {
 					mu:     planlocks.New(ctx),
 					client: fakeClient,
 					prefix: "test",
-					pool:   context.Pool(ctx).Limited(10),
+					pool:   context.Pool(ctx).Limited(ctx, "", 10),
 				}
 				if err := u.uploadSequenceBlob(ctx, containerName, plan.ID, seq, 0); err != nil {
 					t.Fatalf("[TestEnsureSequenceBlob]: failed to upload sequence blob: %v", err)
@@ -797,7 +797,7 @@ func TestEnsureBlockBlob(t *testing.T) {
 					mu:     planlocks.New(ctx),
 					client: fakeClient,
 					prefix: "test",
-					pool:   context.Pool(ctx).Limited(10),
+					pool:   context.Pool(ctx).Limited(ctx, "", 10),
 				}
 				if err := u.uploadBlockBlob(ctx, containerName, plan.ID, block, 0); err != nil {
 					t.Fatalf("[TestEnsureBlockBlob]: failed to upload block blob: %v", err)

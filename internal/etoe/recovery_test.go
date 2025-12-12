@@ -63,7 +63,7 @@ func TestRecovery(t *testing.T) {
 	reg.Register(plugAction)
 
 	g1 := context.Pool(ctx).Group()
-	g2 := context.Pool(ctx).Limited(20).Group()
+	g2 := context.Pool(ctx).Limited(ctx, "", 20).Group()
 	results := make(chan testResult, 1)
 	g1.Go(
 		ctx,

@@ -76,13 +76,16 @@ func (r recovery) recoverPlansInContainer(ctx context.Context, containerName str
 		return err
 	}
 
-	g := context.Pool(ctx).Limited(10).Group()
+	g := context.Pool(ctx).Limited(ctx, "", 10).Group()
 
 	for _, planResult := range planBlobs {
+		if ctx.Err() != nil {
+			break
+		}
 		if time.Unix(planResult.ID.Time().UnixTime()).Before(r.now().AddDate(0, 0, -r.reader.retentionDays)) {
 			continue
 		}
-		_ = g.Go(
+		g.Go(
 			ctx,
 			func(ctx context.Context) error {
 				return r.recoverPlan(ctx, containerName, planResult.ID)

@@ -185,7 +185,7 @@ func createAndUploadTestPlan(ctx context.Context, t *testing.T, fakeClient *blob
 		mu:     planlocks.New(ctx),
 		client: fakeClient,
 		prefix: prefix,
-		pool:   context.Pool(ctx).Limited(10),
+		pool:   context.Pool(ctx).Limited(ctx, "", 10),
 	}
 
 	if err := uploader.uploadSubObjects(ctx, containerName, plan); err != nil {

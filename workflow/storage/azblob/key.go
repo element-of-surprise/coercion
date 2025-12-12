@@ -41,11 +41,15 @@ func recoveryContainerNames(ctx context.Context, prefix string, reader reader, r
 	t := time.Now().UTC().AddDate(0, 0, 1) // One day ahead.
 	containers := make([]string, retentionDays)
 
-	g := context.Pool(ctx).Limited(10).Group()
+	g := context.Pool(ctx).Limited(ctx, "", 10).Group()
 	for i := 0; i < retentionDays; i++ {
+		if ctx.Err() != nil {
+			break
+		}
+
 		t = t.AddDate(0, 0, -1)
 		date := t
-		err := g.Go(
+		g.Go(
 			ctx,
 			func(ctx context.Context) error {
 				cn, err := recoveryContainerName(ctx, reader, containerName(prefix, date))
@@ -56,9 +60,6 @@ func recoveryContainerNames(ctx context.Context, prefix string, reader reader, r
 				return nil
 			},
 		)
-		if err != nil {
-			return nil, err
-		}
 	}
 	if err := g.Wait(ctx); err != nil {
 		return nil, err

@@ -396,7 +396,7 @@ func (s *States) ExecuteSequences(req statemachine.Request[Data]) statemachine.R
 	// to have room. So if we call g.Go(), and it blocks and in one that is currently running we go over the failures, we will
 	// still end up running the one we just queued up. So we use the limiter to block the g.Go() from even being called.
 	limiter := make(chan struct{}, h.block.Concurrency)
-	pool := context.Pool(req.Ctx).Limited(h.block.Concurrency)
+	pool := context.Pool(req.Ctx).Limited(req.Ctx, "ExecuteSequences", h.block.Concurrency)
 	g := pool.Group()
 
 	for i := 0; i < len(h.block.Sequences); i++ {

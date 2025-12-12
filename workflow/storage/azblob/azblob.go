@@ -138,7 +138,7 @@ func New(ctx context.Context, args Args, options ...Option) (*Vault, error) {
 		client: opsClient,
 		mu:     v.mu,
 		prefix: v.prefix,
-		pool:   context.Pool(ctx).Limited(20),
+		pool:   context.Pool(ctx).Limited(ctx, "azBlobUploader", 20),
 	}
 
 	v.reader = reader{
