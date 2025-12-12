@@ -26,7 +26,7 @@ func setupUploaderTest(t *testing.T) (*blobops.Fake, *uploader) {
 		mu:     planlocks.New(ctx),
 		client: fakeClient,
 		prefix: prefix,
-		pool:   context.Pool(ctx).Limited(10),
+		pool:   context.Pool(ctx).Limited(ctx, "", 10),
 	}
 
 	return fakeClient, u

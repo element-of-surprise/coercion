@@ -28,7 +28,7 @@ func New(ctx context.Context) *Group {
 		canceled:    &atomic.Bool{},
 		createLocks: map[uuid.UUID]*sync.RWMutex{},
 	}
-	_ = context.Pool(ctx).Submit(
+	context.Pool(ctx).Submit(
 		ctx,
 		func() {
 			g.clean(ctx)

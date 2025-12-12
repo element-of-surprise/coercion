@@ -20,7 +20,7 @@ type uploader struct {
 	mu     *planlocks.Group
 	client blobops.Ops
 	prefix string
-	pool   *worker.Limited
+	pool   *worker.Pool
 }
 
 type uploadPlanType uint8
@@ -140,8 +140,11 @@ func (u *uploader) uploadSubObjects(ctx context.Context, containerName string, p
 	g := u.pool.Group()
 
 	for _, checks := range []*workflow.Checks{p.BypassChecks, p.PreChecks, p.PostChecks, p.ContChecks, p.DeferredChecks} {
+		if ctx.Err() != nil {
+			break
+		}
 		if checks != nil {
-			_ = g.Go(
+			g.Go(
 				ctx,
 				func(ctx context.Context) error {
 					return u.uploadChecksBlob(ctx, containerName, p.ID, checks)
@@ -151,7 +154,11 @@ func (u *uploader) uploadSubObjects(ctx context.Context, containerName string, p
 	}
 
 	for i, block := range p.Blocks {
-		_ = g.Go(
+		if ctx.Err() != nil {
+			break
+		}
+
+		g.Go(
 			ctx,
 			func(ctx context.Context) error {
 				return u.uploadBlockBlob(ctx, containerName, p.ID, block, i)
@@ -177,7 +184,7 @@ func (u *uploader) uploadBlockBlob(ctx context.Context, containerName string, pl
 	g := u.pool.Group()
 
 	blockBlobName := blockBlobName(planID, block.ID)
-	_ = g.Go(
+	g.Go(
 		ctx,
 		func(ctx context.Context) error {
 			if err := u.client.UploadBlob(ctx, containerName, blockBlobName, nil, blockData); err != nil {
@@ -188,8 +195,11 @@ func (u *uploader) uploadBlockBlob(ctx context.Context, containerName string, pl
 	)
 
 	for _, checks := range []*workflow.Checks{block.BypassChecks, block.PreChecks, block.PostChecks, block.ContChecks, block.DeferredChecks} {
+		if ctx.Err() != nil {
+			break
+		}
 		if checks != nil {
-			_ = g.Go(
+			g.Go(
 				ctx,
 				func(ctx context.Context) error {
 					return u.uploadChecksBlob(ctx, containerName, planID, checks)
@@ -199,7 +209,7 @@ func (u *uploader) uploadBlockBlob(ctx context.Context, containerName string, pl
 	}
 
 	for i, seq := range block.Sequences {
-		_ = g.Go(
+		g.Go(
 			ctx,
 			func(ctx context.Context) error {
 				return u.uploadSequenceBlob(ctx, containerName, planID, seq, i)
@@ -225,7 +235,7 @@ func (u *uploader) uploadSequenceBlob(ctx context.Context, containerName string,
 	g := u.pool.Group()
 
 	seqBlobName := sequenceBlobName(planID, seq.ID)
-	_ = g.Go(
+	g.Go(
 		ctx,
 		func(ctx context.Context) error {
 			if err := u.client.UploadBlob(ctx, containerName, seqBlobName, nil, seqData); err != nil {
@@ -236,7 +246,10 @@ func (u *uploader) uploadSequenceBlob(ctx context.Context, containerName string,
 	)
 
 	for i, action := range seq.Actions {
-		_ = g.Go(
+		if ctx.Err() != nil {
+			break
+		}
+		g.Go(
 			ctx,
 			func(ctx context.Context) error {
 				return u.uploadActionBlob(ctx, containerName, planID, action, i)
@@ -262,7 +275,7 @@ func (u *uploader) uploadChecksBlob(ctx context.Context, containerName string, p
 	g := u.pool.Group()
 
 	checksBlobName := checksBlobName(planID, checks.ID)
-	_ = g.Go(
+	g.Go(
 		ctx,
 		func(ctx context.Context) error {
 			if err := u.client.UploadBlob(ctx, containerName, checksBlobName, nil, checksData); err != nil {
@@ -273,7 +286,10 @@ func (u *uploader) uploadChecksBlob(ctx context.Context, containerName string, p
 	)
 
 	for i, action := range checks.Actions {
-		_ = g.Go(
+		if ctx.Err() != nil {
+			break
+		}
+		g.Go(
 			ctx,
 			func(ctx context.Context) error {
 				return u.uploadActionBlob(ctx, containerName, planID, action, i)
