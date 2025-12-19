@@ -102,18 +102,20 @@ func recoveryContainerName(ctx context.Context, reader reader, cn string) (strin
 	return "", nil
 }
 
-// containerNames returns a list of container names to check for reads,
-// starting with today and going back one day to handle boundary cases.
-func containerNames(prefix string) []string {
+// searchContainerNames returns a list of container names to search for plans,
+// covering the full retention period. This ensures that recovery can find
+// plans that may be several days old.
+func searchContainerNames(prefix string, retentionDays int) []string {
+	if retentionDays <= 0 {
+		return nil
+	}
 	now := time.Now().UTC()
-	containers := make([]string, 0, 2)
+	containers := make([]string, 0, retentionDays)
 
-	// Today's container
-	containers = append(containers, containerName(prefix, now))
-
-	// Yesterday's container (for boundary cases)
-	yesterday := now.AddDate(0, 0, -1)
-	containers = append(containers, containerName(prefix, yesterday))
+	for i := 0; i < retentionDays; i++ {
+		date := now.AddDate(0, 0, -i)
+		containers = append(containers, containerName(prefix, date))
+	}
 
 	return containers
 }
