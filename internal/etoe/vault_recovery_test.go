@@ -511,8 +511,8 @@ func TestAzblobRetentionRecovery(t *testing.T) {
 				t.Errorf("[TestAzblobRetentionRecovery](%s): expected ReadDirect() to succeed, got error: %v", test.name, directErr)
 				continue
 			}
-			if directPlan.State.Status != workflow.NotStarted {
-				t.Errorf("[TestAzblobRetentionRecovery](%s): expected plan status to remain NotStarted, got %s", test.name, directPlan.State.Status)
+			if directPlan.State.Status != workflow.Running {
+				t.Errorf("[TestAzblobRetentionRecovery](%s): expected plan status to remain Running, got %s", test.name, directPlan.State.Status)
 				continue
 			}
 			log.Printf("Plan %s (%s) correctly outside retention: Read() failed, ReadDirect() succeeded, status unchanged", test.name, planID)
@@ -523,7 +523,7 @@ func TestAzblobRetentionRecovery(t *testing.T) {
 }
 
 // createPlanAtTime creates a simple plan with IDs timestamped at the specified time.
-// The plan is in NotStarted state so recovery would attempt to process it.
+// The plan is in Running state to simulate a plan that was interrupted mid-execution.
 func createPlanAtTime(submitTime time.Time) (*workflow.Plan, error) {
 	ctx := context.Background()
 
@@ -573,7 +573,8 @@ func createPlanAtTime(submitTime time.Time) (*workflow.Plan, error) {
 
 	plan.SubmitTime = submitTime
 	plan.State = &workflow.State{
-		Status: workflow.NotStarted,
+		Status: workflow.Running,
+		Start:  submitTime,
 	}
 
 	return plan, nil
