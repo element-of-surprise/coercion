@@ -151,10 +151,8 @@ func (r reader) search(ctx context.Context, filters storage.Filters, ch chan sto
 	// For now, implement search by listing all plans and filtering
 	// TODO: When Azure Blob Index Tags search API is available in the SDK, use it for better performance
 
-	// Get all containers to search
-	containers := containerNames(r.prefix)
+	containers := searchContainerNames(r.prefix, r.retentionDays)
 
-	// Collect all results first for filtering
 	var results []storage.ListResult
 
 	for _, containerName := range containers {
@@ -217,13 +215,11 @@ func (r reader) matchesFilters(result storage.ListResult, filters storage.Filter
 
 // list lists all plans, most recent first.
 func (r reader) list(ctx context.Context, limit int, ch chan storage.Stream[storage.ListResult]) {
-	// Get containers to search (most recent first)
-	containers := containerNames(r.prefix)
+	containers := searchContainerNames(r.prefix, r.retentionDays)
 
 	var results []storage.ListResult
 	count := 0
 
-	// Search containers in order
 	for _, containerName := range containers {
 		if limit > 0 && count >= limit {
 			break

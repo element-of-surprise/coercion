@@ -53,28 +53,74 @@ func TestContainerName(t *testing.T) {
 	}
 }
 
-func TestContainerNames(t *testing.T) {
+func TestSearchContainerNames(t *testing.T) {
 	t.Parallel()
 
-	prefix := "test"
-	got := containerNames(prefix)
-
-	// Should return 2 containers: today and yesterday
-	if len(got) != 2 {
-		t.Errorf("TestContainerNames: got %d containers, want 2", len(got))
+	tests := []struct {
+		name          string
+		prefix        string
+		retentionDays int
+		wantLen       int
+	}{
+		{
+			name:          "Success: 14 day retention",
+			prefix:        "test",
+			retentionDays: 14,
+			wantLen:       14,
+		},
+		{
+			name:          "Success: 7 day retention",
+			prefix:        "test",
+			retentionDays: 7,
+			wantLen:       7,
+		},
+		{
+			name:          "Success: 1 day retention",
+			prefix:        "test",
+			retentionDays: 1,
+			wantLen:       1,
+		},
+		{
+			name:          "Success: zero retention returns nil",
+			prefix:        "test",
+			retentionDays: 0,
+			wantLen:       0,
+		},
+		{
+			name:          "Success: negative retention returns nil",
+			prefix:        "test",
+			retentionDays: -1,
+			wantLen:       0,
+		},
 	}
 
-	// First should be today
-	expectedToday := containerName(prefix, time.Now().UTC())
-	if got[0] != expectedToday {
-		t.Errorf("TestContainerNames: first container got %q, want %q", got[0], expectedToday)
-	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			got := searchContainerNames(test.prefix, test.retentionDays)
 
-	// Second should be yesterday
-	yesterday := time.Now().UTC().AddDate(0, 0, -1)
-	expectedYesterday := containerName(prefix, yesterday)
-	if got[1] != expectedYesterday {
-		t.Errorf("TestContainerNames: second container got %q, want %q", got[1], expectedYesterday)
+			if len(got) != test.wantLen {
+				t.Errorf("TestSearchContainerNames(%s): got %d containers, want %d", test.name, len(got), test.wantLen)
+				return
+			}
+
+			if test.wantLen == 0 {
+				return
+			}
+
+			// First should be today
+			now := time.Now().UTC()
+			expectedToday := containerName(test.prefix, now)
+			if got[0] != expectedToday {
+				t.Errorf("TestSearchContainerNames(%s): first container got %q, want %q", test.name, got[0], expectedToday)
+			}
+
+			// Last should be retentionDays-1 days ago
+			lastDay := now.AddDate(0, 0, -(test.retentionDays - 1))
+			expectedLast := containerName(test.prefix, lastDay)
+			if got[len(got)-1] != expectedLast {
+				t.Errorf("TestSearchContainerNames(%s): last container got %q, want %q", test.name, got[len(got)-1], expectedLast)
+			}
+		})
 	}
 }
 

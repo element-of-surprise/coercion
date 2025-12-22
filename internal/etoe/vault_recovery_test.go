@@ -282,13 +282,13 @@ func createLongRunningPlan() (*workflow.Plan, error) {
 	return plan, nil
 }
 
-// insertOldRunningPlan creates and stores a running plan with a UUID from 2 days + 1 hour ago.
-// This plan should be outside the retention period and should NOT be recovered.
+// insertOldRunningPlan creates and stores a running plan with a UUID from 14 days + 1 hour ago.
+// This plan should be outside the 14-day retention period and should NOT be recovered.
 func insertOldRunningPlan(t *testing.T, ctx context.Context) uuid.UUID {
 	t.Helper()
 
-	// Create a plan with a UUID from 2 days + 1 hour ago
-	oldTime := time.Now().UTC().AddDate(0, 0, -2).Add(-1 * time.Hour)
+	// Create a plan with a UUID from 14 days + 1 hour ago (outside 14-day retention)
+	oldTime := time.Now().UTC().AddDate(0, 0, -14).Add(-1 * time.Hour)
 
 	plan, err := createOldRunningPlan(oldTime)
 	if err != nil {
@@ -392,4 +392,190 @@ func verifyOldPlanNotRecovered(t *testing.T, ctx context.Context, oldPlanID uuid
 	}
 
 	log.Println("Azblob retention test passed: old plans are not recovered")
+}
+
+// TestAzblobRetentionRecovery tests that recovery respects the retention period boundary.
+// It creates 4 plans at different ages:
+// - 1 hour old (should be recoverable)
+// - 2 days old (should be recoverable)
+// - 13 days old (should be recoverable)
+// - 14 days + 1 minute old (should NOT be recoverable - outside 14 day retention)
+//
+// This test cannot run in parallel as it deletes containers before starting.
+func TestAzblobRetentionRecovery(t *testing.T) {
+	flag.Parse()
+
+	if *vaultType != "azblob" {
+		t.Skip("Skipping azblob retention test: vault type is not azblob")
+	}
+
+	ctx := context.Background()
+	initGlobals()
+
+	log.Println("Tearing down existing containers...")
+	if err := azblob.Teardown(ctx, *azblobURL, *blobPrefix, cred); err != nil {
+		t.Fatalf("[TestAzblobRetentionRecovery]: failed to teardown containers: %v", err)
+	}
+	log.Println("Teardown complete")
+
+	log.Println("Waiting 1 minute for teardown to propagate...")
+	time.Sleep(1 * time.Minute)
+
+	if err := createVault(ctx); err != nil {
+		t.Fatalf("[TestAzblobRetentionRecovery]: failed to recreate vault after teardown: %v", err)
+	}
+
+	now := time.Now().UTC()
+
+	// Define plan ages for testing.
+	tests := []struct {
+		name          string
+		age           time.Duration
+		shouldRecover bool
+	}{
+		{
+			name:          "1 hour old",
+			age:           1 * time.Hour,
+			shouldRecover: true,
+		},
+		{
+			name:          "2 days old",
+			age:           2 * 24 * time.Hour,
+			shouldRecover: true,
+		},
+		{
+			name:          "13 days old",
+			age:           13 * 24 * time.Hour,
+			shouldRecover: true,
+		},
+		{
+			name:          "14 days + 1 minute old",
+			age:           14*24*time.Hour + 1*time.Minute,
+			shouldRecover: false,
+		},
+	}
+
+	planIDs := make([]uuid.UUID, len(tests))
+	for i, test := range tests {
+		planTime := now.Add(-test.age)
+		plan, err := createPlanAtTime(planTime)
+		if err != nil {
+			t.Fatalf("[TestAzblobRetentionRecovery]: failed to create plan for %s: %v", test.name, err)
+		}
+		planIDs[i] = plan.ID
+
+		if err := vault.Create(ctx, plan); err != nil {
+			t.Fatalf("[TestAzblobRetentionRecovery]: failed to store plan for %s: %v", test.name, err)
+		}
+		log.Printf("Created plan %s with ID %s (age: %s)", test.name, plan.ID, test.age)
+	}
+
+	if err := vault.Close(ctx); err != nil {
+		log.Printf("Warning: error closing vault: %v", err)
+	}
+
+	if err := createVault(ctx); err != nil {
+		t.Fatalf("[TestAzblobRetentionRecovery]: failed to recreate vault for recovery: %v", err)
+	}
+
+	log.Println("Creating workstream to trigger recovery...")
+	_, err := workstream.New(ctx, reg, vault)
+	if err != nil {
+		t.Fatalf("[TestAzblobRetentionRecovery]: failed to create workstream: %v", err)
+	}
+
+	azblobVault, ok := vault.(*azblob.Vault)
+	if !ok {
+		t.Fatalf("[TestAzblobRetentionRecovery]: expected vault to be *azblob.Vault, got %T", vault)
+	}
+
+	for i, test := range tests {
+		planID := planIDs[i]
+
+		_, readErr := vault.Read(ctx, planID)
+
+		directPlan, directErr := azblobVault.ReadDirect(ctx, planID)
+
+		if test.shouldRecover {
+			if readErr != nil {
+				t.Errorf("[TestAzblobRetentionRecovery](%s): expected Read() to succeed, got error: %v", test.name, readErr)
+				continue
+			}
+			log.Printf("Plan %s (%s) correctly readable via Read()", test.name, planID)
+		} else {
+			if readErr == nil {
+				t.Errorf("[TestAzblobRetentionRecovery](%s): expected Read() to fail for plan outside retention, but it succeeded", test.name)
+				continue
+			}
+			if directErr != nil {
+				t.Errorf("[TestAzblobRetentionRecovery](%s): expected ReadDirect() to succeed, got error: %v", test.name, directErr)
+				continue
+			}
+			if directPlan.State.Status != workflow.Running {
+				t.Errorf("[TestAzblobRetentionRecovery](%s): expected plan status to remain Running, got %s", test.name, directPlan.State.Status)
+				continue
+			}
+			log.Printf("Plan %s (%s) correctly outside retention: Read() failed, ReadDirect() succeeded, status unchanged", test.name, planID)
+		}
+	}
+
+	log.Println("All retention boundary checks passed")
+}
+
+// createPlanAtTime creates a simple plan with IDs timestamped at the specified time.
+// The plan is in Running state to simulate a plan that was interrupted mid-execution.
+func createPlanAtTime(submitTime time.Time) (*workflow.Plan, error) {
+	ctx := context.Background()
+
+	seqs := &workflow.Sequence{
+		Name:  "retention-test-sequence",
+		Descr: "Sequence for retention boundary test",
+		Actions: []*workflow.Action{
+			{
+				Name:    "retention-test-action",
+				Descr:   "Action for retention boundary test",
+				Plugin:  testplugin.Name,
+				Timeout: 30 * time.Second,
+				Req:     testplugin.Req{Sleep: 1 * time.Second, Arg: "retention"},
+			},
+		},
+	}
+
+	build, err := builder.New("retention-boundary-test", "Test plan for retention boundary behavior")
+	if err != nil {
+		return nil, fmt.Errorf("failed to create builder: %w", err)
+	}
+
+	build.AddBlock(
+		builder.BlockArgs{
+			Name:        "retention-test-block",
+			Descr:       "Block for retention boundary test",
+			Concurrency: 1,
+		},
+	)
+	build.AddSequence(clone.Sequence(ctx, seqs, cloneOpts...)).Up()
+
+	plan, err := build.Plan()
+	if err != nil {
+		return nil, fmt.Errorf("failed to build plan: %w", err)
+	}
+
+	type setIDer interface {
+		SetID(uuid.UUID)
+	}
+
+	// Set all object IDs to timestamps based on submitTime.
+	i := 0
+	for item := range walk.Plan(plan) {
+		item.Value.(setIDer).SetID(newV7FromTime(submitTime.Add(time.Duration(i) * time.Millisecond)))
+		i++
+	}
+
+	plan.SubmitTime = submitTime
+	plan.State = &workflow.State{
+		Status: workflow.Running,
+		Start:  submitTime,
+	}
+
+	return plan, nil
 }
