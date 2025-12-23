@@ -25,10 +25,12 @@ func setupDeleterTest(t *testing.T) (*blobops.Fake, deleter) {
 	// Create plugin registry
 	reg := registry.New()
 	reg.Register(&testPlugins.HelloPlugin{})
+	
+	planMu := planlocks.New(ctx)
 
 	// Create reader
 	r := reader{
-		mu:            planlocks.New(ctx),
+		mu:            planMu,
 		readFlight:    &singleflight.Group{},
 		existsFlight:  &singleflight.Group{},
 		prefix:        prefix,
@@ -39,7 +41,7 @@ func setupDeleterTest(t *testing.T) (*blobops.Fake, deleter) {
 
 	// Create deleter
 	del := deleter{
-		mu:     planlocks.New(ctx),
+		mu:     planMu,
 		prefix: prefix,
 		client: fakeClient,
 		reader: r,
