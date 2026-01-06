@@ -305,7 +305,7 @@ func (e *Plans) Wait(ctx context.Context, id uuid.UUID) error {
 	}
 }
 
-// getStater provides an interface for grabbing the State struct from workflow objects and setting them.
+// getSetStates provides an interface for grabbing the State struct from workflow objects and setting them.
 type getSetStates interface {
 	GetState() workflow.State
 	SetState(state workflow.State)
