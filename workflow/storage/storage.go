@@ -56,7 +56,7 @@ type ListResult struct {
 	// SubmitTime is the Plan submit time.
 	SubmitTime time.Time
 	// State is the Plan state.
-	State *workflow.State
+	State workflow.State
 }
 
 // Vault is a storage reader and writer for Plan data. An implementation of Vault must ensure

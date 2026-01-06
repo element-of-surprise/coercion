@@ -35,13 +35,13 @@ func (p reader) docToPlan(ctx context.Context, response *azcosmos.ItemResponse) 
 		Descr:      resp.Descr,
 		SubmitTime: resp.SubmitTime,
 		Reason:     resp.Reason,
-		State: &workflow.State{
-			Status: resp.StateStatus,
-			Start:  resp.StateStart,
-			End:    resp.StateEnd,
-			ETag:   string(resp.ETag),
-		},
 	}
+	plan.State.Set(workflow.State{
+		Status: resp.StateStatus,
+		Start:  resp.StateStart,
+		End:    resp.StateEnd,
+		ETag:   string(resp.ETag),
+	})
 	k := key(resp.PlanID)
 	plan.BypassChecks, err = p.idToCheck(ctx, k, resp.BypassChecks)
 	if err != nil {

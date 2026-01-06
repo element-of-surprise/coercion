@@ -85,7 +85,7 @@ func (u planUpdater) UpdatePlan(ctx context.Context, plan *workflow.Plan) error 
 	u.mu.Lock(plan.ID)
 	defer u.mu.Unlock(plan.ID)
 
-	switch plan.State.Status {
+	switch plan.State.Get().Status {
 	case workflow.NotStarted:
 		return u.uploader.uploadPlan(ctx, plan, uptCreate)
 	case workflow.Running:

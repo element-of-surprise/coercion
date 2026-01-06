@@ -133,7 +133,9 @@ func main() {
 		fatalErr(logger, "mismatch in submitted and returned plan with ID %s: returned plan: -want/+got:\n%s", plan.ID, diff)
 	}
 
-	plan.State.Status = workflow.Completed
+	state := plan.State.Get()
+	state.Status = workflow.Completed
+	plan.State.Set(state)
 	if err := vault.UpdatePlan(ctx, plan); err != nil {
 		fatalErr(logger, "Failed to update plan entry: %v", err)
 	}

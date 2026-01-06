@@ -42,7 +42,9 @@ func (f finalStates) planChecks(req statemachine.Request[Data]) statemachine.Req
 		req.Next = f.blocks
 		return req
 	}
-	plan.State.Status = workflow.Failed
+	state := plan.State.Get()
+	state.Status = workflow.Failed
+	plan.State.Set(state)
 	plan.Reason = r
 	req.Err = err
 	req.Next = f.end
@@ -54,17 +56,21 @@ func (f finalStates) planChecks(req statemachine.Request[Data]) statemachine.Req
 func (f finalStates) blocks(req statemachine.Request[Data]) statemachine.Request[Data] {
 	plan := req.Data.Plan
 	for _, block := range req.Data.Plan.Blocks {
-		switch block.State.Status {
+		switch block.State.Get().Status {
 		case workflow.Completed:
 		case workflow.Failed:
-			plan.State.Status = workflow.Failed
+			state := plan.State.Get()
+			state.Status = workflow.Failed
+			plan.State.Set(state)
 			plan.Reason = workflow.FRBlock
 			req.Err = fmt.Errorf("block failure")
 			return req
 		default:
-			plan.State.Status = workflow.Failed
+			state := plan.State.Get()
+			state.Status = workflow.Failed
+			plan.State.Set(state)
 			plan.Reason = workflow.FRBlock
-			req.Err = fmt.Errorf("block End state reached in %s state, which is invalid: %w", block.State.Status, ErrInternalFailure)
+			req.Err = fmt.Errorf("block End state reached in %s state, which is invalid: %w", block.State.Get().Status, ErrInternalFailure)
 			return req
 		}
 	}
@@ -75,7 +81,11 @@ func (f finalStates) blocks(req statemachine.Request[Data]) statemachine.Request
 // end records a Plan as Completed.
 func (f finalStates) end(req statemachine.Request[Data]) statemachine.Request[Data] {
 	plan := req.Data.Plan
-	plan.State.Status = workflow.Completed
+	state := plan.State.Get()
+	if state.Status < workflow.Completed {
+		state.Status = workflow.Completed
+	}
+	plan.State.Set(state)
 	return req
 }
 
@@ -85,7 +95,7 @@ func (f finalStates) examineBypasses(gates *workflow.Checks) bool {
 	if gates == nil {
 		return false
 	}
-	if gates.State.Status == workflow.Completed {
+	if gates.State.Get().Status == workflow.Completed {
 		return true
 	}
 	return false
@@ -116,13 +126,13 @@ func (f finalStates) examineChecks(checks [4]*workflow.Checks) (workflow.Failure
 			r = workflow.FRDeferredCheck
 		}
 
-		switch check.State.Status {
+		switch check.State.Get().Status {
 		case workflow.Completed:
 			continue
 		case workflow.Failed:
 			return r, fmt.Errorf("%s failure", t)
 		default:
-			err := fmt.Errorf("plan End state reached with a %s in %s state, which is invalid: %w", t, check.State.Status, ErrInternalFailure)
+			err := fmt.Errorf("plan End state reached with a %s in %s state, which is invalid: %w", t, check.State.Get().Status, ErrInternalFailure)
 			return r, err
 		}
 	}

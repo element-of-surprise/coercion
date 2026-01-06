@@ -168,8 +168,8 @@ func TestReaderList(t *testing.T) {
 			if !gotResult.SubmitTime.Equal(wantPlan.SubmitTime) {
 				t.Errorf("TestReaderList(%s): result[%d].SubmitTime = %s, want %s", test.name, i, gotResult.SubmitTime, wantPlan.SubmitTime)
 			}
-			if gotResult.State.Status != wantPlan.State.Status {
-				t.Errorf("TestReaderList(%s): result[%d].State.Status = %v, want %v", test.name, i, gotResult.State.Status, wantPlan.State.Status)
+			if gotResult.State.Status != wantPlan.State.Get().Status {
+				t.Errorf("TestReaderList(%s): result[%d].State.Status = %v, want %v", test.name, i, gotResult.State.Status, wantPlan.State.Get().Status)
 			}
 		}
 
@@ -209,7 +209,7 @@ func createTestPlan(t *testing.T, submitTime time.Time) *workflow.Plan {
 	// Set IDs and states for all objects
 	p.SetID(mustUUID())
 	p.SubmitTime = submitTime
-	p.SetState(&workflow.State{
+	p.SetState(workflow.State{
 		Status: workflow.Running,
 		Start:  submitTime,
 		End:    time.Time{},
@@ -219,7 +219,7 @@ func createTestPlan(t *testing.T, submitTime time.Time) *workflow.Plan {
 	if p.PreChecks != nil {
 		p.PreChecks.SetID(mustUUID())
 		p.PreChecks.Key = mustUUID()
-		p.PreChecks.SetState(&workflow.State{
+		p.PreChecks.SetState(workflow.State{
 			Status: workflow.Running,
 			Start:  submitTime,
 			End:    time.Time{},
@@ -227,7 +227,191 @@ func createTestPlan(t *testing.T, submitTime time.Time) *workflow.Plan {
 		for _, action := range p.PreChecks.Actions {
 			action.SetID(mustUUID())
 			action.SetPlanID(p.ID)
-			action.SetState(&workflow.State{
+			action.SetState(workflow.State{
+				Status: workflow.Running,
+				Start:  submitTime,
+				End:    time.Time{},
+			})
+		}
+	}
+
+	return p
+}
+
+// TestSearchMultipleStatuses tests that searching with multiple statuses returns
+// plans matching ANY of the statuses (OR logic), not ALL of them (AND logic).
+// This tests the fix for a bug where the SQL query used AND instead of OR,
+// which would always return zero results when multiple statuses were provided.
+func TestSearchMultipleStatuses(t *testing.T) {
+	tmpDir := os.TempDir()
+	id, err := uuid.NewV7()
+	if err != nil {
+		t.Fatalf("TestSearchMultipleStatuses: couldn't generate UUID: %s", err)
+	}
+	dbPath := filepath.Join(tmpDir, id.String())
+	defer os.RemoveAll(dbPath)
+
+	pool, err := sqlitex.NewPool(
+		dbPath,
+		sqlitex.PoolOptions{
+			Flags:    sqlite.OpenReadWrite | sqlite.OpenCreate,
+			PoolSize: 1,
+		},
+	)
+	if err != nil {
+		t.Fatalf("TestSearchMultipleStatuses: couldn't create pool: %s", err)
+	}
+	defer pool.Close()
+
+	conn, err := pool.Take(context.Background())
+	if err != nil {
+		t.Fatalf("TestSearchMultipleStatuses: couldn't get connection: %s", err)
+	}
+
+	if err := createTables(context.Background(), conn); err != nil {
+		pool.Put(conn)
+		t.Fatalf("TestSearchMultipleStatuses: couldn't create tables: %s", err)
+	}
+	pool.Put(conn)
+
+	reg := registry.New()
+	reg.Register(&plugins.CheckPlugin{})
+	reg.Register(&plugins.HelloPlugin{})
+
+	r := reader{
+		pool: pool,
+		reg:  reg,
+	}
+
+	ctx := t.Context()
+	now := time.Now()
+
+	// Create plans with different statuses
+	statusPlans := map[workflow.Status]*workflow.Plan{
+		workflow.Running:   createTestPlanWithStatus(t, now.Add(-3*time.Hour), workflow.Running),
+		workflow.Completed: createTestPlanWithStatus(t, now.Add(-2*time.Hour), workflow.Completed),
+		workflow.Failed:    createTestPlanWithStatus(t, now.Add(-1*time.Hour), workflow.Failed),
+	}
+
+	for status, plan := range statusPlans {
+		conn, err := pool.Take(ctx)
+		if err != nil {
+			t.Fatalf("TestSearchMultipleStatuses: couldn't get connection: %s", err)
+		}
+		if err := commitPlan(ctx, conn, plan, nil); err != nil {
+			pool.Put(conn)
+			t.Fatalf("TestSearchMultipleStatuses: couldn't commit plan with status %v: %s", status, err)
+		}
+		pool.Put(conn)
+	}
+
+	tests := []struct {
+		name         string
+		statuses     []workflow.Status
+		wantCount    int
+		wantStatuses []workflow.Status
+	}{
+		{
+			name:         "Success: Search with single status returns matching plan",
+			statuses:     []workflow.Status{workflow.Running},
+			wantCount:    1,
+			wantStatuses: []workflow.Status{workflow.Running},
+		},
+		{
+			name:         "Success: Search with two statuses returns both matching plans",
+			statuses:     []workflow.Status{workflow.Running, workflow.Completed},
+			wantCount:    2,
+			wantStatuses: []workflow.Status{workflow.Completed, workflow.Running},
+		},
+		{
+			name:         "Success: Search with all three statuses returns all plans",
+			statuses:     []workflow.Status{workflow.Running, workflow.Completed, workflow.Failed},
+			wantCount:    3,
+			wantStatuses: []workflow.Status{workflow.Failed, workflow.Completed, workflow.Running},
+		},
+	}
+
+	for _, test := range tests {
+		ch, err := r.Search(ctx, storage.Filters{ByStatus: test.statuses})
+		if err != nil {
+			t.Errorf("TestSearchMultipleStatuses(%s): Search returned error: %s", test.name, err)
+			continue
+		}
+
+		var results []storage.ListResult
+		for item := range ch {
+			if item.Err != nil {
+				t.Errorf("TestSearchMultipleStatuses(%s): got error in stream: %s", test.name, item.Err)
+				continue
+			}
+			results = append(results, item.Result)
+		}
+
+		if len(results) != test.wantCount {
+			t.Errorf("TestSearchMultipleStatuses(%s): got %d results, want %d", test.name, len(results), test.wantCount)
+			continue
+		}
+
+		// Verify that all returned results have one of the expected statuses
+		for i, result := range results {
+			found := false
+			for _, wantStatus := range test.wantStatuses {
+				if result.State.Status == wantStatus {
+					found = true
+					break
+				}
+			}
+			if !found {
+				t.Errorf("TestSearchMultipleStatuses(%s): result[%d] has status %v, which is not in expected statuses %v",
+					test.name, i, result.State.Status, test.wantStatuses)
+			}
+		}
+	}
+}
+
+// createTestPlanWithStatus creates a test plan with the specified status.
+func createTestPlanWithStatus(t *testing.T, submitTime time.Time, status workflow.Status) *workflow.Plan {
+	build, err := builder.New("test", "test", builder.WithGroupID(mustUUID()))
+	if err != nil {
+		t.Fatalf("createTestPlanWithStatus: couldn't create builder: %s", err)
+	}
+
+	checkAction := &workflow.Action{
+		Name:   "action",
+		Descr:  "action",
+		Plugin: plugins.CheckPluginName,
+		Req:    nil,
+	}
+
+	build.AddChecks(builder.PreChecks, &workflow.Checks{})
+	build.AddAction(checkAction)
+	build.Up()
+
+	p, err := build.Plan()
+	if err != nil {
+		t.Fatalf("createTestPlanWithStatus: couldn't build plan: %s", err)
+	}
+
+	p.SetID(mustUUID())
+	p.SubmitTime = submitTime
+	p.SetState(workflow.State{
+		Status: status,
+		Start:  submitTime,
+		End:    time.Time{},
+	})
+
+	if p.PreChecks != nil {
+		p.PreChecks.SetID(mustUUID())
+		p.PreChecks.Key = mustUUID()
+		p.PreChecks.SetState(workflow.State{
+			Status: workflow.Running,
+			Start:  submitTime,
+			End:    time.Time{},
+		})
+		for _, action := range p.PreChecks.Actions {
+			action.SetID(mustUUID())
+			action.SetPlanID(p.ID)
+			action.SetState(workflow.State{
 				Status: workflow.Running,
 				Start:  submitTime,
 				End:    time.Time{},

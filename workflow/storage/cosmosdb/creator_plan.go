@@ -108,10 +108,10 @@ func planToSearchEntry(swarm string, p *workflow.Plan) (searchEntry, error) {
 		Descr:        p.Descr,
 		ID:           p.ID,
 		GroupID:      p.GroupID,
-		StateStatus:  p.State.Status,
+		StateStatus:  p.State.Get().Status,
 		SubmitTime:   p.SubmitTime,
-		StateStart:   p.State.Start,
-		StateEnd:     p.State.End,
+		StateStart:   p.State.Get().Start,
+		StateEnd:     p.State.Get().End,
 	}, nil
 }
 
@@ -187,9 +187,9 @@ func planToEntry(swarm string, p *workflow.Plan) (plansEntry, error) {
 		Descr:        p.Descr,
 		Meta:         p.Meta,
 		Blocks:       blocks,
-		StateStatus:  p.State.Status,
-		StateStart:   p.State.Start,
-		StateEnd:     p.State.End,
+		StateStatus:  p.State.Get().Status,
+		StateStart:   p.State.Get().Start,
+		StateEnd:     p.State.Get().End,
 		Reason:       p.Reason,
 	}
 
@@ -258,9 +258,9 @@ func checkToEntry(iCtx *itemsContext, c *workflow.Checks) (checksEntry, error) {
 		PlanID:       iCtx.planID,
 		Actions:      actions,
 		Delay:        c.Delay,
-		StateStatus:  c.State.Status,
-		StateStart:   c.State.Start,
-		StateEnd:     c.State.End,
+		StateStatus:  c.State.Get().Status,
+		StateStart:   c.State.Get().Start,
+		StateEnd:     c.State.Get().End,
 	}, nil
 }
 
@@ -323,9 +323,9 @@ func blockToEntry(iCtx *itemsContext, pos int, b *workflow.Block) (blocksEntry, 
 		Sequences:         sequences,
 		Concurrency:       b.Concurrency,
 		ToleratedFailures: b.ToleratedFailures,
-		StateStatus:       b.State.Status,
-		StateStart:        b.State.Start,
-		StateEnd:          b.State.End,
+		StateStatus:       b.State.Get().Status,
+		StateStart:        b.State.Get().Start,
+		StateEnd:          b.State.Get().End,
 	}
 
 	if b.BypassChecks != nil {
@@ -394,9 +394,9 @@ func sequenceToEntry(iCtx *itemsContext, pos int, seq *workflow.Sequence) (seque
 		Descr:        seq.Descr,
 		Pos:          pos,
 		Actions:      actions,
-		StateStatus:  seq.State.Status,
-		StateStart:   seq.State.Start,
-		StateEnd:     seq.State.End,
+		StateStatus:  seq.State.Get().Status,
+		StateStart:   seq.State.Get().Start,
+		StateEnd:     seq.State.Get().End,
 	}, nil
 }
 
@@ -429,7 +429,7 @@ func actionToEntry(iCtx *itemsContext, pos int, a *workflow.Action) (actionsEntr
 	if err != nil {
 		return actionsEntry{}, fmt.Errorf("json.Marshal(req): %w", err)
 	}
-	attempts, err := encodeAttempts(a.Attempts)
+	attempts, err := encodeAttempts(a.Attempts.Get())
 	if err != nil {
 		return actionsEntry{}, fmt.Errorf("can't encode action.Attempts: %w", err)
 	}
@@ -448,14 +448,14 @@ func actionToEntry(iCtx *itemsContext, pos int, a *workflow.Action) (actionsEntr
 		Retries:      a.Retries,
 		Req:          req,
 		Attempts:     attempts,
-		StateStatus:  a.State.Status,
-		StateStart:   a.State.Start,
-		StateEnd:     a.State.End,
+		StateStatus:  a.State.Get().Status,
+		StateStart:   a.State.Get().Start,
+		StateEnd:     a.State.Get().End,
 	}, nil
 }
 
 // encodeAttempts encodes a slice of attempts into a JSON array holding JSON encoded attempts as byte slices.
-func encodeAttempts(attempts []*workflow.Attempt) ([]byte, error) {
+func encodeAttempts(attempts []workflow.Attempt) ([]byte, error) {
 	if len(attempts) == 0 {
 		return nil, nil
 	}
@@ -474,19 +474,19 @@ func encodeAttempts(attempts []*workflow.Attempt) ([]byte, error) {
 }
 
 // decodeAttempts decodes a JSON array of JSON encoded attempts as byte slices into a slice of attempts.
-func decodeAttempts(rawAttempts []byte, plug plugins.Plugin) ([]*workflow.Attempt, error) {
+func decodeAttempts(rawAttempts []byte, plug plugins.Plugin) ([]workflow.Attempt, error) {
 	if rawAttempts == nil {
-		return []*workflow.Attempt{}, nil
+		return []workflow.Attempt{}, nil
 	}
 	rawList := make([][]byte, 0)
 	if err := json.Unmarshal(rawAttempts, &rawList); err != nil {
 		return nil, fmt.Errorf("json.Unmarshal(rawAttempts): %w", err)
 	}
 
-	attempts := make([]*workflow.Attempt, 0, len(rawList))
+	attempts := make([]workflow.Attempt, 0, len(rawList))
 	for _, raw := range rawList {
-		var a = &workflow.Attempt{Resp: plug.Response()}
-		if err := json.Unmarshal(raw, a); err != nil {
+		var a = workflow.Attempt{Resp: plug.Response()}
+		if err := json.Unmarshal(raw, &a); err != nil {
 			return nil, fmt.Errorf("json.Unmarshal(raw): %w", err)
 		}
 		attempts = append(attempts, a)

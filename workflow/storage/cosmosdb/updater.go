@@ -124,9 +124,9 @@ func replaceSearch(ctx context.Context, client creatorClient, plan *workflow.Pla
 		ID:           plan.ID,
 		GroupID:      plan.GroupID,
 		SubmitTime:   plan.SubmitTime,
-		StateStatus:  plan.State.Status,
-		StateStart:   plan.State.Start,
-		StateEnd:     plan.State.End,
+		StateStatus:  plan.State.Get().Status,
+		StateStart:   plan.State.Get().Start,
+		StateEnd:     plan.State.Get().End,
 	}
 	b, err := json.Marshal(se)
 	if err != nil {

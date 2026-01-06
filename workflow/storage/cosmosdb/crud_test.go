@@ -85,8 +85,8 @@ func TestStorageItemCRUD(t *testing.T) {
 		if p.Name != result.Name {
 			t.Fatalf("expected %s, got %s", p.Name, result.Name)
 		}
-		if p.State.Status != result.State.Status {
-			t.Fatalf("expected %s, got %s", p.State.Status, result.State.Status)
+		if p.State.Get().Status != result.State.Get().Status {
+			t.Fatalf("expected %s, got %s", p.State.Get().Status, result.State.Get().Status)
 		}
 
 		if diff := prettyConfig.Compare(p, result); diff != "" {

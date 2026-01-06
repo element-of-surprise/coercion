@@ -28,41 +28,44 @@ func TestPlanToEntry(t *testing.T) {
 	}{
 		{
 			name: "Success: plan with minimal fields",
-			plan: &workflow.Plan{
-				ID:         planID,
-				GroupID:    groupID,
-				Name:       "Test Plan",
-				Descr:      "Test Description",
-				SubmitTime: now,
-				State: &workflow.State{
+			plan: func() *workflow.Plan {
+				p := &workflow.Plan{
+					ID:         planID,
+					GroupID:    groupID,
+					Name:       "Test Plan",
+					Descr:      "Test Description",
+					SubmitTime: now,
+					Blocks:     []*workflow.Block{},
+				}
+				p.State.Set(workflow.State{
 					Status: workflow.NotStarted,
 					Start:  now,
 					End:    time.Time{},
-				},
-				Blocks: []*workflow.Block{},
-			},
+				})
+				return p
+			}(),
 			wantErr: false,
 		},
 		{
 			name: "Success: plan with checks",
-			plan: &workflow.Plan{
-				ID:         planID,
-				GroupID:    groupID,
-				Name:       "Test Plan",
-				Descr:      "Test Description",
-				SubmitTime: now,
-				PreChecks: &workflow.Checks{
-					ID: workflow.NewV7(),
-					State: &workflow.State{
-						Status: workflow.NotStarted,
-					},
+			plan: func() *workflow.Plan {
+				c := &workflow.Checks{
+					ID:      workflow.NewV7(),
 					Actions: []*workflow.Action{},
-				},
-				State: &workflow.State{
-					Status: workflow.NotStarted,
-				},
-				Blocks: []*workflow.Block{},
-			},
+				}
+				c.State.Set(workflow.State{Status: workflow.NotStarted})
+				p := &workflow.Plan{
+					ID:         planID,
+					GroupID:    groupID,
+					Name:       "Test Plan",
+					Descr:      "Test Description",
+					SubmitTime: now,
+					PreChecks:  c,
+					Blocks:     []*workflow.Block{},
+				}
+				p.State.Set(workflow.State{Status: workflow.NotStarted})
+				return p
+			}(),
 			wantErr: false,
 		},
 		{
@@ -72,13 +75,16 @@ func TestPlanToEntry(t *testing.T) {
 		},
 		{
 			name: "Error: plan with nil ID",
-			plan: &workflow.Plan{
-				ID:     uuid.Nil,
-				Name:   "Test",
-				Descr:  "Test",
-				Blocks: []*workflow.Block{},
-				State:  &workflow.State{},
-			},
+			plan: func() *workflow.Plan {
+				p := &workflow.Plan{
+					ID:     uuid.Nil,
+					Name:   "Test",
+					Descr:  "Test",
+					Blocks: []*workflow.Block{},
+				}
+				p.State.Set(workflow.State{})
+				return p
+			}(),
 			wantErr: true,
 		},
 	}
@@ -131,14 +137,12 @@ func TestBlockToEntry(t *testing.T) {
 			name: "Success: basic block",
 			block: func() *workflow.Block {
 				b := &workflow.Block{
-					ID:    blockID,
-					Name:  "Test Block",
-					Descr: "Test Description",
-					State: &workflow.State{
-						Status: workflow.NotStarted,
-					},
+					ID:        blockID,
+					Name:      "Test Block",
+					Descr:     "Test Description",
 					Sequences: []*workflow.Sequence{},
 				}
+				b.State.Set(workflow.State{Status: workflow.NotStarted})
 				b.SetPlanID(planID)
 				return b
 			}(),
@@ -247,12 +251,10 @@ func TestChecksToEntry(t *testing.T) {
 			name: "Success: basic checks",
 			checks: func() *workflow.Checks {
 				c := &workflow.Checks{
-					ID: checksID,
-					State: &workflow.State{
-						Status: workflow.NotStarted,
-					},
+					ID:      checksID,
 					Actions: []*workflow.Action{},
 				}
+				c.State.Set(workflow.State{Status: workflow.NotStarted})
 				c.SetPlanID(planID)
 				return c
 			}(),
@@ -316,14 +318,12 @@ func TestSequenceToEntry(t *testing.T) {
 			name: "Success: basic sequence",
 			sequence: func() *workflow.Sequence {
 				s := &workflow.Sequence{
-					ID:    seqID,
-					Name:  "Test Sequence",
-					Descr: "Test Description",
-					State: &workflow.State{
-						Status: workflow.NotStarted,
-					},
+					ID:      seqID,
+					Name:    "Test Sequence",
+					Descr:   "Test Description",
 					Actions: []*workflow.Action{},
 				}
+				s.State.Set(workflow.State{Status: workflow.NotStarted})
 				s.SetPlanID(planID)
 				return s
 			}(),
@@ -383,10 +383,8 @@ func TestActionToEntry(t *testing.T) {
 					Descr:   "Test Description",
 					Plugin:  "test-plugin",
 					Timeout: 30 * time.Second,
-					State: &workflow.State{
-						Status: workflow.NotStarted,
-					},
 				}
+				a.State.Set(workflow.State{Status: workflow.NotStarted})
 				a.SetPlanID(planID)
 				return a
 			}(),
@@ -493,33 +491,37 @@ func TestPlanMetadataConversion(t *testing.T) {
 	}{
 		{
 			name: "Success: round trip conversion with all fields",
-			plan: &workflow.Plan{
-				ID:      planID,
-				GroupID: groupID,
-				Name:    "Test Plan",
-				Descr:   "Test Description",
-				State: &workflow.State{
+			plan: func() *workflow.Plan {
+				p := &workflow.Plan{
+					ID:         planID,
+					GroupID:    groupID,
+					Name:       "Test Plan",
+					Descr:      "Test Description",
+					SubmitTime: now,
+				}
+				p.State.Set(workflow.State{
 					Status: workflow.Running,
 					Start:  now,
-				},
-				SubmitTime: now,
-			},
+				})
+				return p
+			}(),
 			testPlanToMeta:    true,
 			testMapToPlanMeta: true,
 			wantErr:           false,
 		},
 		{
 			name: "Success: plan without group ID",
-			plan: &workflow.Plan{
-				ID:      planID,
-				GroupID: uuid.Nil,
-				Name:    "Test Plan",
-				Descr:   "Test Description",
-				State: &workflow.State{
-					Status: workflow.NotStarted,
-				},
-				SubmitTime: now,
-			},
+			plan: func() *workflow.Plan {
+				p := &workflow.Plan{
+					ID:         planID,
+					GroupID:    uuid.Nil,
+					Name:       "Test Plan",
+					Descr:      "Test Description",
+					SubmitTime: now,
+				}
+				p.State.Set(workflow.State{Status: workflow.NotStarted})
+				return p
+			}(),
 			testPlanToMeta:    true,
 			testMapToPlanMeta: true,
 			wantErr:           false,
@@ -558,7 +560,7 @@ func TestPlanMetadataConversion(t *testing.T) {
 						Name:       "Test Plan",
 						Descr:      "Test Description",
 						SubmitTime: truncatedTime,
-						State: &workflow.State{
+						State: workflow.State{
 							Status: workflow.Running,
 							Start:  truncatedTime,
 						},
@@ -711,7 +713,7 @@ func TestPlanMetadataConversion(t *testing.T) {
 					if !got.SubmitTime.Equal(test.wantPlanMeta.SubmitTime) {
 						t.Errorf("TestPlanMetadataConversion(%s): planMeta SubmitTime got %v, want %v", test.name, got.SubmitTime, test.wantPlanMeta.SubmitTime)
 					}
-					if got.State != nil && test.wantPlanMeta.State != nil {
+					if got.State != (workflow.State{}) && test.wantPlanMeta.State != (workflow.State{}) {
 						if got.State.Status != test.wantPlanMeta.State.Status {
 							t.Errorf("TestPlanMetadataConversion(%s): planMeta State.Status got %v, want %v", test.name, got.State.Status, test.wantPlanMeta.State.Status)
 						}
@@ -732,9 +734,9 @@ func TestPlanMetadataConversion(t *testing.T) {
 					if test.plan.GroupID != uuid.Nil && got.GroupID != test.plan.GroupID {
 						t.Errorf("TestPlanMetadataConversion(%s): round trip GroupID got %v, want %v", test.name, got.GroupID, test.plan.GroupID)
 					}
-					if got.State != nil && test.plan.State != nil {
-						if got.State.Status != test.plan.State.Status {
-							t.Errorf("TestPlanMetadataConversion(%s): round trip State.Status got %v, want %v", test.name, got.State.Status, test.plan.State.Status)
+					if got.State != (workflow.State{}) && test.plan.State.Get() != (workflow.State{}) {
+						if got.State.Status != test.plan.State.Get().Status {
+							t.Errorf("TestPlanMetadataConversion(%s): round trip State.Status got %v, want %v", test.name, got.State.Status, test.plan.State.Get().Status)
 						}
 					}
 				}

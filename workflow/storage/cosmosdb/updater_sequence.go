@@ -31,14 +31,15 @@ func (u sequenceUpdater) UpdateSequence(ctx context.Context, seq *workflow.Seque
 	defer u.mu.Unlock()
 
 	patch := azcosmos.PatchOperations{}
-	patch.AppendReplace("/stateStatus", seq.State.Status)
-	patch.AppendReplace("/stateStart", seq.State.Start)
-	patch.AppendReplace("/stateEnd", seq.State.End)
+	patch.AppendReplace("/stateStatus", seq.State.Get().Status)
+	patch.AppendReplace("/stateStart", seq.State.Get().Start)
+	patch.AppendReplace("/stateEnd", seq.State.Get().End)
 
 	itemOpt := itemOptions(u.defaultIOpts)
 	var ifMatchEtag *azcore.ETag = nil
-	if seq.State.ETag != "" {
-		ifMatchEtag = (*azcore.ETag)(&seq.State.ETag)
+	if seq.State.Get().ETag != "" {
+		etag := seq.State.Get().ETag
+		ifMatchEtag = (*azcore.ETag)(&etag)
 	}
 	itemOpt.IfMatchEtag = ifMatchEtag
 
@@ -48,7 +49,9 @@ func (u sequenceUpdater) UpdateSequence(ctx context.Context, seq *workflow.Seque
 		return errors.E(ctx, errors.CatUser, errors.TypeStorageUpdate, err)
 	}
 
-	seq.State.ETag = string(resp.ETag)
+	state := seq.State.Get()
+	state.ETag = string(resp.ETag)
+	seq.State.Set(state)
 
 	return nil
 }

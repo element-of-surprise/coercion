@@ -79,8 +79,8 @@ func writeOtherBlocks(buff *strings.Builder, blocks []*workflow.Block) {
 	tbl.WithHeaderFormatter(headerFmt).WithFirstColumnFormatter(columnFmt)
 
 	for i, block := range blocks {
-		tbl.AddRow(i, block.Descr, block.State.Status)
-		if block.State.Status == workflow.Running {
+		tbl.AddRow(i, block.Descr, block.State.Get().Status)
+		if block.State.Get().Status == workflow.Running {
 			continue
 		}
 	}
@@ -89,7 +89,7 @@ func writeOtherBlocks(buff *strings.Builder, blocks []*workflow.Block) {
 
 func findRunningBlock(blocks []*workflow.Block) (int, *workflow.Block) {
 	for i, b := range blocks {
-		if b.State.Status == workflow.Running {
+		if b.State.Get().Status == workflow.Running {
 			return i, b
 		}
 	}
@@ -99,7 +99,7 @@ func findRunningBlock(blocks []*workflow.Block) (int, *workflow.Block) {
 func findRunningSeq(seq []*workflow.Sequence) []*workflow.Sequence {
 	var found []*workflow.Sequence
 	for _, s := range seq {
-		if s.State.Status == workflow.Running {
+		if s.State.Get().Status == workflow.Running {
 			found = append(found, s)
 		}
 	}
@@ -114,7 +114,7 @@ func writeRunningBlock(buff *strings.Builder, block *workflow.Block) {
 	tbl.WithHeaderFormatter(headerFmt).WithFirstColumnFormatter(columnFmt)
 
 	for i, seq := range block.Sequences {
-		tbl.AddRow(i, seq.Name, seq.State.Status)
+		tbl.AddRow(i, seq.Name, seq.State.Get().Status)
 	}
 	tbl.Print()
 }
@@ -127,7 +127,7 @@ func writeRunningActions(buff *strings.Builder, seq *workflow.Sequence) {
 	tbl.WithHeaderFormatter(headerFmt).WithFirstColumnFormatter(columnFmt)
 
 	for i, action := range seq.Actions {
-		tbl.AddRow(i, action.Name, action.State.Status)
+		tbl.AddRow(i, action.Name, action.State.Get().Status)
 	}
 	tbl.Print()
 }

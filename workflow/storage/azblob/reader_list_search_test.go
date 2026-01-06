@@ -49,7 +49,7 @@ func TestSearchWithRetentionPeriod(t *testing.T) {
 							ID:         createPlanIDForDate(t, now),
 							Name:       "today-plan",
 							SubmitTime: now,
-							State:      &workflow.State{Status: workflow.Running},
+							State:      workflow.State{Status: workflow.Running},
 						},
 					},
 				}
@@ -67,7 +67,7 @@ func TestSearchWithRetentionPeriod(t *testing.T) {
 							ID:         createPlanIDForDate(t, planDate),
 							Name:       "one-day-ago-plan",
 							SubmitTime: planDate,
-							State:      &workflow.State{Status: workflow.Running},
+							State:      workflow.State{Status: workflow.Running},
 						},
 					},
 				}
@@ -85,7 +85,7 @@ func TestSearchWithRetentionPeriod(t *testing.T) {
 							ID:         createPlanIDForDate(t, planDate),
 							Name:       "two-days-ago-plan",
 							SubmitTime: planDate,
-							State:      &workflow.State{Status: workflow.Running},
+							State:      workflow.State{Status: workflow.Running},
 						},
 					},
 				}
@@ -103,7 +103,7 @@ func TestSearchWithRetentionPeriod(t *testing.T) {
 							ID:         createPlanIDForDate(t, planDate),
 							Name:       "seven-days-ago-plan",
 							SubmitTime: planDate,
-							State:      &workflow.State{Status: workflow.Running},
+							State:      workflow.State{Status: workflow.Running},
 						},
 					},
 				}
@@ -121,7 +121,7 @@ func TestSearchWithRetentionPeriod(t *testing.T) {
 							ID:         createPlanIDForDate(t, planDate),
 							Name:       "thirteen-days-ago-plan",
 							SubmitTime: planDate,
-							State:      &workflow.State{Status: workflow.Running},
+							State:      workflow.State{Status: workflow.Running},
 						},
 					},
 				}
@@ -139,7 +139,7 @@ func TestSearchWithRetentionPeriod(t *testing.T) {
 							ID:         createPlanIDForDate(t, planDate),
 							Name:       "fourteen-days-ago-plan",
 							SubmitTime: planDate,
-							State:      &workflow.State{Status: workflow.Running},
+							State:      workflow.State{Status: workflow.Running},
 						},
 					},
 				}
@@ -157,7 +157,7 @@ func TestSearchWithRetentionPeriod(t *testing.T) {
 							ID:         createPlanIDForDate(t, planDate),
 							Name:       "fifteen-days-ago-plan",
 							SubmitTime: planDate,
-							State:      &workflow.State{Status: workflow.Running},
+							State:      workflow.State{Status: workflow.Running},
 						},
 					},
 				}
@@ -178,7 +178,7 @@ func TestSearchWithRetentionPeriod(t *testing.T) {
 							ID:         createPlanIDForDate(t, now),
 							Name:       "today-plan",
 							SubmitTime: now,
-							State:      &workflow.State{Status: workflow.Running},
+							State:      workflow.State{Status: workflow.Running},
 						},
 					},
 					containerName("test", twoDaysAgo): {
@@ -186,7 +186,7 @@ func TestSearchWithRetentionPeriod(t *testing.T) {
 							ID:         createPlanIDForDate(t, twoDaysAgo),
 							Name:       "two-days-plan",
 							SubmitTime: twoDaysAgo,
-							State:      &workflow.State{Status: workflow.Running},
+							State:      workflow.State{Status: workflow.Running},
 						},
 					},
 					containerName("test", sevenDaysAgo): {
@@ -194,7 +194,7 @@ func TestSearchWithRetentionPeriod(t *testing.T) {
 							ID:         createPlanIDForDate(t, sevenDaysAgo),
 							Name:       "seven-days-plan",
 							SubmitTime: sevenDaysAgo,
-							State:      &workflow.State{Status: workflow.Running},
+							State:      workflow.State{Status: workflow.Running},
 						},
 					},
 					containerName("test", thirteenDaysAgo): {
@@ -202,7 +202,7 @@ func TestSearchWithRetentionPeriod(t *testing.T) {
 							ID:         createPlanIDForDate(t, thirteenDaysAgo),
 							Name:       "thirteen-days-plan",
 							SubmitTime: thirteenDaysAgo,
-							State:      &workflow.State{Status: workflow.Running},
+							State:      workflow.State{Status: workflow.Running},
 						},
 					},
 				}
@@ -223,7 +223,7 @@ func TestSearchWithRetentionPeriod(t *testing.T) {
 							ID:         createPlanIDForDate(t, twoDaysAgo),
 							Name:       "within-retention",
 							SubmitTime: twoDaysAgo,
-							State:      &workflow.State{Status: workflow.Running},
+							State:      workflow.State{Status: workflow.Running},
 						},
 					},
 					containerName("test", fifteenDaysAgo): {
@@ -231,7 +231,7 @@ func TestSearchWithRetentionPeriod(t *testing.T) {
 							ID:         createPlanIDForDate(t, fifteenDaysAgo),
 							Name:       "beyond-retention-15",
 							SubmitTime: fifteenDaysAgo,
-							State:      &workflow.State{Status: workflow.Running},
+							State:      workflow.State{Status: workflow.Running},
 						},
 					},
 					containerName("test", twentyDaysAgo): {
@@ -239,7 +239,7 @@ func TestSearchWithRetentionPeriod(t *testing.T) {
 							ID:         createPlanIDForDate(t, twentyDaysAgo),
 							Name:       "beyond-retention-20",
 							SubmitTime: twentyDaysAgo,
-							State:      &workflow.State{Status: workflow.Running},
+							State:      workflow.State{Status: workflow.Running},
 						},
 					},
 				}
@@ -256,19 +256,19 @@ func TestSearchWithRetentionPeriod(t *testing.T) {
 							ID:         createPlanIDForDate(t, now),
 							Name:       "running-plan",
 							SubmitTime: now,
-							State:      &workflow.State{Status: workflow.Running},
+							State:      workflow.State{Status: workflow.Running},
 						},
 						{
 							ID:         createPlanIDForDate(t, now.Add(-time.Hour)),
 							Name:       "completed-plan",
 							SubmitTime: now.Add(-time.Hour),
-							State:      &workflow.State{Status: workflow.Completed},
+							State:      workflow.State{Status: workflow.Completed},
 						},
 						{
 							ID:         createPlanIDForDate(t, now.Add(-2*time.Hour)),
 							Name:       "failed-plan",
 							SubmitTime: now.Add(-2 * time.Hour),
-							State:      &workflow.State{Status: workflow.Failed},
+							State:      workflow.State{Status: workflow.Failed},
 						},
 					},
 				}
@@ -377,7 +377,7 @@ func TestSearchRecoveryScenario(t *testing.T) {
 					ID:         createPlanIDForDate(t, planDate),
 					Name:       "recovery-test-plan",
 					SubmitTime: planDate,
-					State:      &workflow.State{Status: workflow.Running},
+					State:      workflow.State{Status: workflow.Running},
 				})
 			}
 
@@ -448,7 +448,7 @@ func TestListWithRetentionPeriod(t *testing.T) {
 							ID:         createPlanIDForDate(t, now),
 							Name:       "today-plan",
 							SubmitTime: now,
-							State:      &workflow.State{Status: workflow.Running},
+							State:      workflow.State{Status: workflow.Running},
 						},
 					},
 					containerName("test", twoDaysAgo): {
@@ -456,7 +456,7 @@ func TestListWithRetentionPeriod(t *testing.T) {
 							ID:         createPlanIDForDate(t, twoDaysAgo),
 							Name:       "two-days-plan",
 							SubmitTime: twoDaysAgo,
-							State:      &workflow.State{Status: workflow.Completed},
+							State:      workflow.State{Status: workflow.Completed},
 						},
 					},
 					containerName("test", sevenDaysAgo): {
@@ -464,7 +464,7 @@ func TestListWithRetentionPeriod(t *testing.T) {
 							ID:         createPlanIDForDate(t, sevenDaysAgo),
 							Name:       "seven-days-plan",
 							SubmitTime: sevenDaysAgo,
-							State:      &workflow.State{Status: workflow.Failed},
+							State:      workflow.State{Status: workflow.Failed},
 						},
 					},
 				}
@@ -483,7 +483,7 @@ func TestListWithRetentionPeriod(t *testing.T) {
 							ID:         createPlanIDForDate(t, now),
 							Name:       "today-plan",
 							SubmitTime: now,
-							State:      &workflow.State{Status: workflow.Running},
+							State:      workflow.State{Status: workflow.Running},
 						},
 					},
 					containerName("test", fifteenDaysAgo): {
@@ -491,7 +491,7 @@ func TestListWithRetentionPeriod(t *testing.T) {
 							ID:         createPlanIDForDate(t, fifteenDaysAgo),
 							Name:       "beyond-retention",
 							SubmitTime: fifteenDaysAgo,
-							State:      &workflow.State{Status: workflow.Running},
+							State:      workflow.State{Status: workflow.Running},
 						},
 					},
 				}

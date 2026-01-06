@@ -264,10 +264,10 @@ func TestEtoE(t *testing.T) {
 		panic(err)
 	}
 
-	if result.State.Status != workflow.Completed {
-		t.Fatalf("TestEtoE: workflow did not complete successfully(%s)", result.State.Status)
+	if result.State.Get().Status != workflow.Completed {
+		t.Fatalf("TestEtoE: workflow did not complete successfully(%s)", result.State.Get().Status)
 	}
-	plugResp := result.PreChecks.Actions[0].Attempts[0].Resp.(plugins.Resp)
+	plugResp := result.PreChecks.Actions[0].Attempts.Get()[0].Resp.(plugins.Resp)
 	if plugResp.Arg == "" {
 		t.Fatalf("TestEtoE: planID not found")
 	}
@@ -275,10 +275,10 @@ func TestEtoE(t *testing.T) {
 	if err != nil {
 		t.Fatalf("TestEtoE: planID not a valid UUID")
 	}
-	if result.DeferredChecks.State.Status != workflow.Completed {
-		t.Fatalf("TestEtoE: deferred checks did not complete successfully(%s)", result.DeferredChecks.State.Status)
+	if result.DeferredChecks.State.Get().Status != workflow.Completed {
+		t.Fatalf("TestEtoE: deferred checks did not complete successfully(%s)", result.DeferredChecks.State.Get().Status)
 	}
-	plugResp = result.DeferredChecks.Actions[0].Attempts[0].Resp.(plugins.Resp)
+	plugResp = result.DeferredChecks.Actions[0].Attempts.Get()[0].Resp.(plugins.Resp)
 	if plugResp.Arg == "" {
 		t.Fatalf("TestEtoE: planID not found")
 	}
@@ -288,37 +288,37 @@ func TestEtoE(t *testing.T) {
 	}
 
 	for _, block := range result.Blocks {
-		if block.State.Status != workflow.Completed {
-			t.Fatalf("TestEtoE: block did not complete successfully(%s)", block.State.Status)
+		if block.State.Get().Status != workflow.Completed {
+			t.Fatalf("TestEtoE: block did not complete successfully(%s)", block.State.Get().Status)
 		}
-		if block.PreChecks.State.Status != workflow.Completed {
-			t.Fatalf("TestEtoE: block pre checks did not complete successfully(%s)", block.PreChecks.State.Status)
+		if block.PreChecks.State.Get().Status != workflow.Completed {
+			t.Fatalf("TestEtoE: block pre checks did not complete successfully(%s)", block.PreChecks.State.Get().Status)
 		}
 		if err := testPlugResp(block.PreChecks.Actions[0], "actionID"); err != nil {
 			t.Fatalf("TestEtoE(block PreChecks): %v", err)
 		}
-		if block.PostChecks.State.Status != workflow.Completed {
-			t.Fatalf("TestEtoE: block post checks did not complete successfully(%s)", block.PostChecks.State.Status)
+		if block.PostChecks.State.Get().Status != workflow.Completed {
+			t.Fatalf("TestEtoE: block post checks did not complete successfully(%s)", block.PostChecks.State.Get().Status)
 		}
 		if err := testPlugResp(block.PostChecks.Actions[0], "actionID"); err != nil {
 			t.Fatalf("TestEtoE(block PostChecks): %v", err)
 		}
-		if block.ContChecks.State.Status != workflow.Completed {
-			t.Fatalf("TestEtoE: block cont checks did not complete successfully(%s)", block.ContChecks.State.Status)
+		if block.ContChecks.State.Get().Status != workflow.Completed {
+			t.Fatalf("TestEtoE: block cont checks did not complete successfully(%s)", block.ContChecks.State.Get().Status)
 		}
 		if err := testPlugResp(block.ContChecks.Actions[0], "actionID"); err != nil {
 			t.Fatalf("TestEtoE(block ContChecks): %v", err)
 		}
-		if block.DeferredChecks.State.Status != workflow.Completed {
-			t.Fatalf("TestEtoE: block deferred checks did not complete successfully(%s)", block.DeferredChecks.State.Status)
+		if block.DeferredChecks.State.Get().Status != workflow.Completed {
+			t.Fatalf("TestEtoE: block deferred checks did not complete successfully(%s)", block.DeferredChecks.State.Get().Status)
 		}
 		if err := testPlugResp(block.DeferredChecks.Actions[0], "actionID"); err != nil {
 			t.Fatalf("TestEtoE(block DeferredChecks): %v", err)
 		}
 
 		for _, seq := range block.Sequences {
-			if seq.State.Status != workflow.Completed {
-				t.Fatalf("TestEtoE: sequence did not complete successfully(%s)", seq.State.Status)
+			if seq.State.Get().Status != workflow.Completed {
+				t.Fatalf("TestEtoE: sequence did not complete successfully(%s)", seq.State.Get().Status)
 			}
 			if err := testPlugResp(seq.Actions[1], "actionID"); err != nil {
 				t.Fatalf("TestEtoE(sequence): %v", err)
@@ -328,7 +328,7 @@ func TestEtoE(t *testing.T) {
 }
 
 func testPlugResp(action *workflow.Action, want string) error {
-	plugResp := action.Attempts[0].Resp.(plugins.Resp)
+	plugResp := action.Attempts.Get()[0].Resp.(plugins.Resp)
 	if plugResp.Arg == "" {
 		return fmt.Errorf("%q was not found in the response", want)
 	}
@@ -465,19 +465,19 @@ func TestBypassPlan(t *testing.T) {
 		}
 	}
 
-	if result.Data.State.Status != workflow.Completed {
+	if result.Data.State.Get().Status != workflow.Completed {
 		t.Fatalf("TestBypassPlan: expected workflow to complete")
 	}
-	if result.Data.PreChecks.State.Status != workflow.NotStarted {
-		t.Fatalf("TestBypassPlan: expected Prechecks in NotStarted, got %s", result.Data.PreChecks.State.Status)
+	if result.Data.PreChecks.State.Get().Status != workflow.NotStarted {
+		t.Fatalf("TestBypassPlan: expected Prechecks in NotStarted, got %s", result.Data.PreChecks.State.Get().Status)
 	}
-	if result.Data.PostChecks.State.Status != workflow.NotStarted {
+	if result.Data.PostChecks.State.Get().Status != workflow.NotStarted {
 		t.Fatalf("TestBypassPlan: expected Postchecks in NotStarted")
 	}
-	if result.Data.ContChecks.State.Status != workflow.NotStarted {
+	if result.Data.ContChecks.State.Get().Status != workflow.NotStarted {
 		t.Fatalf("TestBypassPlan: expected ContChecks in NotStarted")
 	}
-	if result.Data.Blocks[0].State.Status != workflow.NotStarted {
+	if result.Data.Blocks[0].State.Get().Status != workflow.NotStarted {
 		t.Fatalf("TestBypassPlan: expected Block0 in NotStarted")
 	}
 }
@@ -630,41 +630,41 @@ func TestBypassBlock(t *testing.T) {
 		}
 	}
 
-	if result.Data.State.Status != workflow.Completed {
+	if result.Data.State.Get().Status != workflow.Completed {
 		t.Fatalf("TestBypassPlan: expected workflow to complete")
 	}
 
 	// Block 0 checks.
-	if result.Data.Blocks[0].BypassChecks.State.Status != workflow.Completed {
-		t.Fatalf("TestBypassPlan: expected block 0 BypassChecks in Completed, got %s", result.Data.Blocks[0].BypassChecks.State.Status)
+	if result.Data.Blocks[0].BypassChecks.State.Get().Status != workflow.Completed {
+		t.Fatalf("TestBypassPlan: expected block 0 BypassChecks in Completed, got %s", result.Data.Blocks[0].BypassChecks.State.Get().Status)
 	}
-	if result.Data.Blocks[0].PreChecks.State.Status != workflow.NotStarted {
-		t.Fatalf("TestBypassPlan: expected block 0 Prechecks in NotStarted, got %s", result.Data.Blocks[0].PreChecks.State.Status)
+	if result.Data.Blocks[0].PreChecks.State.Get().Status != workflow.NotStarted {
+		t.Fatalf("TestBypassPlan: expected block 0 Prechecks in NotStarted, got %s", result.Data.Blocks[0].PreChecks.State.Get().Status)
 	}
-	if result.Data.Blocks[0].PostChecks.State.Status != workflow.NotStarted {
+	if result.Data.Blocks[0].PostChecks.State.Get().Status != workflow.NotStarted {
 		t.Fatalf("TestBypassPlan: expected block 0 Postchecks in NotStarted")
 	}
-	if result.Data.Blocks[0].ContChecks.State.Status != workflow.NotStarted {
+	if result.Data.Blocks[0].ContChecks.State.Get().Status != workflow.NotStarted {
 		t.Fatalf("TestBypassPlan: expected block 0 ContChecks in NotStarted")
 	}
-	if result.Data.Blocks[0].State.Status != workflow.Completed {
+	if result.Data.Blocks[0].State.Get().Status != workflow.Completed {
 		t.Fatalf("TestBypassPlan: expected Block0 in NotStarted")
 	}
 	for _, seq := range result.Data.Blocks[0].Sequences {
-		if seq.State.Status != workflow.NotStarted {
+		if seq.State.Get().Status != workflow.NotStarted {
 			t.Fatalf("TestBypassPlan: expected block 0 Sequence in Completed")
 		}
 	}
 
 	// Block 1 checks.
-	if result.Data.Blocks[1].BypassChecks.State.Status != workflow.Failed {
+	if result.Data.Blocks[1].BypassChecks.State.Get().Status != workflow.Failed {
 		t.Fatalf("TestBypassPlan: expected block 1 BypassChecks in Failed")
 	}
-	if result.Data.Blocks[1].State.Status != workflow.Completed {
+	if result.Data.Blocks[1].State.Get().Status != workflow.Completed {
 		t.Fatalf("TestBypassPlan: expected Block1 in Completed")
 	}
 	for _, seq := range result.Data.Blocks[1].Sequences {
-		if seq.State.Status != workflow.Completed {
+		if seq.State.Get().Status != workflow.Completed {
 			t.Fatalf("TestBypassPlan: expected block 1 Sequence in Completed")
 		}
 	}

@@ -398,7 +398,7 @@ func TestRecoveryContainerNames(t *testing.T) {
 					return []storage.ListResult{
 						{
 							ID:    uuid.New(),
-							State: &workflow.State{Status: workflow.Running},
+							State: workflow.State{Status: workflow.Running},
 						},
 					}, nil
 				}
@@ -415,7 +415,7 @@ func TestRecoveryContainerNames(t *testing.T) {
 					return []storage.ListResult{
 						{
 							ID: uuid.New(),
-							State: &workflow.State{
+							State: workflow.State{
 								Status: workflow.NotStarted,
 							},
 						},
@@ -440,7 +440,7 @@ func TestRecoveryContainerNames(t *testing.T) {
 				return []storage.ListResult{
 					{
 						ID:    uuid.New(),
-						State: &workflow.State{Status: workflow.Completed},
+						State: workflow.State{Status: workflow.Completed},
 					},
 				}, nil
 			},
@@ -459,14 +459,14 @@ func TestRecoveryContainerNames(t *testing.T) {
 					return []storage.ListResult{
 						{
 							ID:    uuid.New(),
-							State: &workflow.State{Status: workflow.Running},
+							State: workflow.State{Status: workflow.Running},
 						},
 					}, nil
 				case yesterday:
 					return []storage.ListResult{
 						{
 							ID:    uuid.New(),
-							State: &workflow.State{Status: workflow.Running},
+							State: workflow.State{Status: workflow.Running},
 						},
 					}, nil
 				default:
@@ -492,21 +492,21 @@ func TestRecoveryContainerNames(t *testing.T) {
 					return []storage.ListResult{
 						{
 							ID:    uuid.New(),
-							State: &workflow.State{Status: workflow.Completed},
+							State: workflow.State{Status: workflow.Completed},
 						},
 					}, nil
 				case yesterday:
 					return []storage.ListResult{
 						{
 							ID:    uuid.New(),
-							State: &workflow.State{Status: workflow.Running},
+							State: workflow.State{Status: workflow.Running},
 						},
 					}, nil
 				case twoDaysAgo:
 					return []storage.ListResult{
 						{
 							ID:    uuid.New(),
-							State: &workflow.State{Status: workflow.Completed},
+							State: workflow.State{Status: workflow.Completed},
 						},
 					}, nil
 				default:

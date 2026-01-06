@@ -94,7 +94,7 @@ func TestPlanValidate(t *testing.T) {
 			name: "Error: State != nil",
 			plan: func() *Plan {
 				p := goodPlan()
-				p.State = &State{}
+				p.State.Set(State{Status: Running})
 				return p
 			},
 			err: true,
@@ -172,7 +172,7 @@ func TestPreCheckValidate(t *testing.T) {
 			name: "Error: State != nil",
 			preCheck: func() *Checks {
 				p := goodPreChecks()
-				p.State = &State{}
+				p.State.Set(State{Status: Running})
 				return p
 			},
 			err: true,
@@ -260,7 +260,7 @@ func TestPostCheckValidate(t *testing.T) {
 			name: "Error: State != nil",
 			postCheck: func() *Checks {
 				p := goodPostChecks()
-				p.State = &State{}
+				p.State.Set(State{Status: Running})
 				return p
 			},
 			err: true,
@@ -347,7 +347,7 @@ func TestDeferredCheckValidate(t *testing.T) {
 			name: "Error: State != nil",
 			deferCheck: func() *Checks {
 				p := goodDeferChecks()
-				p.State = &State{}
+				p.State.Set(State{Status: Running})
 				return p
 			},
 			err: true,
@@ -434,7 +434,7 @@ func TestContCheckValidate(t *testing.T) {
 			name: "Error: State != nil",
 			contCheck: func() *Checks {
 				p := goodContChecks()
-				p.State = &State{}
+				p.State.Set(State{Status: Running})
 				return p
 			},
 			err: true,
@@ -551,7 +551,7 @@ func TestBlockValidate(t *testing.T) {
 			name: "Error: State is non-nil",
 			block: func() *Block {
 				b := goodBlock()
-				b.State = &State{}
+				b.State.Set(State{Status: Running})
 				return b
 			},
 			err: true,
@@ -673,7 +673,7 @@ func TestSequenceValidate(t *testing.T) {
 			name: "Error: State is non-nil",
 			sequence: func() *Sequence {
 				s := goodSequence()
-				s.State = &State{}
+				s.State.Set(State{Status: Running})
 				return s
 			},
 			err: true,
@@ -808,7 +808,7 @@ func TestActionValidate(t *testing.T) {
 			name: "Error: State is not nil",
 			action: func() *Action {
 				a := goodAction()
-				a.State = &State{}
+				a.State.Set(State{Status: Running})
 				return a
 			},
 			err: true,

@@ -168,24 +168,24 @@ func (e *Plans) Start(ctx context.Context, id uuid.UUID) error {
 	if plan == nil {
 		return ErrNotFound
 	}
-	if plan.State == nil {
-		return fmt.Errorf("plan(%s) has nil State", id)
-	}
 
+	planStatus := plan.State.Get().Status
 	switch {
-	case plan.State.Status == workflow.NotStarted:
+	case planStatus == workflow.NotStarted:
 		if err := e.validateStartState(ctx, plan); err != nil {
 			return err
 		}
-	case plan.State.Status == workflow.Running:
+	case planStatus == workflow.Running:
 		return nil
-	case plan.State.Status > workflow.Running:
+	case planStatus > workflow.Running:
 		return nil
 	}
 
 	// This ensures that before we return that this will be running.
-	plan.State.Status = workflow.Running
-	plan.State.Start = e.now()
+	state := plan.State.Get()
+	state.Status = workflow.Running
+	state.Start = e.now()
+	plan.State.Set(state)
 	if err := e.store.UpdatePlan(ctx, plan); err != nil {
 		return err
 	}
@@ -220,7 +220,7 @@ func (e *Plans) recover(ctx context.Context) error {
 	// runPlan starts its own goroutine and this is used to signal when the plan has started.
 	recoveryStarted := make([]chan struct{}, 0, len(req.Data.plans))
 	for _, plan := range req.Data.plans {
-		context.Log(ctx).Info("coercion: recovered plan", "id", plan.ID, "status", plan.State.Status)
+		context.Log(ctx).Info("coercion: recovered plan", "id", plan.ID, "status", plan.State.Get().Status)
 		w := make(chan struct{})
 		recoveryStarted = append(recoveryStarted, w)
 		e.runPlan(ctx, plan, w)
@@ -305,10 +305,10 @@ func (e *Plans) Wait(ctx context.Context, id uuid.UUID) error {
 	}
 }
 
-// getStater provides an interface for grabbing the State struct from workflow objects.
-// This is used to validate that the starting state of the plan is correct before starting it.
-type getStater interface {
-	GetState() *workflow.State
+// getStater provides an interface for grabbing the State struct from workflow objects and setting them.
+type getSetStates interface {
+	GetState() workflow.State
+	SetState(state workflow.State)
 }
 
 type ider interface {
@@ -364,7 +364,7 @@ func (p *Plans) validateAction(i walk.Item) error {
 
 	action := i.Value.(*workflow.Action)
 
-	if action.Attempts != nil {
+	if len(action.Attempts.Get()) != 0 {
 		return fmt.Errorf("action(%s).Attempts was non-nil", action.Name)
 	}
 
@@ -400,11 +400,8 @@ func (e *Plans) validateID(i walk.Item) error {
 
 // validateState validates that the object is in a valid state to be started.
 func (e *Plans) validateState(i walk.Item) error {
-	if get, ok := i.Value.(getStater); ok {
+	if get, ok := i.Value.(getSetStates); ok {
 		state := get.GetState()
-		if state == nil {
-			return fmt.Errorf("Object(%T).State is nil", i.Value)
-		}
 		if state.Status != workflow.NotStarted {
 			return fmt.Errorf("internal status is not NotStarted")
 		}

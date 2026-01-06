@@ -74,9 +74,9 @@ func commitPlan(ctx context.Context, conn *sqlite.Conn, p *workflow.Plan, captur
 		return errors.E(ctx, errors.CatInternal, errors.TypeBug, fmt.Errorf("planToSQL(idsToJSON(blocks)): %w", err))
 	}
 	stmt.SetBytes("$blocks", blocks)
-	stmt.SetInt64("$state_status", int64(p.State.Status))
-	stmt.SetInt64("$state_start", p.State.Start.UnixNano())
-	stmt.SetInt64("$state_end", p.State.End.UnixNano())
+	stmt.SetInt64("$state_status", int64(p.State.Get().Status))
+	stmt.SetInt64("$state_start", p.State.Get().Start.UnixNano())
+	stmt.SetInt64("$state_end", p.State.Get().End.UnixNano())
 	if p.SubmitTime.Before(zeroTime) {
 		stmt.SetInt64("$submit_time", zeroTime.UnixNano())
 	} else {
@@ -148,9 +148,9 @@ func commitChecks(ctx context.Context, conn *sqlite.Conn, planID uuid.UUID, chec
 	stmt.SetText("$plan_id", planID.String())
 	stmt.SetBytes("$actions", actions)
 	stmt.SetInt64("$delay", int64(checks.Delay))
-	stmt.SetInt64("$state_status", int64(checks.State.Status))
-	stmt.SetInt64("$state_start", checks.State.Start.UnixNano())
-	stmt.SetInt64("$state_end", checks.State.End.UnixNano())
+	stmt.SetInt64("$state_status", int64(checks.State.Get().Status))
+	stmt.SetInt64("$state_start", checks.State.Get().Start.UnixNano())
+	stmt.SetInt64("$state_end", checks.State.Get().End.UnixNano())
 
 	sStmt, err := stmt.Prepare(conn)
 	if err != nil {
@@ -237,11 +237,14 @@ func commitBlock(ctx context.Context, conn *sqlite.Conn, planID uuid.UUID, pos i
 	stmt.SetBytes("$sequences", sequences)
 	stmt.SetInt64("$concurrency", int64(block.Concurrency))
 	stmt.SetInt64("$toleratedfailures", int64(block.ToleratedFailures))
-	stmt.SetInt64("$state_status", int64(block.State.Status))
-	stmt.SetInt64("$state_start", block.State.Start.UnixNano())
-	stmt.SetInt64("$state_end", block.State.End.UnixNano())
+	stmt.SetInt64("$state_status", int64(block.State.Get().Status))
+	stmt.SetInt64("$state_start", block.State.Get().Start.UnixNano())
+	stmt.SetInt64("$state_end", block.State.Get().End.UnixNano())
 
 	sStmt, err := stmt.Prepare(conn)
+	if err != nil {
+		return fmt.Errorf("commitBlock: %w", err)
+	}
 
 	_, err = sStmt.Step()
 	if err != nil {
@@ -287,9 +290,9 @@ func commitSequence(ctx context.Context, conn *sqlite.Conn, planID uuid.UUID, po
 	stmt.SetText("$descr", seq.Descr)
 	stmt.SetInt64("$pos", int64(pos))
 	stmt.SetBytes("$actions", actions)
-	stmt.SetInt64("$state_status", int64(seq.State.Status))
-	stmt.SetInt64("$state_start", seq.State.Start.UnixNano())
-	stmt.SetInt64("$state_end", seq.State.End.UnixNano())
+	stmt.SetInt64("$state_status", int64(seq.State.Get().Status))
+	stmt.SetInt64("$state_start", seq.State.Get().Start.UnixNano())
+	stmt.SetInt64("$state_end", seq.State.Get().End.UnixNano())
 
 	sStmt, err := stmt.Prepare(conn)
 	if err != nil {
@@ -338,7 +341,7 @@ func commitAction(ctx context.Context, conn *sqlite.Conn, planID uuid.UUID, pos 
 		return fmt.Errorf("commitAction: %w", err)
 	}
 
-	attempts, err := encodeAttempts(action.Attempts)
+	attempts, err := encodeAttempts(action.Attempts.Get())
 	if err != nil {
 		return fmt.Errorf("commitAction: %w", err)
 	}
@@ -356,9 +359,9 @@ func commitAction(ctx context.Context, conn *sqlite.Conn, planID uuid.UUID, pos 
 	if attempts != nil {
 		stmt.SetBytes("$attempts", attempts)
 	}
-	stmt.SetInt64("$state_status", int64(action.State.Status))
-	stmt.SetInt64("$state_start", action.State.Start.UnixNano())
-	stmt.SetInt64("$state_end", action.State.End.UnixNano())
+	stmt.SetInt64("$state_status", int64(action.State.Get().Status))
+	stmt.SetInt64("$state_start", action.State.Get().Start.UnixNano())
+	stmt.SetInt64("$state_end", action.State.Get().End.UnixNano())
 
 	sStmt, err := stmt.Prepare(conn)
 	if err != nil {
@@ -374,7 +377,7 @@ func commitAction(ctx context.Context, conn *sqlite.Conn, planID uuid.UUID, pos 
 }
 
 // encodeAttempts encodes a slice of attempts into a JSON array hodling JSON encoded attempts as byte slices.
-func encodeAttempts(attempts []*workflow.Attempt) ([]byte, error) {
+func encodeAttempts(attempts []workflow.Attempt) ([]byte, error) {
 	if len(attempts) == 0 {
 		return nil, nil
 	}
@@ -393,16 +396,16 @@ func encodeAttempts(attempts []*workflow.Attempt) ([]byte, error) {
 }
 
 // decodeAttempts decodes a JSON array of JSON encoded attempts as byte slices into a slice of attempts.
-func decodeAttempts(rawAttempts []byte, plug plugins.Plugin) ([]*workflow.Attempt, error) {
+func decodeAttempts(rawAttempts []byte, plug plugins.Plugin) ([]workflow.Attempt, error) {
 	rawList := make([][]byte, 0)
 	if err := json.Unmarshal(rawAttempts, &rawList); err != nil {
 		return nil, fmt.Errorf("decodeAttempts: %w", err)
 	}
 
-	attempts := make([]*workflow.Attempt, 0, len(rawList))
+	attempts := make([]workflow.Attempt, 0, len(rawList))
 	for _, raw := range rawList {
-		var a = &workflow.Attempt{Resp: plug.Response()}
-		if err := json.Unmarshal(raw, a); err != nil {
+		var a = workflow.Attempt{Resp: plug.Response()}
+		if err := json.Unmarshal(raw, &a); err != nil {
 			return nil, fmt.Errorf("decodeAttempts: %w", err)
 		}
 		attempts = append(attempts, a)

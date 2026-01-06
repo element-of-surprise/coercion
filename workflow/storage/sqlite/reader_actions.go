@@ -89,10 +89,11 @@ func (r reader) actionRowToAction(ctx context.Context, stmt *sqlite.Stmt) (*work
 	a.Plugin = stmt.GetText("plugin")
 	a.Timeout = time.Duration(stmt.GetInt64("timeout"))
 	a.Retries = int(stmt.GetInt64("retries"))
-	a.State, err = fieldToState(stmt)
+	state, err := fieldToState(stmt)
 	if err != nil {
 		return nil, fmt.Errorf("actionRowToAction: %w", err)
 	}
+	a.State.Set(*state)
 
 	plug := r.reg.Plugin(a.Plugin)
 	if plug == nil {
@@ -117,10 +118,11 @@ func (r reader) actionRowToAction(ctx context.Context, stmt *sqlite.Stmt) (*work
 	}
 	b = fieldToBytes("attempts", stmt)
 	if len(b) > 0 {
-		a.Attempts, err = decodeAttempts(b, plug)
+		attempts, err := decodeAttempts(b, plug)
 		if err != nil {
 			return nil, fmt.Errorf("couldn't decode attempts: %w", err)
 		}
+		a.Attempts.Set(attempts)
 	}
 	return a, nil
 }

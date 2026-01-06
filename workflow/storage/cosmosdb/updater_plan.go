@@ -36,15 +36,16 @@ func (u planUpdater) UpdatePlan(ctx context.Context, p *workflow.Plan) error {
 
 	patch := azcosmos.PatchOperations{}
 	patch.AppendReplace("/reason", p.Reason)
-	patch.AppendReplace("/stateStatus", p.State.Status)
-	patch.AppendReplace("/stateStart", p.State.Start)
-	patch.AppendReplace("/stateEnd", p.State.End)
+	patch.AppendReplace("/stateStatus", p.State.Get().Status)
+	patch.AppendReplace("/stateStart", p.State.Get().Start)
+	patch.AppendReplace("/stateEnd", p.State.Get().End)
 	patch.AppendReplace("/submitTime", p.SubmitTime)
 
 	itemOpt := itemOptions(u.defaultIOpts)
 	var ifMatchEtag *azcore.ETag = nil
-	if p.State.ETag != "" {
-		ifMatchEtag = (*azcore.ETag)(&p.State.ETag)
+	if p.State.Get().ETag != "" {
+		etag := p.State.Get().ETag
+		ifMatchEtag = (*azcore.ETag)(&etag)
 	}
 	itemOpt.IfMatchEtag = ifMatchEtag
 
@@ -53,7 +54,9 @@ func (u planUpdater) UpdatePlan(ctx context.Context, p *workflow.Plan) error {
 		return errors.E(ctx, errors.CatUser, errors.TypeStorageUpdate, err)
 	}
 
-	p.State.ETag = string(resp.ETag)
+	state := p.State.Get()
+	state.ETag = string(resp.ETag)
+	p.State.Set(state)
 
 	return nil
 }

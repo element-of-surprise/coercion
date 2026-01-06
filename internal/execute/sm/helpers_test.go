@@ -62,12 +62,22 @@ func TestRunPreChecks(t *testing.T) {
 	}
 }
 
+func newActionWithState(name string, state *workflow.State) *workflow.Action {
+	a := &workflow.Action{Name: name}
+	a.State.Set(*state)
+	return a
+}
+
+func newChecksWithStateAndActions(actions []*workflow.Action, state *workflow.State) *workflow.Checks {
+	c := &workflow.Checks{Actions: actions}
+	c.State.Set(*state)
+	return c
+}
+
 func TestRunChecksOnce(t *testing.T) {
 	t.Parallel()
 
 	now := time.Now().UTC()
-
-	emptyState := &workflow.State{}
 
 	tests := []struct {
 		name       string
@@ -82,17 +92,8 @@ func TestRunChecksOnce(t *testing.T) {
 					{Name: "error"},
 				},
 			},
-			wantChecks: &workflow.Checks{
-				Actions: []*workflow.Action{
-					{Name: "error", State: emptyState},
-				},
-				State: &workflow.State{
-					Status: workflow.Failed,
-					Start:  now,
-					End:    now,
-				},
-			},
-			wantErr: true,
+			wantChecks: newChecksWithStateAndActions([]*workflow.Action{newActionWithState("error", &workflow.State{})}, &workflow.State{Status: workflow.Failed, Start: now, End: now}),
+			wantErr:    true,
 		},
 		{
 			name: "Success",
@@ -101,16 +102,7 @@ func TestRunChecksOnce(t *testing.T) {
 					{Name: "action1"},
 				},
 			},
-			wantChecks: &workflow.Checks{
-				Actions: []*workflow.Action{
-					{Name: "action1", State: emptyState},
-				},
-				State: &workflow.State{
-					Status: workflow.Completed,
-					Start:  now,
-					End:    now,
-				},
-			},
+			wantChecks: newChecksWithStateAndActions([]*workflow.Action{newActionWithState("action1", &workflow.State{})}, &workflow.State{Status: workflow.Completed, Start: now, End: now}),
 		},
 	}
 
@@ -121,9 +113,9 @@ func TestRunChecksOnce(t *testing.T) {
 			testActionsParallelRunner: fakeParallelActionRunner,
 			nower:                     func() time.Time { return now },
 		}
-		test.checks.State = &workflow.State{}
+		test.checks.State.Set(workflow.State{})
 		for _, action := range test.checks.Actions {
-			action.State = &workflow.State{}
+			action.State.Set(workflow.State{})
 		}
 
 		err := states.runChecksOnce(context.Background(), test.checks)
@@ -159,8 +151,8 @@ func TestParallelActionsRunner(t *testing.T) {
 			// Note: Even though this is a failed action, we are faking the action runner
 			// so we just need to make sure the action was marked Running.
 			wantActions: []*workflow.Action{
-				{Name: "action1", State: &workflow.State{Status: workflow.Running, Start: now}},
-				{Name: "error", State: &workflow.State{Status: workflow.Running, Start: now}},
+				newActionWithState("action1", &workflow.State{Status: workflow.Running, Start: now}),
+				newActionWithState("error", &workflow.State{Status: workflow.Running, Start: now}),
 			},
 			err: true,
 		},
@@ -171,8 +163,8 @@ func TestParallelActionsRunner(t *testing.T) {
 				{Name: "action2"},
 			},
 			wantActions: []*workflow.Action{
-				{Name: "action1", State: &workflow.State{Status: workflow.Running, Start: now}},
-				{Name: "action2", State: &workflow.State{Status: workflow.Running, Start: now}},
+				newActionWithState("action1", &workflow.State{Status: workflow.Running, Start: now}),
+				newActionWithState("action2", &workflow.State{Status: workflow.Running, Start: now}),
 			},
 		},
 	}
@@ -185,7 +177,7 @@ func TestParallelActionsRunner(t *testing.T) {
 			nower:            func() time.Time { return now },
 		}
 		for _, action := range test.actions {
-			action.State = &workflow.State{}
+			action.State.Set(workflow.State{})
 		}
 
 		err := states.runActionsParallel(context.Background(), test.actions)
@@ -198,6 +190,12 @@ func TestParallelActionsRunner(t *testing.T) {
 			t.Errorf("TestRunChecks(%s): expected error, got nil", test.name)
 		}
 	}
+}
+
+func newSequenceWithState(name string, actions []*workflow.Action, state *workflow.State) *workflow.Sequence {
+	s := &workflow.Sequence{Name: name, Actions: actions}
+	s.State.Set(*state)
+	return s
 }
 
 // TestRunActions tests the runActions function. Since this is wrapper around
@@ -217,76 +215,22 @@ func TestExecSeq(t *testing.T) {
 		wantErr   bool
 	}{
 		{
-			name: "action failed, so seq failed",
-			seq: &workflow.Sequence{
-				Name:    "seq",
-				Actions: []*workflow.Action{{Name: "action"}, {Name: "error"}},
-				State:   &workflow.State{},
-			},
-			wantSeq: &workflow.Sequence{
-				Name:    "seq",
-				Actions: []*workflow.Action{{Name: "action"}, {Name: "error"}},
-				State: &workflow.State{
-					Status: workflow.Failed,
-					Start:  start,
-					End:    end,
-				},
-			},
+			name:    "action failed, so seq failed",
+			seq:     newSequenceWithState("seq", []*workflow.Action{{Name: "action"}, {Name: "error"}}, &workflow.State{}),
+			wantSeq: newSequenceWithState("seq", []*workflow.Action{{Name: "action"}, {Name: "error"}}, &workflow.State{Status: workflow.Failed, Start: start, End: end}),
 			dbUpdates: []*workflow.Sequence{
-				{
-					Name:    "seq",
-					Actions: []*workflow.Action{{Name: "action"}, {Name: "error"}},
-					State: &workflow.State{
-						Status: workflow.Running,
-						Start:  start,
-					},
-				},
-				{
-					Name:    "seq",
-					Actions: []*workflow.Action{{Name: "action"}, {Name: "error"}},
-					State: &workflow.State{
-						Status: workflow.Failed,
-						Start:  start,
-						End:    end,
-					},
-				},
+				newSequenceWithState("seq", []*workflow.Action{{Name: "action"}, {Name: "error"}}, &workflow.State{Status: workflow.Running, Start: start}),
+				newSequenceWithState("seq", []*workflow.Action{{Name: "action"}, {Name: "error"}}, &workflow.State{Status: workflow.Failed, Start: start, End: end}),
 			},
 			wantErr: true,
 		},
 		{
-			name: "seq completed",
-			seq: &workflow.Sequence{
-				Name:    "seq",
-				Actions: []*workflow.Action{{Name: "action1"}, {Name: "action2"}},
-				State:   &workflow.State{},
-			},
-			wantSeq: &workflow.Sequence{
-				Name:    "seq",
-				Actions: []*workflow.Action{{Name: "action1"}, {Name: "action2"}},
-				State: &workflow.State{
-					Status: workflow.Completed,
-					Start:  start,
-					End:    end,
-				},
-			},
+			name:    "seq completed",
+			seq:     newSequenceWithState("seq", []*workflow.Action{{Name: "action1"}, {Name: "action2"}}, &workflow.State{}),
+			wantSeq: newSequenceWithState("seq", []*workflow.Action{{Name: "action1"}, {Name: "action2"}}, &workflow.State{Status: workflow.Completed, Start: start, End: end}),
 			dbUpdates: []*workflow.Sequence{
-				{
-					Name:    "seq",
-					Actions: []*workflow.Action{{Name: "action1"}, {Name: "action2"}},
-					State: &workflow.State{
-						Status: workflow.Running,
-						Start:  start,
-					},
-				},
-				{
-					Name:    "seq",
-					Actions: []*workflow.Action{{Name: "action1"}, {Name: "action2"}},
-					State: &workflow.State{
-						Status: workflow.Completed,
-						Start:  start,
-						End:    end,
-					},
-				},
+				newSequenceWithState("seq", []*workflow.Action{{Name: "action1"}, {Name: "action2"}}, &workflow.State{Status: workflow.Running, Start: start}),
+				newSequenceWithState("seq", []*workflow.Action{{Name: "action1"}, {Name: "action2"}}, &workflow.State{Status: workflow.Completed, Start: start, End: end}),
 			},
 		},
 	}
@@ -325,25 +269,14 @@ func TestResetActions(t *testing.T) {
 
 	action := &workflow.Action{
 		Name: "action",
-		State: &workflow.State{
-			Status: workflow.Running,
-			Start:  time.Now(),
-			End:    time.Now(),
-		},
-		Attempts: []*workflow.Attempt{
-			{},
-		},
 	}
+	action.Attempts.Set([]workflow.Attempt{{}})
+	action.State.Set(workflow.State{Status: workflow.Running, Start: time.Now(), End: time.Now()})
 
 	want := &workflow.Action{
 		Name: "action",
-		State: &workflow.State{
-			Status: workflow.NotStarted,
-			Start:  time.Time{},
-			End:    time.Time{},
-		},
-		Attempts: nil,
 	}
+	want.State.Set(workflow.State{Status: workflow.NotStarted, Start: time.Time{}, End: time.Time{}})
 
 	resetActions([]*workflow.Action{action})
 

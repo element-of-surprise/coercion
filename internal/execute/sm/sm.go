@@ -127,15 +127,59 @@ func (s *States) Start(req statemachine.Request[Data]) statemachine.Request[Data
 	}
 	req.Data.contCheckResult = make(chan error, 1)
 
-	plan.State.Status = workflow.Running
-	plan.State.Start = s.now()
+	startTime := s.now()
+	state := plan.State.Get()
+	state.Status = workflow.Running
+	state.Start = startTime
+	plan.State.Set(state)
+	plan.RuntimeUpdate.Set(startTime)
 
 	if err := s.store.UpdatePlan(req.Ctx, plan); err != nil {
 		log.Fatalf("failed to write Plan: %v", err)
 	}
 
+	// Copy req for the background goroutine to avoid race with req.Next assignment below
+	reqCopy := req
+	_ = context.Tasks(req.Ctx).Once(
+		req.Ctx,
+		"updateLastUpdate",
+		func(ctx context.Context) error {
+			s.updateLastUpdate(ctx, reqCopy)
+			return nil
+		},
+	)
+
 	req.Next = s.PlanBypassChecks
 	return req
+}
+
+// updateLastUpdate periodically updates the last update time of the Plan while it is running.
+func (s *States) updateLastUpdate(ctx context.Context, req statemachine.Request[Data]) {
+	t := time.NewTicker(10 * time.Second)
+	defer t.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+			if req.Data.Plan.State.Get().Status != workflow.Running {
+				return
+			}
+			s.runtimeUpdate(req.Ctx, req.Data.Plan)
+		}
+	}
+}
+
+// runtimeUpdate updates the RuntimeUpdate time of the Plan if more than 5 minutes have passed since the last update.
+func (s *States) runtimeUpdate(ctx context.Context, plan *workflow.Plan) {
+	if s.now().Sub(walk.LastUpdate(ctx, plan)) > 5*time.Minute {
+		now := s.now()
+		plan.RuntimeUpdate.Set(now)
+		if err := s.store.UpdatePlan(ctx, plan); err != nil {
+			context.Log(ctx).Error(fmt.Sprintf("failed to write Plan last update time: %v", err))
+		}
+	}
 }
 
 // PlanBypassChecks runs all the gates on the Plan. If any of the gates fail,
@@ -237,18 +281,22 @@ func (s *States) ExecuteBlock(req statemachine.Request[Data]) statemachine.Reque
 
 	if req.Data.recovered && h.block.GetState().Status == workflow.Running {
 		s.handleRecoveredSeqs(req, h.block)
-		if h.block.State.Status != workflow.Running {
+		if h.block.State.Get().Status != workflow.Running {
 			req.Next = s.BlockDeferredChecks
 		}
 	} else {
 		if err := after(req.Ctx, h.block.EntranceDelay); err != nil {
-			h.block.State.Status = workflow.Stopped
+			state := h.block.State.Get()
+			state.Status = workflow.Stopped
+			h.block.State.Set(state)
 			req.Data.err = err
 			req.Next = s.PlanDeferredChecks
 			return req
 		}
-		h.block.State.Status = workflow.Running
-		h.block.State.Start = s.now()
+		state := h.block.State.Get()
+		state.Status = workflow.Running
+		state.Start = s.now()
+		h.block.State.Set(state)
 	}
 
 	req.Next = s.BlockBypassChecks
@@ -285,7 +333,9 @@ func (s *States) handleRecoveredSeqs(req statemachine.Request[Data], b *workflow
 	_ = g.Wait(context.Background())
 
 	if s.exceededFailures(b, &failed) {
-		b.State.Status = workflow.Failed
+		state := b.State.Get()
+		state.Status = workflow.Failed
+		b.State.Set(state)
 		req.Data.err = fmt.Errorf("block(%s) has exceeded the tolerated failures", b.Name)
 	}
 }
@@ -301,7 +351,7 @@ func (s *States) BlockBypassChecks(req statemachine.Request[Data]) statemachine.
 		}
 	}()
 
-	if h.block.BypassChecks == nil || h.block.BypassChecks.State.Status == workflow.Failed {
+	if h.block.BypassChecks == nil || h.block.BypassChecks.State.Get().Status == workflow.Failed {
 		req.Next = s.BlockPreChecks
 		return req
 	}
@@ -327,14 +377,16 @@ func (s *States) BlockPreChecks(req statemachine.Request[Data]) statemachine.Req
 		}
 	}()
 
-	if h.block.PreChecks == nil || h.block.PreChecks.State.Status == workflow.Completed {
+	if h.block.PreChecks == nil || h.block.PreChecks.State.Get().Status == workflow.Completed {
 		req.Next = s.BlockStartContChecks
 		return req
 	}
 
 	err := s.runPreChecks(req.Ctx, h.block.PreChecks, h.block.ContChecks)
 	if err != nil {
-		h.block.State.Status = workflow.Failed
+		state := h.block.State.Get()
+		state.Status = workflow.Failed
+		h.block.State.Set(state)
 		req.Data.err = err
 		req.Next = s.BlockDeferredChecks
 		return req
@@ -386,7 +438,7 @@ func (s *States) ExecuteSequences(req statemachine.Request[Data]) statemachine.R
 	failures := atomic.Int64{}
 
 	for _, seq := range h.block.Sequences {
-		if seq.State.Status == workflow.Failed {
+		if seq.State.Get().Status == workflow.Failed {
 			failures.Add(1)
 		}
 	}
@@ -401,19 +453,24 @@ func (s *States) ExecuteSequences(req statemachine.Request[Data]) statemachine.R
 
 	for i := 0; i < len(h.block.Sequences); i++ {
 		seq := h.block.Sequences[i]
-		if seq.State.Status == workflow.Completed || seq.State.Status == workflow.Failed {
+		seqStatus := seq.State.Get().Status
+		if seqStatus == workflow.Completed || seqStatus == workflow.Failed {
 			continue
 		}
 
 		if _, err := req.Data.contChecksPassing(); err != nil {
-			h.block.State.Status = workflow.Failed
+			state := h.block.State.Get()
+			state.Status = workflow.Failed
+			h.block.State.Set(state)
 			req.Data.err = err
 			req.Next = s.BlockDeferredChecks
 			return req
 		}
 
 		if s.exceededFailures(h.block, &failures) {
-			h.block.State.Status = workflow.Failed
+			state := h.block.State.Get()
+			state.Status = workflow.Failed
+			h.block.State.Set(state)
 			req.Data.err = fmt.Errorf("block(%s) has exceeded the tolerated failures", h.block.Name)
 			req.Next = s.BlockDeferredChecks
 			return req
@@ -443,7 +500,9 @@ func (s *States) ExecuteSequences(req statemachine.Request[Data]) statemachine.R
 
 	// Need to recheck in case the last sequence failed and sent us over the edge.
 	if h.block.ToleratedFailures >= 0 && failures.Load() > int64(h.block.ToleratedFailures) {
-		h.block.State.Status = workflow.Failed
+		state := h.block.State.Get()
+		state.Status = workflow.Failed
+		h.block.State.Set(state)
 		req.Data.err = fmt.Errorf("block(%s) has exceeded the tolerated failures", h.block.Name)
 		req.Next = s.BlockDeferredChecks
 		return req
@@ -475,7 +534,9 @@ func (s *States) BlockPostChecks(req statemachine.Request[Data]) statemachine.Re
 
 	err := s.runChecksOnce(req.Ctx, h.block.PostChecks)
 	if err != nil {
-		h.block.State.Status = workflow.Failed
+		state := h.block.State.Get()
+		state.Status = workflow.Failed
+		h.block.State.Set(state)
 		req.Data.err = err
 		return req
 	}
@@ -498,7 +559,9 @@ func (s *States) BlockDeferredChecks(req statemachine.Request[Data]) statemachin
 
 	err := s.runChecksOnce(req.Ctx, h.block.DeferredChecks)
 	if err != nil {
-		h.block.State.Status = workflow.Failed
+		state := h.block.State.Get()
+		state.Status = workflow.Failed
+		h.block.State.Set(state)
 		req.Data.err = err
 		return req
 	}
@@ -511,15 +574,19 @@ func (s *States) BlockEnd(req statemachine.Request[Data]) statemachine.Request[D
 	h := req.Data.blocks[0]
 
 	defer func() {
-		h.block.State.End = s.now()
+		state := h.block.State.Get()
+		state.End = s.now()
+		h.block.State.Set(state)
 		if err := s.store.UpdateBlock(req.Ctx, h.block); err != nil {
 			log.Fatalf("failed to write Block: %v", err)
 		}
 	}()
 
 	// Don't use checksCompleted() here, we want to run the block if it is not completed.
-	if h.block.BypassChecks != nil && h.block.BypassChecks.State.Status == workflow.Completed {
-		h.block.State.Status = workflow.Completed
+	if h.block.BypassChecks != nil && h.block.BypassChecks.State.Get().Status == workflow.Completed {
+		state := h.block.State.Get()
+		state.Status = workflow.Completed
+		h.block.State.Set(state)
 	} else {
 		// For safety reasons, we always check this so we don't get goroutine leaks.
 		if h.contCancel != nil {
@@ -535,23 +602,31 @@ func (s *States) BlockEnd(req statemachine.Request[Data]) statemachine.Request[D
 				}
 			}
 			if err != nil {
-				h.block.State.Status = workflow.Failed
+				state := h.block.State.Get()
+				state.Status = workflow.Failed
+				h.block.State.Set(state)
 				req.Data.err = err
 				req.Next = s.PlanDeferredChecks
 				return req
 			}
 		}
 
-		if h.block.State.Status == workflow.Running {
-			h.block.State.Status = workflow.Completed
+		if h.block.State.Get().Status == workflow.Running {
+			state := h.block.State.Get()
+			state.Status = workflow.Completed
+			h.block.State.Set(state)
 		} else {
-			h.block.State.Status = workflow.Failed
+			state := h.block.State.Get()
+			state.Status = workflow.Failed
+			h.block.State.Set(state)
 			req.Next = s.PlanDeferredChecks
 			return req
 		}
 
 		if err := after(req.Ctx, h.block.ExitDelay); err != nil {
-			h.block.State.Status = workflow.Stopped
+			state := h.block.State.Get()
+			state.Status = workflow.Stopped
+			h.block.State.Set(state)
 			req.Data.err = err
 			req.Next = s.PlanDeferredChecks
 			return req
@@ -625,7 +700,9 @@ func (s *States) PlanDeferredChecks(req statemachine.Request[Data]) statemachine
 func (s *States) End(req statemachine.Request[Data]) statemachine.Request[Data] {
 	plan := req.Data.Plan
 	defer func() {
-		plan.State.End = s.now()
+		state := plan.State.Get()
+		state.End = s.now()
+		plan.State.Set(state)
 		s.writeEverything(req.Ctx, plan)
 	}()
 
@@ -776,8 +853,10 @@ func (s *States) runChecksOnce(ctx context.Context, checks *workflow.Checks) err
 
 	resetActions(checks.Actions)
 
-	checks.State.Status = workflow.Running
-	checks.State.Start = s.now()
+	state := checks.State.Get()
+	state.Status = workflow.Running
+	state.Start = s.now()
+	checks.State.Set(state)
 
 	if err := s.store.UpdateChecks(ctx, checks); err != nil {
 		log.Fatalf("failed to write Checks: %v", err)
@@ -788,14 +867,20 @@ func (s *States) runChecksOnce(ctx context.Context, checks *workflow.Checks) err
 		}
 	}()
 	defer func() {
-		checks.State.End = s.now()
+		state := checks.State.Get()
+		state.End = s.now()
+		checks.State.Set(state)
 	}()
 
 	if err := s.runActionsParallel(ctx, checks.Actions); err != nil {
-		checks.State.Status = workflow.Failed
+		state := checks.State.Get()
+		state.Status = workflow.Failed
+		checks.State.Set(state)
 		return err
 	}
-	checks.State.Status = workflow.Completed
+	state = checks.State.Get()
+	state.Status = workflow.Completed
+	checks.State.Set(state)
 	return nil
 }
 
@@ -806,8 +891,10 @@ func (s *States) runActionsParallel(ctx context.Context, actions []*workflow.Act
 	}
 	// Yes, we loop twice, but actions is small and we only want to write to the store once.
 	for _, action := range actions {
-		action.State.Status = workflow.Running
-		action.State.Start = s.now()
+		state := action.State.Get()
+		state.Status = workflow.Running
+		state.Start = s.now()
+		action.State.Set(state)
 		if err := s.store.UpdateAction(ctx, action); err != nil {
 			log.Fatalf("failed to write Action: %v", err)
 		}
@@ -835,36 +922,45 @@ func (s *States) execSeq(ctx context.Context, seq *workflow.Sequence) error {
 		}
 	}()
 
-	switch seq.State.Status {
+	switch seq.State.Get().Status {
 	case workflow.Completed:
 		return nil
 	case workflow.Failed:
 		for _, action := range seq.Actions {
-			if action.State.Status == workflow.Failed {
-				return action.Attempts[len(action.Attempts)-1].Err
+			if action.State.Get().Status == workflow.Failed {
+				attempts := action.Attempts.Get()
+				return attempts[len(attempts)-1].Err
 			}
 		}
 		// Well, this shouldn't happen, but we have a failed sequence with no failed actions.
 		return fmt.Errorf("bug: sequence %s is already failed, but can't figure out why", seq.Name)
 	}
 
-	seq.State.Status = workflow.Running
-	seq.State.Start = s.now()
+	state := seq.State.Get()
+	state.Status = workflow.Running
+	state.Start = s.now()
+	seq.State.Set(state)
 	if err := s.store.UpdateSequence(ctx, seq); err != nil {
 		log.Fatalf("failed to write Sequence: %v", err)
 	}
 	defer func() {
-		seq.State.End = s.now()
+		state := seq.State.Get()
+		state.End = s.now()
+		seq.State.Set(state)
 	}()
 
 	for _, action := range seq.Actions {
 		if err := s.runAction(ctx, action, s.store); err != nil {
-			seq.State.Status = workflow.Failed
+			state := seq.State.Get()
+			state.Status = workflow.Failed
+			seq.State.Set(state)
 			return err
 		}
 	}
 
-	seq.State.Status = workflow.Completed
+	state = seq.State.Get()
+	state.Status = workflow.Completed
+	seq.State.Set(state)
 	return nil
 }
 
@@ -879,11 +975,12 @@ func (s *States) runAction(ctx context.Context, action *workflow.Action, updater
 			log.Fatalf("failed to write Action: %v", err)
 		}
 	}()
-	switch action.State.Status {
+	switch action.State.Get().Status {
 	case workflow.Completed:
 		return nil
 	case workflow.Failed:
-		return action.Attempts[len(action.Attempts)-1].Err
+		attempts := action.Attempts.Get()
+		return attempts[len(attempts)-1].Err
 	}
 
 	ctx = context.SetActionID(ctx, action.ID)
@@ -916,10 +1013,8 @@ func (s *States) now() time.Time {
 // This is used by the ContChecks to reset the actions before each run.
 func resetActions(actions []*workflow.Action) {
 	for _, action := range actions {
-		action.State.Status = workflow.NotStarted
-		action.State.Start = time.Time{}
-		action.State.End = time.Time{}
-		action.Attempts = nil
+		action.State.Set(workflow.State{Status: workflow.NotStarted})
+		action.Attempts.Set(nil)
 	}
 }
 

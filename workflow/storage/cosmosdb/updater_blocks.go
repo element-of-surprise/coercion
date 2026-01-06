@@ -31,14 +31,15 @@ func (u blockUpdater) UpdateBlock(ctx context.Context, block *workflow.Block) er
 	defer u.mu.Unlock()
 
 	patch := azcosmos.PatchOperations{}
-	patch.AppendReplace("/stateStatus", block.State.Status)
-	patch.AppendReplace("/stateStart", block.State.Start)
-	patch.AppendReplace("/stateEnd", block.State.End)
+	patch.AppendReplace("/stateStatus", block.State.Get().Status)
+	patch.AppendReplace("/stateStart", block.State.Get().Start)
+	patch.AppendReplace("/stateEnd", block.State.Get().End)
 
 	itemOpt := itemOptions(u.defaultIOpts)
 	var ifMatchEtag *azcore.ETag = nil
-	if block.State.ETag != "" {
-		ifMatchEtag = (*azcore.ETag)(&block.State.ETag)
+	if block.State.Get().ETag != "" {
+		etag := block.State.Get().ETag
+		ifMatchEtag = (*azcore.ETag)(&etag)
 	}
 	itemOpt.IfMatchEtag = ifMatchEtag
 
@@ -49,7 +50,9 @@ func (u blockUpdater) UpdateBlock(ctx context.Context, block *workflow.Block) er
 		return errors.E(ctx, errors.CatUser, errors.TypeStorageUpdate, err)
 	}
 
-	block.State.ETag = string(resp.ETag)
+	state := block.State.Get()
+	state.ETag = string(resp.ETag)
+	block.State.Set(state)
 
 	return nil
 }

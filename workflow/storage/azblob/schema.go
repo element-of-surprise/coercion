@@ -81,7 +81,7 @@ func mapToPlanMeta(m map[string]*string) (planMeta, error) {
 			if err := json.Unmarshal([]byte(*v), &state); err != nil {
 				return planMeta{}, fmt.Errorf("invalid state in metadata: %w", err)
 			}
-			lr.State = &state
+			lr.State = state
 		case mdPlanType:
 			pm.PlanType = *v
 		}
@@ -92,7 +92,7 @@ func mapToPlanMeta(m map[string]*string) (planMeta, error) {
 
 // planToMetadata converts a workflow.Plan to a metadata map for blob storage.
 func planToMetadata(ctx context.Context, p *workflow.Plan) (map[string]*string, error) {
-	stateJSON, err := json.Marshal(p.State)
+	stateJSON, err := json.Marshal(p.State.Get())
 	if err != nil {
 		return nil, errors.E(ctx, errors.CatInternal, errors.TypeStoragePut, fmt.Errorf("failed to marshal plan state: %w", err))
 	}
@@ -227,10 +227,10 @@ func planToPlanEntry(p *workflow.Plan) (planEntry, error) {
 		StateStatus: workflow.NotStarted,
 	}
 
-	if p.State != nil {
-		entry.StateStatus = p.State.Status
-		entry.StateStart = p.State.Start
-		entry.StateEnd = p.State.End
+	if state := p.State.Get(); state != (workflow.State{}) {
+		entry.StateStatus = state.Status
+		entry.StateStart = state.Start
+		entry.StateEnd = state.End
 	}
 
 	// Set IDs for sub-objects (lightweight references only)
@@ -282,10 +282,10 @@ func blockToEntry(b *workflow.Block, pos int) (blocksEntry, error) {
 		StateStatus:       workflow.NotStarted,
 	}
 
-	if b.State != nil {
-		entry.StateStatus = b.State.Status
-		entry.StateStart = b.State.Start
-		entry.StateEnd = b.State.End
+	if state := b.State.Get(); state != (workflow.State{}) {
+		entry.StateStatus = state.Status
+		entry.StateStart = state.Start
+		entry.StateEnd = state.End
 	}
 
 	// Set IDs for sub-objects
@@ -324,12 +324,12 @@ func entryToBlock(entry blocksEntry) (*workflow.Block, error) {
 		ExitDelay:         entry.ExitDelay,
 		Concurrency:       entry.Concurrency,
 		ToleratedFailures: entry.ToleratedFailures,
-		State: &workflow.State{
-			Status: entry.StateStatus,
-			Start:  entry.StateStart,
-			End:    entry.StateEnd,
-		},
 	}
+	b.State.Set(workflow.State{
+		Status: entry.StateStatus,
+		Start:  entry.StateStart,
+		End:    entry.StateEnd,
+	})
 	b.SetPlanID(entry.PlanID)
 
 	return b, nil
@@ -353,10 +353,10 @@ func checksToEntry(c *workflow.Checks) (checksEntry, error) {
 		StateStatus: workflow.NotStarted,
 	}
 
-	if c.State != nil {
-		entry.StateStatus = c.State.Status
-		entry.StateStart = c.State.Start
-		entry.StateEnd = c.State.End
+	if state := c.State.Get(); state != (workflow.State{}) {
+		entry.StateStatus = state.Status
+		entry.StateStart = state.Start
+		entry.StateEnd = state.End
 	}
 
 	entry.Actions = make([]uuid.UUID, len(c.Actions))
@@ -373,12 +373,12 @@ func entryToChecks(entry checksEntry) (*workflow.Checks, error) {
 		ID:    entry.ID,
 		Key:   entry.Key,
 		Delay: entry.Delay,
-		State: &workflow.State{
-			Status: entry.StateStatus,
-			Start:  entry.StateStart,
-			End:    entry.StateEnd,
-		},
 	}
+	c.State.Set(workflow.State{
+		Status: entry.StateStatus,
+		Start:  entry.StateStart,
+		End:    entry.StateEnd,
+	})
 	c.SetPlanID(entry.PlanID)
 
 	return c, nil
@@ -404,10 +404,10 @@ func sequenceToEntry(s *workflow.Sequence, pos int) (sequencesEntry, error) {
 		StateStatus: workflow.NotStarted,
 	}
 
-	if s.State != nil {
-		entry.StateStatus = s.State.Status
-		entry.StateStart = s.State.Start
-		entry.StateEnd = s.State.End
+	if state := s.State.Get(); state != (workflow.State{}) {
+		entry.StateStatus = state.Status
+		entry.StateStart = state.Start
+		entry.StateEnd = state.End
 	}
 
 	entry.Actions = make([]uuid.UUID, len(s.Actions))
@@ -425,12 +425,12 @@ func entryToSequence(entry sequencesEntry) (*workflow.Sequence, error) {
 		Key:   entry.Key,
 		Name:  entry.Name,
 		Descr: entry.Descr,
-		State: &workflow.State{
-			Status: entry.StateStatus,
-			Start:  entry.StateStart,
-			End:    entry.StateEnd,
-		},
 	}
+	s.State.Set(workflow.State{
+		Status: entry.StateStatus,
+		Start:  entry.StateStart,
+		End:    entry.StateEnd,
+	})
 	s.SetPlanID(entry.PlanID)
 
 	return s, nil
@@ -459,10 +459,10 @@ func actionToEntry(a *workflow.Action, pos int) (actionsEntry, error) {
 		StateStatus: workflow.NotStarted,
 	}
 
-	if a.State != nil {
-		entry.StateStatus = a.State.Status
-		entry.StateStart = a.State.Start
-		entry.StateEnd = a.State.End
+	if state := a.State.Get(); state != (workflow.State{}) {
+		entry.StateStatus = state.Status
+		entry.StateStart = state.Start
+		entry.StateEnd = state.End
 	}
 
 	// Marshal Req and Attempts to JSON bytes
@@ -474,8 +474,8 @@ func actionToEntry(a *workflow.Action, pos int) (actionsEntry, error) {
 		}
 	}
 
-	if len(a.Attempts) > 0 {
-		attempts, err := json.Marshal(a.Attempts)
+	if len(a.Attempts.Get()) > 0 {
+		attempts, err := json.Marshal(a.Attempts.Get())
 		if err != nil {
 			return actionsEntry{}, fmt.Errorf("can't encode action.Attempts: %w", err)
 		}
@@ -501,12 +501,12 @@ func entryToAction(ctx context.Context, reg *registry.Register, response []byte)
 		Plugin:  resp.Plugin,
 		Timeout: resp.Timeout,
 		Retries: resp.Retries,
-		State: &workflow.State{
-			Status: resp.StateStatus,
-			Start:  resp.StateStart,
-			End:    resp.StateEnd,
-		},
 	}
+	a.State.Set(workflow.State{
+		Status: resp.StateStatus,
+		Start:  resp.StateStart,
+		End:    resp.StateEnd,
+	})
 	a.SetPlanID(resp.PlanID)
 
 	plug := reg.Plugin(a.Plugin)
@@ -532,22 +532,23 @@ func entryToAction(ctx context.Context, reg *registry.Register, response []byte)
 
 	b = resp.Attempts
 	if len(b) > 0 {
-		a.Attempts, err = decodeAttempts(ctx, b, plug)
+		attempts, err := decodeAttempts(ctx, b, plug)
 		if err != nil {
 			return nil, fmt.Errorf("couldn't decode attempts: %w", err)
 		}
+		a.Attempts.Set(attempts)
 	}
 
 	return a, nil
 }
 
 // decodeAttempts decodes a JSON array of JSON encoded attempts as byte slices into a slice of attempts.
-func decodeAttempts(ctx context.Context, rawAttempts []byte, plug plugins.Plugin) ([]*workflow.Attempt, error) {
+func decodeAttempts(ctx context.Context, rawAttempts []byte, plug plugins.Plugin) ([]workflow.Attempt, error) {
 	if len(rawAttempts) == 0 {
 		return nil, nil
 	}
 
-	var attempts []*workflow.Attempt
+	var attempts = []workflow.Attempt{}
 
 	dec := jsontext.NewDecoder(bytes.NewReader(rawAttempts))
 	if dec.PeekKind() != jsontext.BeginArray.Kind() {
@@ -561,8 +562,8 @@ func decodeAttempts(ctx context.Context, rawAttempts []byte, plug plugins.Plugin
 			break
 		}
 
-		var a = &workflow.Attempt{Resp: plug.Response()}
-		if err := json.UnmarshalDecode(dec, a); err != nil {
+		var a = workflow.Attempt{Resp: plug.Response()}
+		if err := json.UnmarshalDecode(dec, &a); err != nil {
 			return nil, errors.E(ctx, errors.CatInternal, errors.TypeStorageGet, fmt.Errorf("failed to unmarshal attempt: %w", err))
 		}
 		attempts = append(attempts, a)

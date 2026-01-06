@@ -90,8 +90,8 @@ func TestStorageRecovery(t *testing.T) {
 
 	pConfig.Print("Workflow result: \n", lastResult)
 
-	if lastResult.State.Status != workflow.Running {
-		t.Fatalf("Expected plan to be running, got status: %s", lastResult.State.Status)
+	if lastResult.State.Get().Status != workflow.Running {
+		t.Fatalf("Expected plan to be running, got status: %s", lastResult.State.Get().Status)
 	}
 
 	log.Println("Plan is running, now simulating crash by canceling execution context...")
@@ -160,8 +160,8 @@ func TestStorageRecovery(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to wait for recovered plan: %v", err)
 	}
-	if result.State.Status != workflow.Completed {
-		t.Fatalf("Expected recovered plan to complete, got status: %s", result.State.Status)
+	if result.State.Get().Status != workflow.Completed {
+		t.Fatalf("Expected recovered plan to complete, got status: %s", result.State.Get().Status)
 	}
 	// Additional validation: Check that some actions were actually executed
 	if len(result.Blocks) == 0 {
@@ -169,16 +169,16 @@ func TestStorageRecovery(t *testing.T) {
 	}
 
 	for _, block := range result.Blocks {
-		if block.State.Status != workflow.Completed {
-			t.Errorf("Block %s did not complete, status: %s", block.ID, block.State.Status)
+		if block.State.Get().Status != workflow.Completed {
+			t.Errorf("Block %s did not complete, status: %s", block.ID, block.State.Get().Status)
 		}
 		for _, seq := range block.Sequences {
-			if seq.State.Status != workflow.Completed {
-				t.Errorf("Sequence %s did not complete, status: %s", seq.ID, seq.State.Status)
+			if seq.State.Get().Status != workflow.Completed {
+				t.Errorf("Sequence %s did not complete, status: %s", seq.ID, seq.State.Get().Status)
 			}
 			for _, action := range seq.Actions {
-				if action.State.Status != workflow.Completed {
-					t.Errorf("Action %s did not complete, status: %s", action.ID, action.State.Status)
+				if action.State.Get().Status != workflow.Completed {
+					t.Errorf("Action %s did not complete, status: %s", action.ID, action.State.Get().Status)
 				}
 			}
 		}
@@ -358,10 +358,10 @@ func createOldRunningPlan(submitTime time.Time) (*workflow.Plan, error) {
 
 	// Override the plan ID with our custom old UUID
 	plan.SubmitTime = submitTime
-	plan.State = &workflow.State{
+	plan.State.Set(workflow.State{
 		Status: workflow.Running,
 		Start:  submitTime,
-	}
+	})
 
 	return plan, nil
 }
@@ -385,8 +385,8 @@ func verifyOldPlanNotRecovered(t *testing.T, ctx context.Context, oldPlanID uuid
 	}
 
 	// Verify the plan is still in Running state (not recovered/modified)
-	if readPlan.State.Status != workflow.Running {
-		t.Errorf("Old plan state was modified during recovery: expected Running, got %s", readPlan.State.Status)
+	if readPlan.State.Get().Status != workflow.Running {
+		t.Errorf("Old plan state was modified during recovery: expected Running, got %s", readPlan.State.Get().Status)
 	} else {
 		log.Printf("Old plan %s correctly remains in Running state (not recovered)", oldPlanID)
 	}
@@ -511,8 +511,8 @@ func TestAzblobRetentionRecovery(t *testing.T) {
 				t.Errorf("[TestAzblobRetentionRecovery](%s): expected ReadDirect() to succeed, got error: %v", test.name, directErr)
 				continue
 			}
-			if directPlan.State.Status != workflow.Running {
-				t.Errorf("[TestAzblobRetentionRecovery](%s): expected plan status to remain Running, got %s", test.name, directPlan.State.Status)
+			if directPlan.State.Get().Status != workflow.Running {
+				t.Errorf("[TestAzblobRetentionRecovery](%s): expected plan status to remain Running, got %s", test.name, directPlan.State.Get().Status)
 				continue
 			}
 			log.Printf("Plan %s (%s) correctly outside retention: Read() failed, ReadDirect() succeeded, status unchanged", test.name, planID)
@@ -572,10 +572,10 @@ func createPlanAtTime(submitTime time.Time) (*workflow.Plan, error) {
 	}
 
 	plan.SubmitTime = submitTime
-	plan.State = &workflow.State{
+	plan.State.Set(workflow.State{
 		Status: workflow.Running,
 		Start:  submitTime,
-	}
+	})
 
 	return plan, nil
 }

@@ -41,9 +41,9 @@ func (u planUpdater) UpdatePlan(ctx context.Context, plan *workflow.Plan) error 
 	stmt.Query(updatePlan)
 	stmt.SetText("$id", plan.ID.String())
 	stmt.SetInt64("$reason", int64(plan.Reason))
-	stmt.SetInt64("$state_status", int64(plan.State.Status))
-	stmt.SetInt64("$state_start", plan.State.Start.UnixNano())
-	stmt.SetInt64("$state_end", plan.State.End.UnixNano())
+	stmt.SetInt64("$state_status", int64(plan.State.Get().Status))
+	stmt.SetInt64("$state_start", plan.State.Get().Start.UnixNano())
+	stmt.SetInt64("$state_end", plan.State.Get().End.UnixNano())
 
 	sStmt, err := stmt.Prepare(conn)
 	if err != nil {

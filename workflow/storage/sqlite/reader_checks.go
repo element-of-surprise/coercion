@@ -85,10 +85,11 @@ func (p reader) checksRowToChecks(ctx context.Context, conn *sqlite.Conn, stmt *
 		}
 	}
 	c.Delay = time.Duration(stmt.GetInt64("delay"))
-	c.State, err = fieldToState(stmt)
+	state, err := fieldToState(stmt)
 	if err != nil {
 		return nil, fmt.Errorf("checksRowToChecks: %w", err)
 	}
+	c.State.Set(*state)
 	c.Actions, err = p.fieldToActions(ctx, conn, stmt)
 	if err != nil {
 		return nil, fmt.Errorf("couldn't get actions ids: %w", err)

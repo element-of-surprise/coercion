@@ -54,88 +54,76 @@ func createAndUploadTestPlan(ctx context.Context, t *testing.T, fakeClient *blob
 
 	planID := workflow.NewV7()
 
+	preCheckAction := &workflow.Action{
+		ID:      workflow.NewV7(),
+		Name:    "pre-check action",
+		Descr:   "pre-check action desc",
+		Plugin:  testPlugins.HelloPluginName,
+		Timeout: 30 * time.Second,
+		Req:     testPlugins.HelloReq{Say: "hello"},
+	}
+	preCheckAction.State.Set(workflow.State{Status: workflow.NotStarted})
+
+	preChecks := &workflow.Checks{
+		ID:      workflow.NewV7(),
+		Actions: []*workflow.Action{preCheckAction},
+	}
+	preChecks.State.Set(workflow.State{Status: workflow.NotStarted})
+
 	plan := &workflow.Plan{
 		ID:         planID,
 		Name:       "Test Plan for Deletion",
 		Descr:      "Test Plan Description",
 		SubmitTime: time.Now().UTC(),
-		PreChecks: &workflow.Checks{
-			ID: workflow.NewV7(),
-			Actions: []*workflow.Action{
-				{
-					ID:      workflow.NewV7(),
-					Name:    "pre-check action",
-					Descr:   "pre-check action desc",
-					Plugin:  testPlugins.HelloPluginName,
-					Timeout: 30 * time.Second,
-					Req:     testPlugins.HelloReq{Say: "hello"},
-					State: &workflow.State{
-						Status: workflow.NotStarted,
-					},
-				},
-			},
-			State: &workflow.State{
-				Status: workflow.NotStarted,
-			},
-		},
-		State: &workflow.State{
-			Status: workflow.NotStarted,
-		},
+		PreChecks:  preChecks,
 	}
+	plan.State.Set(workflow.State{Status: workflow.NotStarted})
 
 	if withBlocks {
-		plan.Blocks = []*workflow.Block{
-			{
-				ID:    workflow.NewV7(),
-				Name:  "Test Block",
-				Descr: "Test Block Description",
-				PreChecks: &workflow.Checks{
-					ID: workflow.NewV7(),
-					Actions: []*workflow.Action{
-						{
-							ID:      workflow.NewV7(),
-							Name:    "block check action",
-							Descr:   "block check action desc",
-							Plugin:  testPlugins.HelloPluginName,
-							Timeout: 30 * time.Second,
-							Req:     testPlugins.HelloReq{Say: "block check"},
-							State: &workflow.State{
-								Status: workflow.NotStarted,
-							},
-						},
-					},
-					State: &workflow.State{
-						Status: workflow.NotStarted,
-					},
-				},
-				Sequences: []*workflow.Sequence{
-					{
-						ID:    workflow.NewV7(),
-						Name:  "Test Sequence",
-						Descr: "Test Sequence Description",
-						Actions: []*workflow.Action{
-							{
-								ID:      workflow.NewV7(),
-								Name:    "sequence action",
-								Descr:   "sequence action desc",
-								Plugin:  testPlugins.HelloPluginName,
-								Timeout: 30 * time.Second,
-								Req:     testPlugins.HelloReq{Say: "sequence"},
-								State: &workflow.State{
-									Status: workflow.NotStarted,
-								},
-							},
-						},
-						State: &workflow.State{
-							Status: workflow.NotStarted,
-						},
-					},
-				},
-				State: &workflow.State{
-					Status: workflow.NotStarted,
-				},
-			},
+		blockCheckAction := &workflow.Action{
+			ID:      workflow.NewV7(),
+			Name:    "block check action",
+			Descr:   "block check action desc",
+			Plugin:  testPlugins.HelloPluginName,
+			Timeout: 30 * time.Second,
+			Req:     testPlugins.HelloReq{Say: "block check"},
 		}
+		blockCheckAction.State.Set(workflow.State{Status: workflow.NotStarted})
+
+		blockPreChecks := &workflow.Checks{
+			ID:      workflow.NewV7(),
+			Actions: []*workflow.Action{blockCheckAction},
+		}
+		blockPreChecks.State.Set(workflow.State{Status: workflow.NotStarted})
+
+		seqAction := &workflow.Action{
+			ID:      workflow.NewV7(),
+			Name:    "sequence action",
+			Descr:   "sequence action desc",
+			Plugin:  testPlugins.HelloPluginName,
+			Timeout: 30 * time.Second,
+			Req:     testPlugins.HelloReq{Say: "sequence"},
+		}
+		seqAction.State.Set(workflow.State{Status: workflow.NotStarted})
+
+		seq := &workflow.Sequence{
+			ID:      workflow.NewV7(),
+			Name:    "Test Sequence",
+			Descr:   "Test Sequence Description",
+			Actions: []*workflow.Action{seqAction},
+		}
+		seq.State.Set(workflow.State{Status: workflow.NotStarted})
+
+		block := &workflow.Block{
+			ID:        workflow.NewV7(),
+			Name:      "Test Block",
+			Descr:     "Test Block Description",
+			PreChecks: blockPreChecks,
+			Sequences: []*workflow.Sequence{seq},
+		}
+		block.State.Set(workflow.State{Status: workflow.NotStarted})
+
+		plan.Blocks = []*workflow.Block{block}
 	}
 
 	// Upload plan and all sub-objects to fake client

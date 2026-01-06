@@ -59,13 +59,13 @@ func TestPlan(t *testing.T) {
 		Blocks: []*workflow.Block{
 			Block(ctx, block, WithKeepSecrets(), WithKeepState()),
 		},
-		State: &workflow.State{
-			Status: workflow.Completed,
-			Start:  start,
-		},
 		Reason:     workflow.FRBlock,
 		SubmitTime: start,
 	}
+	plan.State.Set(workflow.State{
+		Status: workflow.Completed,
+		Start:  start,
+	})
 
 	tests := []struct {
 		name    string
@@ -100,23 +100,26 @@ func TestPlan(t *testing.T) {
 			name:    "WithKeepState()",
 			plan:    plan,
 			options: cloneOptions{keepState: true},
-			want: &workflow.Plan{
-				ID:         id,
-				Name:       "plan1",
-				Descr:      "descr",
-				GroupID:    id,
-				Meta:       []byte("hello"),
-				PreChecks:  Checks(ctx, checks, WithKeepState()),
-				PostChecks: Checks(ctx, checks, WithKeepState()),
-				ContChecks: Checks(ctx, checks, WithKeepState()),
-				Blocks:     []*workflow.Block{Block(ctx, plan.Blocks[0], WithKeepState())},
-				State: &workflow.State{
+			want: func() *workflow.Plan {
+				p := &workflow.Plan{
+					ID:         id,
+					Name:       "plan1",
+					Descr:      "descr",
+					GroupID:    id,
+					Meta:       []byte("hello"),
+					PreChecks:  Checks(ctx, checks, WithKeepState()),
+					PostChecks: Checks(ctx, checks, WithKeepState()),
+					ContChecks: Checks(ctx, checks, WithKeepState()),
+					Blocks:     []*workflow.Block{Block(ctx, plan.Blocks[0], WithKeepState())},
+					Reason:     workflow.FRBlock,
+					SubmitTime: start,
+				}
+				p.State.Set(workflow.State{
 					Status: workflow.Completed,
 					Start:  start,
-				},
-				Reason:     workflow.FRBlock,
-				SubmitTime: start,
-			},
+				})
+				return p
+			}(),
 		},
 		{
 			name:    "Without WithKeepSecrets(), but callNum > 0",
@@ -167,39 +170,45 @@ func TestBlock(t *testing.T) {
 
 	actionSecretRemoved := Action(ctx, action, WithKeepState())
 
+	preChecks := &workflow.Checks{
+		Actions: []*workflow.Action{
+			Action(ctx, action, WithKeepState(), WithKeepSecrets()),
+		},
+	}
+	preChecks.State.Set(workflow.State{})
+
+	postChecks := &workflow.Checks{
+		Actions: []*workflow.Action{
+			Action(ctx, action, WithKeepState(), WithKeepSecrets()),
+		},
+	}
+	postChecks.State.Set(workflow.State{})
+
+	contChecks := &workflow.Checks{
+		Actions: []*workflow.Action{
+			Action(ctx, action, WithKeepState(), WithKeepSecrets()),
+		},
+	}
+	contChecks.State.Set(workflow.State{})
+
 	block := &workflow.Block{
 		ID:            id,
 		Name:          "block1",
 		Descr:         "descr",
 		EntranceDelay: 1 * time.Second,
 		ExitDelay:     1 * time.Second,
-		PreChecks: &workflow.Checks{
-			State: &workflow.State{},
-			Actions: []*workflow.Action{
-				Action(ctx, action, WithKeepState(), WithKeepSecrets()),
-			},
-		},
-		PostChecks: &workflow.Checks{
-			State: &workflow.State{},
-			Actions: []*workflow.Action{
-				Action(ctx, action, WithKeepState(), WithKeepSecrets()),
-			},
-		},
-		ContChecks: &workflow.Checks{
-			State: &workflow.State{},
-			Actions: []*workflow.Action{
-				Action(ctx, action, WithKeepState(), WithKeepSecrets()),
-			},
-		},
+		PreChecks:     preChecks,
+		PostChecks:    postChecks,
+		ContChecks:    contChecks,
 		Sequences: []*workflow.Sequence{
 			Sequence(ctx, sequence, WithKeepState(), WithKeepSecrets()),
 		},
 		Concurrency:       1,
 		ToleratedFailures: 1,
-		State: &workflow.State{
-			Status: workflow.Completed,
-		},
 	}
+	block.State.Set(workflow.State{
+		Status: workflow.Completed,
+	})
 
 	tests := []struct {
 		name    string
@@ -250,39 +259,45 @@ func TestBlock(t *testing.T) {
 			name:    "WithKeepState()",
 			block:   block,
 			options: cloneOptions{keepState: true},
-			want: &workflow.Block{
-				ID:            id,
-				Name:          "block1",
-				Descr:         "descr",
-				EntranceDelay: 1 * time.Second,
-				ExitDelay:     1 * time.Second,
-				PreChecks: &workflow.Checks{
-					State: &workflow.State{},
+			want: func() *workflow.Block {
+				preChecksWant := &workflow.Checks{
 					Actions: []*workflow.Action{
 						actionSecretRemoved,
 					},
-				},
-				PostChecks: &workflow.Checks{
-					State: &workflow.State{},
+				}
+				preChecksWant.State.Set(workflow.State{})
+				postChecksWant := &workflow.Checks{
 					Actions: []*workflow.Action{
 						actionSecretRemoved,
 					},
-				},
-				ContChecks: &workflow.Checks{
-					State: &workflow.State{},
+				}
+				postChecksWant.State.Set(workflow.State{})
+				contChecksWant := &workflow.Checks{
 					Actions: []*workflow.Action{
 						actionSecretRemoved,
 					},
-				},
-				Sequences: []*workflow.Sequence{
-					Sequence(ctx, sequence, WithKeepState()),
-				},
-				Concurrency:       1,
-				ToleratedFailures: 1,
-				State: &workflow.State{
+				}
+				contChecksWant.State.Set(workflow.State{})
+				b := &workflow.Block{
+					ID:            id,
+					Name:          "block1",
+					Descr:         "descr",
+					EntranceDelay: 1 * time.Second,
+					ExitDelay:     1 * time.Second,
+					PreChecks:     preChecksWant,
+					PostChecks:    postChecksWant,
+					ContChecks:    contChecksWant,
+					Sequences: []*workflow.Sequence{
+						Sequence(ctx, sequence, WithKeepState()),
+					},
+					Concurrency:       1,
+					ToleratedFailures: 1,
+				}
+				b.State.Set(workflow.State{
 					Status: workflow.Completed,
-				},
-			},
+				})
+				return b
+			}(),
 		},
 		{
 			name:    "Without WithKeepSecrets(), but callNum > 0",
@@ -344,11 +359,11 @@ func TestChecks(t *testing.T) {
 				Req:  Req{Data: "Hello"},
 			},
 		},
-		State: &workflow.State{
-			Status: workflow.Completed,
-			Start:  start,
-		},
 	}
+	checks.State.Set(workflow.State{
+		Status: workflow.Completed,
+		Start:  start,
+	})
 
 	tests := []struct {
 		name    string
@@ -445,10 +460,10 @@ func TestSequence(t *testing.T) {
 				Req:  Req{Data: "Hello"},
 			},
 		},
-		State: &workflow.State{
-			Status: workflow.Completed,
-		},
 	}
+	sequence.State.Set(workflow.State{
+		Status: workflow.Completed,
+	})
 
 	tests := []struct {
 		name    string
@@ -546,14 +561,20 @@ func TestAction(t *testing.T) {
 		},
 		Timeout: 10 * time.Second,
 		Retries: 2,
-		Attempts: []*workflow.Attempt{
-			{Start: start},
-		},
-		State: &workflow.State{
-			Status: workflow.Completed,
-			Start:  start,
-		},
+		Attempts: func() workflow.AtomicSlice[workflow.Attempt] {
+			var s workflow.AtomicSlice[workflow.Attempt]
+			s.Set(
+				[]workflow.Attempt{
+					{Start: start},
+				},
+			)
+			return s
+		}(),
 	}
+	action.State.Set(workflow.State{
+		Status: workflow.Completed,
+		Start:  start,
+	})
 
 	tests := []struct {
 		name    string
@@ -592,24 +613,33 @@ func TestAction(t *testing.T) {
 			action:     action,
 			options:    cloneOptions{keepState: true},
 			replaceReq: Req{Data: SecureStr},
-			want: &workflow.Action{
-				ID:     id,
-				Name:   "name",
-				Descr:  "descr",
-				Plugin: "plugin",
-				Req: Req{
-					Data: SecureStr,
-				},
-				Timeout: 10 * time.Second,
-				Retries: 2,
-				Attempts: []*workflow.Attempt{
-					{Start: start},
-				},
-				State: &workflow.State{
+			want: func() *workflow.Action {
+				a := &workflow.Action{
+					ID:     id,
+					Name:   "name",
+					Descr:  "descr",
+					Plugin: "plugin",
+					Req: Req{
+						Data: SecureStr,
+					},
+					Timeout: 10 * time.Second,
+					Retries: 2,
+					Attempts: func() workflow.AtomicSlice[workflow.Attempt] {
+						var s workflow.AtomicSlice[workflow.Attempt]
+						s.Set(
+							[]workflow.Attempt{
+								{Start: start},
+							},
+						)
+						return s
+					}(),
+				}
+				a.State.Set(workflow.State{
 					Status: workflow.Completed,
 					Start:  start,
-				},
-			},
+				})
+				return a
+			}(),
 		},
 		{
 			name:    "Without WithKeepSecrets(), but callNum > 0",
@@ -648,7 +678,7 @@ func TestAction(t *testing.T) {
 	}
 }
 
-func TestCloneState(t *testing.T) {
+func TestCloneStateAtomic(t *testing.T) {
 	t.Parallel()
 
 	start := time.Now()
@@ -656,20 +686,20 @@ func TestCloneState(t *testing.T) {
 
 	tests := []struct {
 		name  string
-		state *workflow.State
-		want  *workflow.State
+		state workflow.State
+		want  workflow.State
 	}{
 		{
 			name: "nil",
 		},
 		{
 			name: "Success",
-			state: &workflow.State{
+			state: workflow.State{
 				Status: workflow.Completed,
 				Start:  start,
 				End:    end,
 			},
-			want: &workflow.State{
+			want: workflow.State{
 				Status: workflow.Completed,
 				Start:  start,
 				End:    end,
@@ -678,10 +708,13 @@ func TestCloneState(t *testing.T) {
 	}
 
 	for _, test := range tests {
-		got := cloneState(test.state)
+		var src, dst workflow.AtomicValue[workflow.State]
+		src.Set(test.state)
+		cloneStateAtomic(&dst, &src)
+		got := dst.Get()
 
 		if diff := pretty.Compare(test.want, got); diff != "" {
-			t.Errorf("TestCloneState(%s): -want/+got:\n%s", test.name, diff)
+			t.Errorf("TestCloneStateAtomic(%s): -want/+got:\n%s", test.name, diff)
 		}
 	}
 }
@@ -699,19 +732,19 @@ func TestCloneAttempts(t *testing.T) {
 
 	tests := []struct {
 		name     string
-		attempts []*workflow.Attempt
-		want     []*workflow.Attempt
+		attempts []workflow.Attempt
+		want     []workflow.Attempt
 	}{
 		{
 			name: "nil",
 		},
 		{
 			name:     "len(0)",
-			attempts: []*workflow.Attempt{},
+			attempts: []workflow.Attempt{},
 		},
 		{
 			name: "success",
-			attempts: []*workflow.Attempt{
+			attempts: []workflow.Attempt{
 				{
 					Resp: Resp{
 						M: map[string]any{
@@ -735,7 +768,7 @@ func TestCloneAttempts(t *testing.T) {
 					End:   end,
 				},
 			},
-			want: []*workflow.Attempt{
+			want: []workflow.Attempt{
 				{
 					Resp: Resp{
 						M: map[string]any{
