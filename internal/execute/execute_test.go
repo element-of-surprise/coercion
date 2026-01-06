@@ -460,7 +460,7 @@ func TestValidateStartState(t *testing.T) {
 	for _, test := range tests {
 		p := &Plans{maxSubmit: 30 * time.Minute}
 
-		err := p.validateStartState(context.Background(), test.plan)
+		err := p.validateStartState(test.plan)
 		switch {
 		case test.wantErr && err == nil:
 			t.Errorf("TestValidateStartState(%s): got err == nil, want err != nil", test.name)

@@ -172,7 +172,7 @@ func (e *Plans) Start(ctx context.Context, id uuid.UUID) error {
 	planStatus := plan.State.Get().Status
 	switch {
 	case planStatus == workflow.NotStarted:
-		if err := e.validateStartState(ctx, plan); err != nil {
+		if err := e.validateStartState(plan); err != nil {
 			return err
 		}
 	case planStatus == workflow.Running:
@@ -317,7 +317,7 @@ type ider interface {
 }
 
 // validateStartState validates that the plan is in a valid state to be started.
-func (p *Plans) validateStartState(ctx context.Context, plan *workflow.Plan) error {
+func (p *Plans) validateStartState(plan *workflow.Plan) error {
 	if plan == nil {
 		return fmt.Errorf("plan is nil")
 	}
