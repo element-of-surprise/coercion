@@ -3,7 +3,6 @@ package workflow
 
 import (
 	"fmt"
-	"reflect"
 	"strings"
 	"time"
 
@@ -883,64 +882,6 @@ func Validate(p *Plan) error {
 		}
 	}
 	return nil
-}
-
-// Secure sets all fields in anywhere in the Plan that are tagged with `coerce:"secure"` to their zero value.
-func Secure(v *Plan) {
-	secure(v)
-}
-
-func secure(v any) {
-	val := reflect.ValueOf(v)
-	if val.Kind() == reflect.Ptr {
-		val = val.Elem()
-	}
-	if val.Kind() != reflect.Struct {
-		return
-	}
-
-	typ := val.Type()
-	for i := 0; i < val.NumField(); i++ {
-		field := val.Field(i)
-		if !field.CanSet() {
-			field = field.Addr()
-		}
-
-		tags := getTags(typ.Field(i))
-		if tags.hasTag("secure") {
-			field.Set(reflect.Zero(field.Type()))
-			continue
-		}
-
-		// Recursively coerce nested structs
-		if field.Kind() == reflect.Struct || (field.Kind() == reflect.Ptr && field.Elem().Kind() == reflect.Struct) {
-			secure(field.Addr().Interface())
-		}
-	}
-}
-
-// tags is a set of tags for a field.
-type tags map[string]bool
-
-func (t tags) hasTag(tag string) bool {
-	if t == nil {
-		return false
-	}
-	return t[tag]
-}
-
-// getTags returns the tags for a field.
-func getTags(f reflect.StructField) tags {
-	strTags := f.Tag.Get("coerce")
-	if strings.TrimSpace(strTags) == "" {
-		return nil
-	}
-	t := make(tags)
-	for _, tag := range strings.Split(strTags, ",") {
-		tag = strings.TrimSpace(strings.ToLower(tag))
-		t[tag] = true
-	}
-	return t
 }
 
 // NewV7 generates a new UUID. This is a wrapper around uuid.NewV7

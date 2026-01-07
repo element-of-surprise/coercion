@@ -18,6 +18,7 @@ import (
 
 	"github.com/element-of-surprise/coercion/workflow"
 	"github.com/element-of-surprise/coercion/workflow/utils/html/internal/embedded"
+	"github.com/element-of-surprise/coercion/workflow/utils/secure"
 	"github.com/element-of-surprise/coercion/workflow/utils/walk"
 
 	"github.com/spf13/afero"
@@ -56,7 +57,7 @@ func Render(ctx context.Context, plan *workflow.Plan, options ...RenderOption) (
 	defer bufferPool.Put(ctx, b)
 
 	// Remove any secrets from the plan.
-	workflow.Secure(plan)
+	secure.Plan(plan)
 
 	fs := afero.NewMemMapFs()
 
