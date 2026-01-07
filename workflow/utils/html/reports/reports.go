@@ -279,7 +279,7 @@ func Download(ctx context.Context, plan *workflow.Plan, options ...DownloadOptio
 		},
 	)
 	if walkErr != nil {
-		return nil, err
+		return nil, walkErr
 	}
 	return nil, nil // b gets set in the defer.
 }
