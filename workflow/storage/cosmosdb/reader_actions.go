@@ -93,13 +93,13 @@ func (r reader) docToAction(ctx context.Context, response []byte) (*workflow.Act
 		Plugin:  resp.Plugin,
 		Timeout: resp.Timeout,
 		Retries: resp.Retries,
-		State: &workflow.State{
-			Status: resp.StateStatus,
-			Start:  resp.StateStart,
-			End:    resp.StateEnd,
-			ETag:   string(resp.ETag),
-		},
 	}
+	a.State.Set(workflow.State{
+		Status: resp.StateStatus,
+		Start:  resp.StateStart,
+		End:    resp.StateEnd,
+		ETag:   string(resp.ETag),
+	})
 	a.SetPlanID(resp.PlanID)
 
 	plug := r.reg.Plugin(a.Plugin)
@@ -125,10 +125,11 @@ func (r reader) docToAction(ctx context.Context, response []byte) (*workflow.Act
 	}
 	b = resp.Attempts
 	if len(b) > 0 {
-		a.Attempts, err = decodeAttempts(b, plug)
+		attempts, err := decodeAttempts(b, plug)
 		if err != nil {
 			return nil, fmt.Errorf("couldn't decode attempts: %w", err)
 		}
+		a.Attempts.Set(attempts)
 	}
 	return a, nil
 }

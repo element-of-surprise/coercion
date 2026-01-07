@@ -183,76 +183,53 @@ func TestStart(t *testing.T) {
 			wantErr: true,
 		},
 		{
-			name:    "Error: plan has nil State",
-			id:      storedID,
-			plan:    &workflow.Plan{ID: storedID, SubmitTime: time.Now()},
-			wantErr: true,
-		},
-		{
 			name: "Success: plan starts execution",
 			id:   storedID,
-			plan: &workflow.Plan{
-				ID: storedID,
-				State: &workflow.State{
-					Status: workflow.NotStarted,
-				},
-				SubmitTime: time.Now(),
-			},
+			plan: func() *workflow.Plan {
+				p := &workflow.Plan{ID: storedID, SubmitTime: time.Now()}
+				p.State.Set(workflow.State{Status: workflow.NotStarted})
+				return p
+			}(),
 			wantRunnerCall: true,
 		},
 		{
 			name: "Success: plan already Running returns nil without starting",
 			id:   runningID,
-			plan: &workflow.Plan{
-				ID: runningID,
-				State: &workflow.State{
-					Status: workflow.Running,
-					Start:  time.Now(),
-				},
-				SubmitTime: time.Now(),
-			},
+			plan: func() *workflow.Plan {
+				p := &workflow.Plan{ID: runningID, SubmitTime: time.Now()}
+				p.State.Set(workflow.State{Status: workflow.Running, Start: time.Now()})
+				return p
+			}(),
 			wantRunnerCall: false,
 		},
 		{
 			name: "Success: plan already Completed returns nil without starting",
 			id:   completedID,
-			plan: &workflow.Plan{
-				ID: completedID,
-				State: &workflow.State{
-					Status: workflow.Completed,
-					Start:  time.Now().Add(-time.Minute),
-					End:    time.Now(),
-				},
-				SubmitTime: time.Now().Add(-time.Minute),
-			},
+			plan: func() *workflow.Plan {
+				p := &workflow.Plan{ID: completedID, SubmitTime: time.Now().Add(-time.Minute)}
+				p.State.Set(workflow.State{Status: workflow.Completed, Start: time.Now().Add(-time.Minute), End: time.Now()})
+				return p
+			}(),
 			wantRunnerCall: false,
 		},
 		{
 			name: "Success: plan already Failed returns nil without starting",
 			id:   failedID,
-			plan: &workflow.Plan{
-				ID: failedID,
-				State: &workflow.State{
-					Status: workflow.Failed,
-					Start:  time.Now().Add(-time.Minute),
-					End:    time.Now(),
-				},
-				SubmitTime: time.Now().Add(-time.Minute),
-			},
+			plan: func() *workflow.Plan {
+				p := &workflow.Plan{ID: failedID, SubmitTime: time.Now().Add(-time.Minute)}
+				p.State.Set(workflow.State{Status: workflow.Failed, Start: time.Now().Add(-time.Minute), End: time.Now()})
+				return p
+			}(),
 			wantRunnerCall: false,
 		},
 		{
 			name: "Success: plan already Stopped returns nil without starting",
 			id:   stoppedID,
-			plan: &workflow.Plan{
-				ID: stoppedID,
-				State: &workflow.State{
-					Status: workflow.Stopped,
-					Start:  time.Now().Add(-time.Minute),
-					End:    time.Now(),
-				},
-				SubmitTime: time.Now().Add(-time.Minute),
-			},
+			plan: func() *workflow.Plan {
+				p := &workflow.Plan{ID: stoppedID, SubmitTime: time.Now().Add(-time.Minute)}
+				p.State.Set(workflow.State{Status: workflow.Stopped, Start: time.Now().Add(-time.Minute), End: time.Now()})
+				return p
+			}(),
 			wantRunnerCall: false,
 		},
 	}
@@ -339,16 +316,24 @@ func TestWait(t *testing.T) {
 		wantErr     bool
 	}{
 		{
-			name:        "Success: plan is actively running and completes",
-			id:          runningID,
-			plan:        &workflow.Plan{ID: runningID, State: &workflow.State{Status: workflow.Running}},
+			name: "Success: plan is actively running and completes",
+			id:   runningID,
+			plan: func() *workflow.Plan {
+				p := &workflow.Plan{ID: runningID}
+				p.State.Set(workflow.State{Status: workflow.Running})
+				return p
+			}(),
 			addWaiter:   true,
 			closeWaiter: true,
 		},
 		{
-			name:      "Error: plan is actively running and context cancelled",
-			id:        runningID,
-			plan:      &workflow.Plan{ID: runningID, State: &workflow.State{Status: workflow.Running}},
+			name: "Error: plan is actively running and context cancelled",
+			id:   runningID,
+			plan: func() *workflow.Plan {
+				p := &workflow.Plan{ID: runningID}
+				p.State.Set(workflow.State{Status: workflow.Running})
+				return p
+			}(),
 			addWaiter: true,
 			cancelCtx: true,
 			wantErr:   true,
@@ -356,55 +341,48 @@ func TestWait(t *testing.T) {
 		{
 			name: "Success: plan is Completed and not running",
 			id:   completedID,
-			plan: &workflow.Plan{
-				ID: completedID,
-				State: &workflow.State{
-					Status: workflow.Completed,
-					Start:  time.Now().Add(-time.Minute),
-					End:    time.Now(),
-				},
-			},
+			plan: func() *workflow.Plan {
+				p := &workflow.Plan{ID: completedID}
+				p.State.Set(workflow.State{Status: workflow.Completed, Start: time.Now().Add(-time.Minute), End: time.Now()})
+				return p
+			}(),
 		},
 		{
 			name: "Success: plan is Failed and not running",
 			id:   failedID,
-			plan: &workflow.Plan{
-				ID: failedID,
-				State: &workflow.State{
-					Status: workflow.Failed,
-					Start:  time.Now().Add(-time.Minute),
-					End:    time.Now(),
-				},
-			},
+			plan: func() *workflow.Plan {
+				p := &workflow.Plan{ID: failedID}
+				p.State.Set(workflow.State{Status: workflow.Failed, Start: time.Now().Add(-time.Minute), End: time.Now()})
+				return p
+			}(),
 		},
 		{
 			name: "Success: plan is Stopped and not running",
 			id:   stoppedID,
-			plan: &workflow.Plan{
-				ID: stoppedID,
-				State: &workflow.State{
-					Status: workflow.Stopped,
-					Start:  time.Now().Add(-time.Minute),
-					End:    time.Now(),
-				},
-			},
+			plan: func() *workflow.Plan {
+				p := &workflow.Plan{ID: stoppedID}
+				p.State.Set(workflow.State{Status: workflow.Stopped, Start: time.Now().Add(-time.Minute), End: time.Now()})
+				return p
+			}(),
 		},
 		{
 			name: "Error: plan is NotStarted",
 			id:   notStartedID,
-			plan: &workflow.Plan{
-				ID:    notStartedID,
-				State: &workflow.State{Status: workflow.NotStarted},
-			},
+			plan: func() *workflow.Plan {
+				p := &workflow.Plan{ID: notStartedID}
+				p.State.Set(workflow.State{Status: workflow.NotStarted})
+				return p
+			}(),
 			wantErr: true,
 		},
 		{
 			name: "Error: plan is Running but not in waiters",
 			id:   bugRunningID,
-			plan: &workflow.Plan{
-				ID:    bugRunningID,
-				State: &workflow.State{Status: workflow.Running},
-			},
+			plan: func() *workflow.Plan {
+				p := &workflow.Plan{ID: bugRunningID}
+				p.State.Set(workflow.State{Status: workflow.Running})
+				return p
+			}(),
 			wantErr: true,
 		},
 		{
@@ -482,7 +460,7 @@ func TestValidateStartState(t *testing.T) {
 	for _, test := range tests {
 		p := &Plans{maxSubmit: 30 * time.Minute}
 
-		err := p.validateStartState(context.Background(), test.plan)
+		err := p.validateStartState(test.plan)
 		switch {
 		case test.wantErr && err == nil:
 			t.Errorf("TestValidateStartState(%s): got err == nil, want err != nil", test.name)
@@ -569,11 +547,11 @@ func TestValidateAction(t *testing.T) {
 		},
 		{
 			name: "action.Attempts != nil",
-			item: walk.Item{
-				Value: &workflow.Action{
-					Attempts: []*workflow.Attempt{},
-				},
-			},
+			item: func() walk.Item {
+				a := &workflow.Action{}
+				a.Attempts.Set([]workflow.Attempt{{}})
+				return walk.Item{Value: a}
+			}(),
 			wantErr: true,
 		},
 		{
@@ -665,51 +643,46 @@ func TestValidateState(t *testing.T) {
 		wantErr bool
 	}{
 		{
-			name: "State == nil",
-			item: walk.Item{
-				Value: &workflow.Plan{},
-			},
-			wantErr: true,
-		},
-		{
 			name: "Status != NotStarted",
 			item: walk.Item{
-				Value: &workflow.Plan{
-					State: &workflow.State{
-						Status: workflow.Running,
-					},
-				},
+				Value: func() *workflow.Plan {
+					p := &workflow.Plan{}
+					p.State.Set(workflow.State{Status: workflow.Running})
+					return p
+				}(),
 			},
 			wantErr: true,
 		},
 		{
 			name: "Start != nil",
 			item: walk.Item{
-				Value: &workflow.Plan{
-					State: &workflow.State{
-						Start: time.Now(),
-					},
-				},
+				Value: func() *workflow.Plan {
+					p := &workflow.Plan{}
+					p.State.Set(workflow.State{Start: time.Now()})
+					return p
+				}(),
 			},
 			wantErr: true,
 		},
 		{
 			name: "End != nil",
 			item: walk.Item{
-				Value: &workflow.Plan{
-					State: &workflow.State{
-						End: time.Now(),
-					},
-				},
+				Value: func() *workflow.Plan {
+					p := &workflow.Plan{}
+					p.State.Set(workflow.State{End: time.Now()})
+					return p
+				}(),
 			},
 			wantErr: true,
 		},
 		{
 			name: "Success",
 			item: walk.Item{
-				Value: &workflow.Plan{
-					State: &workflow.State{},
-				},
+				Value: func() *workflow.Plan {
+					p := &workflow.Plan{}
+					p.State.Set(workflow.State{})
+					return p
+				}(),
 			},
 		},
 	}

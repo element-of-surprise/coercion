@@ -48,13 +48,13 @@ func (p reader) docToChecks(ctx context.Context, planID azcosmos.PartitionKey, r
 		ID:    resp.ID,
 		Key:   resp.Key,
 		Delay: time.Duration(resp.Delay),
-		State: &workflow.State{
-			Status: resp.StateStatus,
-			Start:  resp.StateStart,
-			End:    resp.StateEnd,
-			ETag:   string(resp.ETag),
-		},
 	}
+	c.State.Set(workflow.State{
+		Status: resp.StateStatus,
+		Start:  resp.StateStart,
+		End:    resp.StateEnd,
+		ETag:   string(resp.ETag),
+	})
 	c.SetPlanID(resp.PlanID)
 
 	c.Actions, err = p.idsToActions(ctx, planID, resp.Actions)

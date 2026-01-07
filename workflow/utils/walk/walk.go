@@ -2,7 +2,9 @@
 package walk
 
 import (
+	"context"
 	"iter"
+	"time"
 
 	"github.com/element-of-surprise/coercion/workflow"
 )
@@ -95,6 +97,35 @@ func Plan(p *workflow.Plan) iter.Seq[Item] {
 			}
 		}
 	}
+}
+
+type stater interface {
+	GetState() workflow.State
+}
+
+// LastUpdate returns the time of the most recent update to any object in the plan.
+func LastUpdate(ctx context.Context, p *workflow.Plan) time.Time {
+	if p == nil {
+		return time.Time{}
+	}
+
+	var last time.Time
+	rt := p.RuntimeUpdate.Get()
+	if !rt.IsZero() {
+		last = rt
+	}
+
+	for item := range Plan(p) {
+		state := item.Value.(stater).GetState()
+		if state.Start.After(last) {
+			last = state.Start
+		}
+		if state.End.After(last) {
+			last = state.End
+		}
+	}
+
+	return last
 }
 
 func walkChecks(yield func(Item) bool, chain []workflow.Object, checks *workflow.Checks) bool {

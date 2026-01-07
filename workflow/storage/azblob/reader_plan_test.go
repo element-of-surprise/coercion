@@ -11,14 +11,110 @@ import (
 	"github.com/go-json-experiment/json"
 )
 
+// makeAction creates a test action with the given parameters and properly initialized State.
+func makeAction(name, descr, plugin string, req any, status workflow.Status) *workflow.Action {
+	a := &workflow.Action{
+		ID:      workflow.NewV7(),
+		Name:    name,
+		Descr:   descr,
+		Plugin:  plugin,
+		Timeout: 30 * time.Second,
+		Req:     req,
+	}
+	a.State.Set(workflow.State{Status: status})
+	return a
+}
+
+// makeActionWithAttempts creates a test action with attempts and properly initialized State.
+func makeActionWithAttempts(name, descr, plugin string, req any, attempts []workflow.Attempt, status workflow.Status) *workflow.Action {
+	a := &workflow.Action{
+		ID:      workflow.NewV7(),
+		Name:    name,
+		Descr:   descr,
+		Plugin:  plugin,
+		Timeout: 30 * time.Second,
+		Req:     req,
+		Attempts: func() workflow.AtomicSlice[workflow.Attempt] {
+			var atomicAttempts workflow.AtomicSlice[workflow.Attempt]
+			atomicAttempts.Set(attempts)
+			return atomicAttempts
+		}(),
+	}
+	a.State.Set(workflow.State{Status: status})
+	return a
+}
+
+// makeChecks creates test checks with the given actions and properly initialized State.
+func makeChecks(actions []*workflow.Action, status workflow.Status) *workflow.Checks {
+	c := &workflow.Checks{
+		ID:      workflow.NewV7(),
+		Actions: actions,
+	}
+	c.State.Set(workflow.State{Status: status})
+	return c
+}
+
+// makeSequence creates a test sequence with the given actions and properly initialized State.
+func makeSequence(name, descr string, actions []*workflow.Action, status workflow.Status) *workflow.Sequence {
+	s := &workflow.Sequence{
+		ID:      workflow.NewV7(),
+		Name:    name,
+		Descr:   descr,
+		Actions: actions,
+	}
+	s.State.Set(workflow.State{Status: status})
+	return s
+}
+
+// makeBlock creates a test block with the given parameters and properly initialized State.
+func makeBlock(name, descr string, preChecks *workflow.Checks, sequences []*workflow.Sequence, status workflow.Status) *workflow.Block {
+	b := &workflow.Block{
+		ID:        workflow.NewV7(),
+		Name:      name,
+		Descr:     descr,
+		PreChecks: preChecks,
+		Sequences: sequences,
+	}
+	b.State.Set(workflow.State{Status: status})
+	return b
+}
+
+// makePlan creates a test plan with the given parameters and properly initialized State.
+func makePlan(name, descr string, preChecks *workflow.Checks, blocks []*workflow.Block, status workflow.Status) *workflow.Plan {
+	p := &workflow.Plan{
+		ID:        workflow.NewV7(),
+		Name:      name,
+		Descr:     descr,
+		PreChecks: preChecks,
+		Blocks:    blocks,
+	}
+	p.State.Set(workflow.State{Status: status})
+	return p
+}
+
+// makePlanFull creates a test plan with all check types and properly initialized State.
+func makePlanFull(bypassChecks, preChecks, postChecks, contChecks, deferredChecks *workflow.Checks, blocks []*workflow.Block, status workflow.Status) *workflow.Plan {
+	p := &workflow.Plan{
+		ID:             workflow.NewV7(),
+		Name:           "Test Plan",
+		Descr:          "Test Description",
+		BypassChecks:   bypassChecks,
+		PreChecks:      preChecks,
+		PostChecks:     postChecks,
+		ContChecks:     contChecks,
+		DeferredChecks: deferredChecks,
+		Blocks:         blocks,
+	}
+	p.State.Set(workflow.State{Status: status})
+	return p
+}
+
 func TestFixActions(t *testing.T) {
 	t.Parallel()
 
 	ctx := context.Background()
 	reg := registry.New()
 	reg.Register(&testPlugins.HelloPlugin{})
-
-	planID := workflow.NewV7()
 
 	tests := []struct {
 		name    string
@@ -27,249 +123,111 @@ func TestFixActions(t *testing.T) {
 	}{
 		{
 			name: "Success: fix Action.Req in plan-level PreChecks",
-			plan: &workflow.Plan{
-				ID:    planID,
-				Name:  "Test Plan",
-				Descr: "Test Description",
-				PreChecks: &workflow.Checks{
-					ID: workflow.NewV7(),
-					Actions: []*workflow.Action{
-						{
-							ID:      workflow.NewV7(),
-							Name:    "test action",
-							Descr:   "test action",
-							Plugin:  testPlugins.HelloPluginName,
-							Timeout: 30 * time.Second,
-							Req:     testPlugins.HelloReq{Say: "hello"},
-							State: &workflow.State{
-								Status: workflow.NotStarted,
-							},
-						},
+			plan: makePlan(
+				"Test Plan",
+				"Test Description",
+				makeChecks(
+					[]*workflow.Action{
+						makeAction("test action", "test action", testPlugins.HelloPluginName, testPlugins.HelloReq{Say: "hello"}, workflow.NotStarted),
 					},
-					State: &workflow.State{
-						Status: workflow.NotStarted,
-					},
-				},
-				Blocks: []*workflow.Block{},
-				State: &workflow.State{
-					Status: workflow.NotStarted,
-				},
-			},
+					workflow.NotStarted,
+				),
+				[]*workflow.Block{},
+				workflow.NotStarted,
+			),
 			wantErr: false,
 		},
 		{
 			name: "Success: fix Action.Req and Attempt.Resp in multiple locations",
-			plan: &workflow.Plan{
-				ID:    planID,
-				Name:  "Test Plan",
-				Descr: "Test Description",
-				PreChecks: &workflow.Checks{
-					ID: workflow.NewV7(),
-					Actions: []*workflow.Action{
-						{
-							ID:      workflow.NewV7(),
-							Name:    "test action with attempt",
-							Descr:   "test action with attempt",
-							Plugin:  testPlugins.HelloPluginName,
-							Timeout: 30 * time.Second,
-							Req:     testPlugins.HelloReq{Say: "hello"},
-							Attempts: []*workflow.Attempt{
+			plan: makePlan(
+				"Test Plan",
+				"Test Description",
+				makeChecks(
+					[]*workflow.Action{
+						makeActionWithAttempts(
+							"test action with attempt",
+							"test action with attempt",
+							testPlugins.HelloPluginName,
+							testPlugins.HelloReq{Say: "hello"},
+							[]workflow.Attempt{
 								{
 									Resp:  &testPlugins.HelloResp{Said: "hello"},
 									Start: time.Now().UTC(),
 									End:   time.Now().UTC(),
 								},
 							},
-							State: &workflow.State{
-								Status: workflow.Completed,
-							},
-						},
+							workflow.Completed,
+						),
 					},
-					State: &workflow.State{
-						Status: workflow.Completed,
-					},
-				},
-				Blocks: []*workflow.Block{
-					{
-						ID:    workflow.NewV7(),
-						Name:  "test block",
-						Descr: "test block",
-						PreChecks: &workflow.Checks{
-							ID: workflow.NewV7(),
-							Actions: []*workflow.Action{
-								{
-									ID:      workflow.NewV7(),
-									Name:    "block action",
-									Descr:   "block action",
-									Plugin:  testPlugins.HelloPluginName,
-									Timeout: 30 * time.Second,
-									Req:     testPlugins.HelloReq{Say: "world"},
-									State: &workflow.State{
-										Status: workflow.NotStarted,
-									},
-								},
+					workflow.Completed,
+				),
+				[]*workflow.Block{
+					makeBlock(
+						"test block",
+						"test block",
+						makeChecks(
+							[]*workflow.Action{
+								makeAction("block action", "block action", testPlugins.HelloPluginName, testPlugins.HelloReq{Say: "world"}, workflow.NotStarted),
 							},
-							State: &workflow.State{
-								Status: workflow.NotStarted,
-							},
-						},
-						Sequences: []*workflow.Sequence{
-							{
-								ID:    workflow.NewV7(),
-								Name:  "test seq",
-								Descr: "test seq",
-								Actions: []*workflow.Action{
-									{
-										ID:      workflow.NewV7(),
-										Name:    "seq action",
-										Descr:   "seq action",
-										Plugin:  testPlugins.HelloPluginName,
-										Timeout: 30 * time.Second,
-										Req:     testPlugins.HelloReq{Say: "sequence"},
-										Attempts: []*workflow.Attempt{
+							workflow.NotStarted,
+						),
+						[]*workflow.Sequence{
+							makeSequence(
+								"test seq",
+								"test seq",
+								[]*workflow.Action{
+									makeActionWithAttempts(
+										"seq action",
+										"seq action",
+										testPlugins.HelloPluginName,
+										testPlugins.HelloReq{Say: "sequence"},
+										[]workflow.Attempt{
 											{
 												Resp:  &testPlugins.HelloResp{Said: "sequence"},
 												Start: time.Now().UTC(),
 												End:   time.Now().UTC(),
 											},
 										},
-										State: &workflow.State{
-											Status: workflow.Completed,
-										},
-									},
+										workflow.Completed,
+									),
 								},
-								State: &workflow.State{
-									Status: workflow.NotStarted,
-								},
-							},
+								workflow.NotStarted,
+							),
 						},
-						State: &workflow.State{
-							Status: workflow.NotStarted,
-						},
-					},
+						workflow.NotStarted,
+					),
 				},
-				State: &workflow.State{
-					Status: workflow.NotStarted,
-				},
-			},
+				workflow.NotStarted,
+			),
 			wantErr: false,
 		},
 		{
 			name: "Success: fix Action.Req in all check types",
-			plan: &workflow.Plan{
-				ID:    planID,
-				Name:  "Test Plan",
-				Descr: "Test Description",
-				BypassChecks: &workflow.Checks{
-					ID: workflow.NewV7(),
-					Actions: []*workflow.Action{
-						{
-							ID:      workflow.NewV7(),
-							Name:    "bypass",
-							Descr:   "bypass",
-							Plugin:  testPlugins.HelloPluginName,
-							Timeout: 30 * time.Second,
-							Req:     testPlugins.HelloReq{Say: "bypass"},
-							State:   &workflow.State{Status: workflow.NotStarted},
-						},
-					},
-					State: &workflow.State{Status: workflow.NotStarted},
-				},
-				PreChecks: &workflow.Checks{
-					ID: workflow.NewV7(),
-					Actions: []*workflow.Action{
-						{
-							ID:      workflow.NewV7(),
-							Name:    "pre",
-							Descr:   "pre",
-							Plugin:  testPlugins.HelloPluginName,
-							Timeout: 30 * time.Second,
-							Req:     testPlugins.HelloReq{Say: "pre"},
-							State:   &workflow.State{Status: workflow.NotStarted},
-						},
-					},
-					State: &workflow.State{Status: workflow.NotStarted},
-				},
-				PostChecks: &workflow.Checks{
-					ID: workflow.NewV7(),
-					Actions: []*workflow.Action{
-						{
-							ID:      workflow.NewV7(),
-							Name:    "post",
-							Descr:   "post",
-							Plugin:  testPlugins.HelloPluginName,
-							Timeout: 30 * time.Second,
-							Req:     testPlugins.HelloReq{Say: "post"},
-							State:   &workflow.State{Status: workflow.NotStarted},
-						},
-					},
-					State: &workflow.State{Status: workflow.NotStarted},
-				},
-				ContChecks: &workflow.Checks{
-					ID: workflow.NewV7(),
-					Actions: []*workflow.Action{
-						{
-							ID:      workflow.NewV7(),
-							Name:    "cont",
-							Descr:   "cont",
-							Plugin:  testPlugins.HelloPluginName,
-							Timeout: 30 * time.Second,
-							Req:     testPlugins.HelloReq{Say: "cont"},
-							State:   &workflow.State{Status: workflow.NotStarted},
-						},
-					},
-					State: &workflow.State{Status: workflow.NotStarted},
-				},
-				DeferredChecks: &workflow.Checks{
-					ID: workflow.NewV7(),
-					Actions: []*workflow.Action{
-						{
-							ID:      workflow.NewV7(),
-							Name:    "deferred",
-							Descr:   "deferred",
-							Plugin:  testPlugins.HelloPluginName,
-							Timeout: 30 * time.Second,
-							Req:     testPlugins.HelloReq{Say: "deferred"},
-							State:   &workflow.State{Status: workflow.NotStarted},
-						},
-					},
-					State: &workflow.State{Status: workflow.NotStarted},
-				},
-				Blocks: []*workflow.Block{},
-				State:  &workflow.State{Status: workflow.NotStarted},
-			},
+			plan: makePlanFull(
+				makeChecks([]*workflow.Action{makeAction("bypass", "bypass", testPlugins.HelloPluginName, testPlugins.HelloReq{Say: "bypass"}, workflow.NotStarted)}, workflow.NotStarted),
+				makeChecks([]*workflow.Action{makeAction("pre", "pre", testPlugins.HelloPluginName, testPlugins.HelloReq{Say: "pre"}, workflow.NotStarted)}, workflow.NotStarted),
+				makeChecks([]*workflow.Action{makeAction("post", "post", testPlugins.HelloPluginName, testPlugins.HelloReq{Say: "post"}, workflow.NotStarted)}, workflow.NotStarted),
+				makeChecks([]*workflow.Action{makeAction("cont", "cont", testPlugins.HelloPluginName, testPlugins.HelloReq{Say: "cont"}, workflow.NotStarted)}, workflow.NotStarted),
+				makeChecks([]*workflow.Action{makeAction("deferred", "deferred", testPlugins.HelloPluginName, testPlugins.HelloReq{Say: "deferred"}, workflow.NotStarted)}, workflow.NotStarted),
+				[]*workflow.Block{},
+				workflow.NotStarted,
+			),
 			wantErr: false,
 		},
 		{
 			name: "Error: plugin not found in registry",
-			plan: &workflow.Plan{
-				ID:    planID,
-				Name:  "Test Plan",
-				Descr: "Test Description",
-				PreChecks: &workflow.Checks{
-					ID: workflow.NewV7(),
-					Actions: []*workflow.Action{
-						{
-							ID:      workflow.NewV7(),
-							Name:    "test action",
-							Descr:   "test action",
-							Plugin:  "nonexistent.plugin",
-							Timeout: 30 * time.Second,
-							Req:     testPlugins.HelloReq{Say: "hello"},
-							State: &workflow.State{
-								Status: workflow.NotStarted,
-							},
-						},
+			plan: makePlan(
+				"Test Plan",
+				"Test Description",
+				makeChecks(
+					[]*workflow.Action{
+						makeAction("test action", "test action", "nonexistent.plugin", testPlugins.HelloReq{Say: "hello"}, workflow.NotStarted),
 					},
-					State: &workflow.State{
-						Status: workflow.NotStarted,
-					},
-				},
-				Blocks: []*workflow.Block{},
-				State: &workflow.State{
-					Status: workflow.NotStarted,
-				},
-			},
+					workflow.NotStarted,
+				),
+				[]*workflow.Block{},
+				workflow.NotStarted,
+			),
 			wantErr: true,
 		},
 	}
@@ -339,7 +297,7 @@ func TestFixActions(t *testing.T) {
 						}
 
 						// Verify Attempt.Resp was fixed
-						for _, attempt := range action.Attempts {
+						for _, attempt := range action.Attempts.Get() {
 							if attempt.Resp != nil {
 								resp, ok := attempt.Resp.(testPlugins.HelloResp)
 								if !ok {
@@ -396,7 +354,7 @@ func TestFixActions(t *testing.T) {
 						}
 
 						// Verify Attempt.Resp was fixed in sequences
-						for _, attempt := range action.Attempts {
+						for _, attempt := range action.Attempts.Get() {
 							if attempt.Resp != nil {
 								resp, ok := attempt.Resp.(testPlugins.HelloResp)
 								if !ok {

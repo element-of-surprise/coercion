@@ -66,7 +66,7 @@ func (p *Plan) Equal(other *Plan) bool {
 	if !sliceOfObjectsEqual(p.Blocks, other.Blocks) {
 		return false
 	}
-	if !stateEqual(p.State, other.State) {
+	if !stateEqual(p.State.Get(), other.State.Get()) {
 		return false
 	}
 	if !p.SubmitTime.Equal(other.SubmitTime) {
@@ -101,7 +101,7 @@ func (c *Checks) Equal(other *Checks) bool {
 	if !sliceOfObjectsEqual(c.Actions, other.Actions) {
 		return false
 	}
-	if !stateEqual(c.State, other.State) {
+	if !stateEqual(c.State.Get(), other.State.Get()) {
 		return false
 	}
 
@@ -160,7 +160,7 @@ func (b *Block) Equal(other *Block) bool {
 	if b.ToleratedFailures != other.ToleratedFailures {
 		return false
 	}
-	if !stateEqual(b.State, other.State) {
+	if !stateEqual(b.State.Get(), other.State.Get()) {
 		return false
 	}
 
@@ -192,7 +192,7 @@ func (s *Sequence) Equal(other *Sequence) bool {
 	if !sliceOfObjectsEqual(s.Actions, other.Actions) {
 		return false
 	}
-	if !stateEqual(s.State, other.State) {
+	if !stateEqual(s.State.Get(), other.State.Get()) {
 		return false
 	}
 
@@ -233,10 +233,10 @@ func (a *Action) Equal(other *Action) bool {
 	if !reflect.DeepEqual(a.Req, other.Req) {
 		return false
 	}
-	if !sliceOfObjectsEqual(a.Attempts, other.Attempts) {
+	if !sliceOfObjectsEqual(a.Attempts.Get(), other.Attempts.Get()) {
 		return false
 	}
-	if !stateEqual(a.State, other.State) {
+	if !stateEqual(a.State.Get(), other.State.Get()) {
 		return false
 	}
 
@@ -245,12 +245,9 @@ func (a *Action) Equal(other *Action) bool {
 
 // Equal returns true if the Attempt objects are equal.
 // Only compares public fields.
-func (a *Attempt) Equal(other *Attempt) bool {
+func (a Attempt) Equal(other Attempt) bool {
 	if a == other {
 		return true
-	}
-	if a == nil || other == nil {
-		return false
 	}
 
 	if !reflect.DeepEqual(a.Resp, other.Resp) {
@@ -279,14 +276,8 @@ func checksEqual(a, b *Checks) bool {
 	return a.Equal(b)
 }
 
-func stateEqual(a, b *State) bool {
-	if a == b {
-		return true
-	}
-	if a == nil || b == nil {
-		return false
-	}
-	return a.Equal(b)
+func stateEqual(a, b State) bool {
+	return a.Equal(&b)
 }
 
 type objectEqual[T any] interface {

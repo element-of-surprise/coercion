@@ -67,67 +67,59 @@ func createTestPlan(running bool) *workflow.Plan {
 		status = workflow.Running
 	}
 
-	return &workflow.Plan{
+	preCheckAction := &workflow.Action{
+		ID:      workflow.NewV7(),
+		Name:    "pre-check action",
+		Descr:   "pre-check action desc",
+		Plugin:  testPlugins.HelloPluginName,
+		Timeout: 30 * time.Second,
+		Req:     testPlugins.HelloReq{Say: "hello"},
+	}
+	preCheckAction.State.Set(workflow.State{Status: workflow.NotStarted})
+
+	preChecks := &workflow.Checks{
+		ID:      workflow.NewV7(),
+		Actions: []*workflow.Action{preCheckAction},
+	}
+	preChecks.State.Set(workflow.State{Status: workflow.NotStarted})
+
+	seqAction := &workflow.Action{
+		ID:      workflow.NewV7(),
+		Name:    "sequence action",
+		Descr:   "sequence action desc",
+		Plugin:  testPlugins.HelloPluginName,
+		Timeout: 30 * time.Second,
+		Req:     testPlugins.HelloReq{Say: "sequence"},
+	}
+	seqAction.State.Set(workflow.State{Status: workflow.NotStarted})
+
+	seq := &workflow.Sequence{
+		ID:      workflow.NewV7(),
+		Name:    "Test Sequence",
+		Descr:   "Test Sequence Description",
+		Actions: []*workflow.Action{seqAction},
+	}
+	seq.State.Set(workflow.State{Status: workflow.NotStarted})
+
+	block := &workflow.Block{
+		ID:        workflow.NewV7(),
+		Name:      "Test Block",
+		Descr:     "Test Block Description",
+		Sequences: []*workflow.Sequence{seq},
+	}
+	block.State.Set(workflow.State{Status: workflow.NotStarted})
+
+	plan := &workflow.Plan{
 		ID:         planID,
 		Name:       "Test Plan",
 		Descr:      "Test Plan Description",
 		SubmitTime: time.Now().UTC(),
-		PreChecks: &workflow.Checks{
-			ID: workflow.NewV7(),
-			Actions: []*workflow.Action{
-				{
-					ID:      workflow.NewV7(),
-					Name:    "pre-check action",
-					Descr:   "pre-check action desc",
-					Plugin:  testPlugins.HelloPluginName,
-					Timeout: 30 * time.Second,
-					Req:     testPlugins.HelloReq{Say: "hello"},
-					State: &workflow.State{
-						Status: workflow.NotStarted,
-					},
-				},
-			},
-			State: &workflow.State{
-				Status: workflow.NotStarted,
-			},
-		},
-		Blocks: []*workflow.Block{
-			{
-				ID:    workflow.NewV7(),
-				Name:  "Test Block",
-				Descr: "Test Block Description",
-				Sequences: []*workflow.Sequence{
-					{
-						ID:    workflow.NewV7(),
-						Name:  "Test Sequence",
-						Descr: "Test Sequence Description",
-						Actions: []*workflow.Action{
-							{
-								ID:      workflow.NewV7(),
-								Name:    "sequence action",
-								Descr:   "sequence action desc",
-								Plugin:  testPlugins.HelloPluginName,
-								Timeout: 30 * time.Second,
-								Req:     testPlugins.HelloReq{Say: "sequence"},
-								State: &workflow.State{
-									Status: workflow.NotStarted,
-								},
-							},
-						},
-						State: &workflow.State{
-							Status: workflow.NotStarted,
-						},
-					},
-				},
-				State: &workflow.State{
-					Status: workflow.NotStarted,
-				},
-			},
-		},
-		State: &workflow.State{
-			Status: status,
-		},
+		PreChecks:  preChecks,
+		Blocks:     []*workflow.Block{block},
 	}
+	plan.State.Set(workflow.State{Status: status})
+
+	return plan
 }
 
 // uploadPlanToFake uploads a plan and its metadata to the fake client.
@@ -453,7 +445,7 @@ func TestRecoverPlansInContainer(t *testing.T) {
 					Name:       plan.Name,
 					Descr:      plan.Descr,
 					SubmitTime: plan.SubmitTime,
-					State:      plan.State,
+					State:      plan.State.Get(),
 				}
 			}
 

@@ -39,9 +39,9 @@ func (c checksUpdater) UpdateChecks(ctx context.Context, check *workflow.Checks)
 	stmt := Stmt{}
 	stmt.Query(updateChecks)
 	stmt.SetText("$id", check.ID.String())
-	stmt.SetInt64("$state_status", int64(check.State.Status))
-	stmt.SetInt64("$state_start", check.State.Start.UnixNano())
-	stmt.SetInt64("$state_end", check.State.End.UnixNano())
+	stmt.SetInt64("$state_status", int64(check.State.Get().Status))
+	stmt.SetInt64("$state_start", check.State.Get().Start.UnixNano())
+	stmt.SetInt64("$state_end", check.State.Get().End.UnixNano())
 
 	sStmt, err := stmt.Prepare(conn)
 	if err != nil {

@@ -155,19 +155,19 @@ func TestAttemptEqual(t *testing.T) {
 
 	tests := []struct {
 		name string
-		a1   *Attempt
-		a2   *Attempt
+		a1   Attempt
+		a2   Attempt
 		want bool
 	}{
 		{
-			name: "Success: both nil",
-			a1:   nil,
-			a2:   nil,
+			name: "Success: both empty",
+			a1:   Attempt{},
+			a2:   Attempt{},
 			want: true,
 		},
 		{
 			name: "Success: equal values",
-			a1: &Attempt{
+			a1: Attempt{
 				Resp: "response",
 				Err: &plugins.Error{
 					Code:      1,
@@ -177,7 +177,7 @@ func TestAttemptEqual(t *testing.T) {
 				Start: now,
 				End:   later,
 			},
-			a2: &Attempt{
+			a2: Attempt{
 				Resp: "response",
 				Err: &plugins.Error{
 					Code:      1,
@@ -191,12 +191,12 @@ func TestAttemptEqual(t *testing.T) {
 		},
 		{
 			name: "Success: different Resp",
-			a1: &Attempt{
+			a1: Attempt{
 				Resp:  "response1",
 				Start: now,
 				End:   later,
 			},
-			a2: &Attempt{
+			a2: Attempt{
 				Resp:  "response2",
 				Start: now,
 				End:   later,
@@ -205,7 +205,7 @@ func TestAttemptEqual(t *testing.T) {
 		},
 		{
 			name: "Success: different Err",
-			a1: &Attempt{
+			a1: Attempt{
 				Resp: "response",
 				Err: &plugins.Error{
 					Code:    1,
@@ -214,7 +214,7 @@ func TestAttemptEqual(t *testing.T) {
 				Start: now,
 				End:   later,
 			},
-			a2: &Attempt{
+			a2: Attempt{
 				Resp: "response",
 				Err: &plugins.Error{
 					Code:    1,
@@ -227,7 +227,7 @@ func TestAttemptEqual(t *testing.T) {
 		},
 		{
 			name: "Success: wrapped errors equal",
-			a1: &Attempt{
+			a1: Attempt{
 				Err: &plugins.Error{
 					Code:    1,
 					Message: "outer",
@@ -237,7 +237,7 @@ func TestAttemptEqual(t *testing.T) {
 					},
 				},
 			},
-			a2: &Attempt{
+			a2: Attempt{
 				Err: &plugins.Error{
 					Code:    1,
 					Message: "outer",
@@ -251,7 +251,7 @@ func TestAttemptEqual(t *testing.T) {
 		},
 		{
 			name: "Success: wrapped errors different",
-			a1: &Attempt{
+			a1: Attempt{
 				Err: &plugins.Error{
 					Code:    1,
 					Message: "outer",
@@ -261,7 +261,7 @@ func TestAttemptEqual(t *testing.T) {
 					},
 				},
 			},
-			a2: &Attempt{
+			a2: Attempt{
 				Err: &plugins.Error{
 					Code:    1,
 					Message: "outer",
@@ -271,18 +271,6 @@ func TestAttemptEqual(t *testing.T) {
 					},
 				},
 			},
-			want: false,
-		},
-		{
-			name: "Success: first nil",
-			a1:   nil,
-			a2:   &Attempt{},
-			want: false,
-		},
-		{
-			name: "Success: second nil",
-			a1:   &Attempt{},
-			a2:   nil,
 			want: false,
 		},
 	}
@@ -303,6 +291,39 @@ func TestActionEqual(t *testing.T) {
 	key1 := NewV7()
 	key2 := NewV7()
 
+	// Create actions with State for "equal values" test
+	a1EqualValues := &Action{
+		ID:      id1,
+		Key:     key1,
+		Name:    "action1",
+		Descr:   "description",
+		Plugin:  "plugin1",
+		Timeout: 30 * time.Second,
+		Retries: 3,
+		Req:     "request",
+	}
+	a1EqualValues.Attempts.Set([]Attempt{{Resp: "resp1"}})
+	a1EqualValues.State.Set(State{Status: Running})
+
+	a2EqualValues := &Action{
+		ID:      id1,
+		Key:     key1,
+		Name:    "action1",
+		Descr:   "description",
+		Plugin:  "plugin1",
+		Timeout: 30 * time.Second,
+		Retries: 3,
+		Req:     "request",
+	}
+	a2EqualValues.Attempts.Set([]Attempt{{Resp: "resp1"}})
+	a2EqualValues.State.Set(State{Status: Running})
+
+	// Create action with State for "nil State vs non-nil State" test
+	a2WithState := &Action{
+		ID: id1,
+	}
+	a2WithState.State.Set(State{Status: Running})
+
 	tests := []struct {
 		name string
 		a1   *Action
@@ -317,34 +338,8 @@ func TestActionEqual(t *testing.T) {
 		},
 		{
 			name: "Success: equal values",
-			a1: &Action{
-				ID:      id1,
-				Key:     key1,
-				Name:    "action1",
-				Descr:   "description",
-				Plugin:  "plugin1",
-				Timeout: 30 * time.Second,
-				Retries: 3,
-				Req:     "request",
-				Attempts: []*Attempt{
-					{Resp: "resp1"},
-				},
-				State: &State{Status: Running},
-			},
-			a2: &Action{
-				ID:      id1,
-				Key:     key1,
-				Name:    "action1",
-				Descr:   "description",
-				Plugin:  "plugin1",
-				Timeout: 30 * time.Second,
-				Retries: 3,
-				Req:     "request",
-				Attempts: []*Attempt{
-					{Resp: "resp1"},
-				},
-				State: &State{Status: Running},
-			},
+			a1:   a1EqualValues,
+			a2:   a2EqualValues,
 			want: true,
 		},
 		{
@@ -401,28 +396,28 @@ func TestActionEqual(t *testing.T) {
 			name: "Success: different Attempts",
 			a1: &Action{
 				ID: id1,
-				Attempts: []*Attempt{
-					{Resp: "resp1"},
-				},
+				Attempts: func() AtomicSlice[Attempt] {
+					var attempts AtomicSlice[Attempt]
+					attempts.Set([]Attempt{{Resp: "resp1"}})
+					return attempts
+				}(),
 			},
 			a2: &Action{
 				ID: id1,
-				Attempts: []*Attempt{
-					{Resp: "resp2"},
-				},
+				Attempts: func() AtomicSlice[Attempt] {
+					var attempts AtomicSlice[Attempt]
+					attempts.Set([]Attempt{{Resp: "resp2"}})
+					return attempts
+				}(),
 			},
 			want: false,
 		},
 		{
 			name: "Success: nil State vs non-nil State",
 			a1: &Action{
-				ID:    id1,
-				State: nil,
+				ID: id1,
 			},
-			a2: &Action{
-				ID:    id1,
-				State: &State{Status: Running},
-			},
+			a2:   a2WithState,
 			want: false,
 		},
 		{
@@ -448,6 +443,29 @@ func TestSequenceEqual(t *testing.T) {
 	id2 := NewV7()
 	key1 := NewV7()
 
+	// Create sequences with State for "equal values" test
+	s1EqualValues := &Sequence{
+		ID:    id1,
+		Key:   key1,
+		Name:  "sequence1",
+		Descr: "description",
+		Actions: []*Action{
+			{ID: id1, Name: "action1"},
+		},
+	}
+	s1EqualValues.State.Set(State{Status: Running})
+
+	s2EqualValues := &Sequence{
+		ID:    id1,
+		Key:   key1,
+		Name:  "sequence1",
+		Descr: "description",
+		Actions: []*Action{
+			{ID: id1, Name: "action1"},
+		},
+	}
+	s2EqualValues.State.Set(State{Status: Running})
+
 	tests := []struct {
 		name string
 		s1   *Sequence
@@ -462,26 +480,8 @@ func TestSequenceEqual(t *testing.T) {
 		},
 		{
 			name: "Success: equal values",
-			s1: &Sequence{
-				ID:    id1,
-				Key:   key1,
-				Name:  "sequence1",
-				Descr: "description",
-				Actions: []*Action{
-					{ID: id1, Name: "action1"},
-				},
-				State: &State{Status: Running},
-			},
-			s2: &Sequence{
-				ID:    id1,
-				Key:   key1,
-				Name:  "sequence1",
-				Descr: "description",
-				Actions: []*Action{
-					{ID: id1, Name: "action1"},
-				},
-				State: &State{Status: Running},
-			},
+			s1:   s1EqualValues,
+			s2:   s2EqualValues,
 			want: true,
 		},
 		{
@@ -546,6 +546,27 @@ func TestChecksEqual(t *testing.T) {
 	id2 := NewV7()
 	key1 := NewV7()
 
+	// Create checks with State for "equal values" test
+	c1EqualValues := &Checks{
+		ID:    id1,
+		Key:   key1,
+		Delay: 30 * time.Second,
+		Actions: []*Action{
+			{ID: id1, Name: "action1"},
+		},
+	}
+	c1EqualValues.State.Set(State{Status: Running})
+
+	c2EqualValues := &Checks{
+		ID:    id1,
+		Key:   key1,
+		Delay: 30 * time.Second,
+		Actions: []*Action{
+			{ID: id1, Name: "action1"},
+		},
+	}
+	c2EqualValues.State.Set(State{Status: Running})
+
 	tests := []struct {
 		name string
 		c1   *Checks
@@ -560,24 +581,8 @@ func TestChecksEqual(t *testing.T) {
 		},
 		{
 			name: "Success: equal values",
-			c1: &Checks{
-				ID:    id1,
-				Key:   key1,
-				Delay: 30 * time.Second,
-				Actions: []*Action{
-					{ID: id1, Name: "action1"},
-				},
-				State: &State{Status: Running},
-			},
-			c2: &Checks{
-				ID:    id1,
-				Key:   key1,
-				Delay: 30 * time.Second,
-				Actions: []*Action{
-					{ID: id1, Name: "action1"},
-				},
-				State: &State{Status: Running},
-			},
+			c1:   c1EqualValues,
+			c2:   c2EqualValues,
 			want: true,
 		},
 		{
@@ -635,6 +640,49 @@ func TestBlockEqual(t *testing.T) {
 	id2 := NewV7()
 	key1 := NewV7()
 
+	// Create blocks with State for "equal values" test
+	b1EqualValues := &Block{
+		ID:            id1,
+		Key:           key1,
+		Name:          "block1",
+		Descr:         "description",
+		EntranceDelay: 10 * time.Second,
+		ExitDelay:     5 * time.Second,
+		BypassChecks: &Checks{
+			ID: id1,
+		},
+		PreChecks: &Checks{
+			ID: id2,
+		},
+		Sequences: []*Sequence{
+			{ID: id1, Name: "seq1"},
+		},
+		Concurrency:       2,
+		ToleratedFailures: 1,
+	}
+	b1EqualValues.State.Set(State{Status: Running})
+
+	b2EqualValues := &Block{
+		ID:            id1,
+		Key:           key1,
+		Name:          "block1",
+		Descr:         "description",
+		EntranceDelay: 10 * time.Second,
+		ExitDelay:     5 * time.Second,
+		BypassChecks: &Checks{
+			ID: id1,
+		},
+		PreChecks: &Checks{
+			ID: id2,
+		},
+		Sequences: []*Sequence{
+			{ID: id1, Name: "seq1"},
+		},
+		Concurrency:       2,
+		ToleratedFailures: 1,
+	}
+	b2EqualValues.State.Set(State{Status: Running})
+
 	tests := []struct {
 		name string
 		b1   *Block
@@ -649,46 +697,8 @@ func TestBlockEqual(t *testing.T) {
 		},
 		{
 			name: "Success: equal values",
-			b1: &Block{
-				ID:            id1,
-				Key:           key1,
-				Name:          "block1",
-				Descr:         "description",
-				EntranceDelay: 10 * time.Second,
-				ExitDelay:     5 * time.Second,
-				BypassChecks: &Checks{
-					ID: id1,
-				},
-				PreChecks: &Checks{
-					ID: id2,
-				},
-				Sequences: []*Sequence{
-					{ID: id1, Name: "seq1"},
-				},
-				Concurrency:       2,
-				ToleratedFailures: 1,
-				State:             &State{Status: Running},
-			},
-			b2: &Block{
-				ID:            id1,
-				Key:           key1,
-				Name:          "block1",
-				Descr:         "description",
-				EntranceDelay: 10 * time.Second,
-				ExitDelay:     5 * time.Second,
-				BypassChecks: &Checks{
-					ID: id1,
-				},
-				PreChecks: &Checks{
-					ID: id2,
-				},
-				Sequences: []*Sequence{
-					{ID: id1, Name: "seq1"},
-				},
-				Concurrency:       2,
-				ToleratedFailures: 1,
-				State:             &State{Status: Running},
-			},
+			b1:   b1EqualValues,
+			b2:   b2EqualValues,
 			want: true,
 		},
 		{
@@ -803,156 +813,192 @@ func TestPlanEqual(t *testing.T) {
 
 	tests := []struct {
 		name string
-		p1   *Plan
-		p2   *Plan
+		p1   func() *Plan
+		p2   func() *Plan
 		want bool
 	}{
 		{
 			name: "Success: both nil",
-			p1:   nil,
-			p2:   nil,
+			p1:   func() *Plan { return nil },
+			p2:   func() *Plan { return nil },
 			want: true,
 		},
 		{
 			name: "Success: equal values",
-			p1: &Plan{
-				ID:      id1,
-				Name:    "plan1",
-				Descr:   "description",
-				GroupID: groupID1,
-				Meta:    []byte("metadata"),
-				BypassChecks: &Checks{
-					ID: id1,
-				},
-				PreChecks: &Checks{
-					ID: id2,
-				},
-				Blocks: []*Block{
-					{ID: id1, Name: "block1"},
-				},
-				State:      &State{Status: Running},
-				SubmitTime: now,
-				Reason:     FRBlock,
+			p1: func() *Plan {
+				p := &Plan{
+					ID:      id1,
+					Name:    "plan1",
+					Descr:   "description",
+					GroupID: groupID1,
+					Meta:    []byte("metadata"),
+					BypassChecks: &Checks{
+						ID: id1,
+					},
+					PreChecks: &Checks{
+						ID: id2,
+					},
+					Blocks: []*Block{
+						{ID: id1, Name: "block1"},
+					},
+					SubmitTime: now,
+					Reason:     FRBlock,
+				}
+				p.State.Set(State{Status: Running})
+				return p
 			},
-			p2: &Plan{
-				ID:      id1,
-				Name:    "plan1",
-				Descr:   "description",
-				GroupID: groupID1,
-				Meta:    []byte("metadata"),
-				BypassChecks: &Checks{
-					ID: id1,
-				},
-				PreChecks: &Checks{
-					ID: id2,
-				},
-				Blocks: []*Block{
-					{ID: id1, Name: "block1"},
-				},
-				State:      &State{Status: Running},
-				SubmitTime: now,
-				Reason:     FRBlock,
+			p2: func() *Plan {
+				p := &Plan{
+					ID:      id1,
+					Name:    "plan1",
+					Descr:   "description",
+					GroupID: groupID1,
+					Meta:    []byte("metadata"),
+					BypassChecks: &Checks{
+						ID: id1,
+					},
+					PreChecks: &Checks{
+						ID: id2,
+					},
+					Blocks: []*Block{
+						{ID: id1, Name: "block1"},
+					},
+					SubmitTime: now,
+					Reason:     FRBlock,
+				}
+				p.State.Set(State{Status: Running})
+				return p
 			},
 			want: true,
 		},
 		{
 			name: "Success: different ID",
-			p1: &Plan{
-				ID:   id1,
-				Name: "plan",
+			p1: func() *Plan {
+				return &Plan{
+					ID:   id1,
+					Name: "plan",
+				}
 			},
-			p2: &Plan{
-				ID:   id2,
-				Name: "plan",
+			p2: func() *Plan {
+				return &Plan{
+					ID:   id2,
+					Name: "plan",
+				}
 			},
 			want: false,
 		},
 		{
 			name: "Success: different Name",
-			p1: &Plan{
-				ID:   id1,
-				Name: "plan1",
+			p1: func() *Plan {
+				return &Plan{
+					ID:   id1,
+					Name: "plan1",
+				}
 			},
-			p2: &Plan{
-				ID:   id1,
-				Name: "plan2",
+			p2: func() *Plan {
+				return &Plan{
+					ID:   id1,
+					Name: "plan2",
+				}
 			},
 			want: false,
 		},
 		{
 			name: "Success: different Meta",
-			p1: &Plan{
-				ID:   id1,
-				Meta: []byte("meta1"),
+			p1: func() *Plan {
+				return &Plan{
+					ID:   id1,
+					Meta: []byte("meta1"),
+				}
 			},
-			p2: &Plan{
-				ID:   id1,
-				Meta: []byte("meta2"),
+			p2: func() *Plan {
+				return &Plan{
+					ID:   id1,
+					Meta: []byte("meta2"),
+				}
 			},
 			want: false,
 		},
 		{
 			name: "Success: nil Meta vs empty Meta",
-			p1: &Plan{
-				ID:   id1,
-				Meta: nil,
+			p1: func() *Plan {
+				return &Plan{
+					ID:   id1,
+					Meta: nil,
+				}
 			},
-			p2: &Plan{
-				ID:   id1,
-				Meta: []byte{},
+			p2: func() *Plan {
+				return &Plan{
+					ID:   id1,
+					Meta: []byte{},
+				}
 			},
 			want: true, // bytes.Equal treats nil and empty as equal
 		},
 		{
 			name: "Success: different Blocks",
-			p1: &Plan{
-				ID: id1,
-				Blocks: []*Block{
-					{ID: id1, Name: "block1"},
-				},
+			p1: func() *Plan {
+				return &Plan{
+					ID: id1,
+					Blocks: []*Block{
+						{ID: id1, Name: "block1"},
+					},
+				}
 			},
-			p2: &Plan{
-				ID: id1,
-				Blocks: []*Block{
-					{ID: id1, Name: "block2"},
-				},
+			p2: func() *Plan {
+				return &Plan{
+					ID: id1,
+					Blocks: []*Block{
+						{ID: id1, Name: "block2"},
+					},
+				}
 			},
 			want: false,
 		},
 		{
 			name: "Success: different SubmitTime",
-			p1: &Plan{
-				ID:         id1,
-				SubmitTime: now,
+			p1: func() *Plan {
+				return &Plan{
+					ID:         id1,
+					SubmitTime: now,
+				}
 			},
-			p2: &Plan{
-				ID:         id1,
-				SubmitTime: now.Add(time.Hour),
+			p2: func() *Plan {
+				return &Plan{
+					ID:         id1,
+					SubmitTime: now.Add(time.Hour),
+				}
 			},
 			want: false,
 		},
 		{
 			name: "Success: different Reason",
-			p1: &Plan{
-				ID:     id1,
-				Reason: FRBlock,
+			p1: func() *Plan {
+				return &Plan{
+					ID:     id1,
+					Reason: FRBlock,
+				}
 			},
-			p2: &Plan{
-				ID:     id1,
-				Reason: FRPreCheck,
+			p2: func() *Plan {
+				return &Plan{
+					ID:     id1,
+					Reason: FRPreCheck,
+				}
 			},
 			want: false,
 		},
 		{
 			name: "Success: first nil",
-			p1:   nil,
-			p2:   &Plan{},
+			p1:   func() *Plan { return nil },
+			p2: func() *Plan {
+				return &Plan{}
+			},
 			want: false,
 		},
 	}
 
 	for _, test := range tests {
-		got := test.p1.Equal(test.p2)
+		got := test.p1().Equal(test.p2())
 		if got != test.want {
 			t.Errorf("TestPlanEqual(%s): got %v, want %v", test.name, got, test.want)
 		}

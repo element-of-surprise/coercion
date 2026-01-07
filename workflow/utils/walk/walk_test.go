@@ -26,6 +26,7 @@ package walk
 
 import (
 	"testing"
+	"time"
 
 	"github.com/element-of-surprise/coercion/workflow"
 
@@ -146,5 +147,173 @@ func TestPlan(t *testing.T) {
 
 	if diff := pConfig.Compare(want, got); diff != "" {
 		t.Errorf("TestPlan: -want, +got:\n%s", diff)
+	}
+}
+
+func TestLastUpdate(t *testing.T) {
+	now := time.Now()
+	past := now.Add(-1 * time.Hour)
+	future := now.Add(1 * time.Hour)
+
+	tests := []struct {
+		name string
+		plan *workflow.Plan
+		want time.Time
+	}{
+		{
+			name: "Success: nil plan returns zero time",
+			plan: nil,
+			want: time.Time{},
+		},
+		{
+			name: "Success: empty plan returns zero time",
+			plan: &workflow.Plan{
+				Name:  "plan",
+				Descr: "plan",
+				Blocks: []*workflow.Block{
+					{
+						Name:  "block",
+						Descr: "block",
+						Sequences: []*workflow.Sequence{
+							{
+								Name:  "seq",
+								Descr: "seq",
+								Actions: []*workflow.Action{
+									{Name: "action", Descr: "action", Plugin: "test"},
+								},
+							},
+						},
+					},
+				},
+			},
+			want: time.Time{},
+		},
+		{
+			name: "Success: RuntimeUpdate is the latest",
+			plan: func() *workflow.Plan {
+				p := &workflow.Plan{
+					Name:  "plan",
+					Descr: "plan",
+					Blocks: []*workflow.Block{
+						{
+							Name:  "block",
+							Descr: "block",
+							Sequences: []*workflow.Sequence{
+								{
+									Name:  "seq",
+									Descr: "seq",
+									Actions: []*workflow.Action{
+										{Name: "action", Descr: "action", Plugin: "test"},
+									},
+								},
+							},
+						},
+					},
+				}
+				p.RuntimeUpdate.Set(future)
+				p.State.Set(workflow.State{Start: past, End: now})
+				return p
+			}(),
+			want: future,
+		},
+		{
+			name: "Success: State.Start is the latest",
+			plan: func() *workflow.Plan {
+				p := &workflow.Plan{
+					Name:  "plan",
+					Descr: "plan",
+					Blocks: []*workflow.Block{
+						{
+							Name:  "block",
+							Descr: "block",
+							Sequences: []*workflow.Sequence{
+								{
+									Name:  "seq",
+									Descr: "seq",
+									Actions: []*workflow.Action{
+										{Name: "action", Descr: "action", Plugin: "test"},
+									},
+								},
+							},
+						},
+					},
+				}
+				p.RuntimeUpdate.Set(past)
+				p.State.Set(workflow.State{Start: now})
+				p.Blocks[0].Sequences[0].Actions[0].State.Set(workflow.State{Start: future})
+				return p
+			}(),
+			want: future,
+		},
+		{
+			name: "Success: State.End is the latest",
+			plan: func() *workflow.Plan {
+				p := &workflow.Plan{
+					Name:  "plan",
+					Descr: "plan",
+					Blocks: []*workflow.Block{
+						{
+							Name:  "block",
+							Descr: "block",
+							Sequences: []*workflow.Sequence{
+								{
+									Name:  "seq",
+									Descr: "seq",
+									Actions: []*workflow.Action{
+										{Name: "action", Descr: "action", Plugin: "test"},
+									},
+								},
+							},
+						},
+					},
+				}
+				p.RuntimeUpdate.Set(past)
+				p.State.Set(workflow.State{Start: past, End: now})
+				p.Blocks[0].State.Set(workflow.State{Start: past, End: future})
+				return p
+			}(),
+			want: future,
+		},
+		{
+			name: "Success: nested checks State.End is the latest",
+			plan: func() *workflow.Plan {
+				p := &workflow.Plan{
+					Name:  "plan",
+					Descr: "plan",
+					PreChecks: &workflow.Checks{
+						Actions: []*workflow.Action{
+							{Name: "precheck_action", Descr: "precheck_action", Plugin: "test"},
+						},
+					},
+					Blocks: []*workflow.Block{
+						{
+							Name:  "block",
+							Descr: "block",
+							Sequences: []*workflow.Sequence{
+								{
+									Name:  "seq",
+									Descr: "seq",
+									Actions: []*workflow.Action{
+										{Name: "action", Descr: "action", Plugin: "test"},
+									},
+								},
+							},
+						},
+					},
+				}
+				p.RuntimeUpdate.Set(past)
+				p.State.Set(workflow.State{Start: past, End: now})
+				p.PreChecks.Actions[0].State.Set(workflow.State{Start: now, End: future})
+				return p
+			}(),
+			want: future,
+		},
+	}
+
+	for _, test := range tests {
+		got := LastUpdate(t.Context(), test.plan)
+		if !got.Equal(test.want) {
+			t.Errorf("TestLastUpdate(%s): got %v, want %v", test.name, got, test.want)
+		}
 	}
 }

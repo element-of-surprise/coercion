@@ -92,12 +92,12 @@ func Plan(ctx context.Context, p *workflow.Plan, options ...Option) *workflow.Pl
 	if opts.keepState {
 		np.ID = p.ID
 		np.Reason = p.Reason
-		np.State = cloneState(p.State)
+		cloneStateAtomic(&np.State, &p.State)
 		np.SubmitTime = p.SubmitTime
 	}
 
 	if p.BypassChecks != nil {
-		if opts.removeCompleted && p.BypassChecks.State.Status == workflow.Completed {
+		if opts.removeCompleted && p.BypassChecks.State.Get().Status == workflow.Completed {
 			return nil
 		}
 		np.BypassChecks = Checks(ctx, p.BypassChecks, withOptions(opts))
@@ -131,16 +131,16 @@ func Plan(ctx context.Context, p *workflow.Plan, options ...Option) *workflow.Pl
 			return np
 		}
 		// There are no blocks, but if any of these are not in a good state, we return the Plan.
-		if p.PreChecks.State.Status != workflow.Completed {
+		if p.PreChecks != nil && p.PreChecks.State.Get().Status != workflow.Completed {
 			return np
 		}
-		if p.PostChecks.State.Status != workflow.Completed {
+		if p.PostChecks != nil && p.PostChecks.State.Get().Status != workflow.Completed {
 			return np
 		}
-		if p.ContChecks.State.Status == workflow.Failed {
+		if p.ContChecks != nil && p.ContChecks.State.Get().Status == workflow.Failed {
 			return np
 		}
-		if p.DeferredChecks.State.Status == workflow.Failed {
+		if p.DeferredChecks != nil && p.DeferredChecks.State.Get().Status == workflow.Failed {
 			return np
 		}
 		return nil
@@ -172,7 +172,7 @@ func Checks(ctx context.Context, c *workflow.Checks, options ...Option) *workflo
 
 	if opts.keepState {
 		clone.ID = c.ID
-		clone.State = cloneState(c.State)
+		cloneStateAtomic(&clone.State, &c.State)
 	}
 
 	for i := 0; i < len(c.Actions); i++ {
@@ -209,7 +209,7 @@ func Block(ctx context.Context, b *workflow.Block, options ...Option) *workflow.
 
 	if opts.keepState {
 		n.ID = b.ID
-		n.State = cloneState(b.State)
+		cloneStateAtomic(&n.State, &b.State)
 	}
 
 	var (
@@ -220,8 +220,8 @@ func Block(ctx context.Context, b *workflow.Block, options ...Option) *workflow.
 	)
 
 	if b.BypassChecks != nil {
-		state := b.BypassChecks.State
-		if state != nil && state.Status == workflow.Completed {
+		state := b.BypassChecks.State.Get()
+		if state.Status == workflow.Completed {
 			if opts.removeCompleted {
 				return nil
 			}
@@ -229,29 +229,29 @@ func Block(ctx context.Context, b *workflow.Block, options ...Option) *workflow.
 		n.BypassChecks = Checks(ctx, b.BypassChecks, withOptions(opts))
 	}
 	if b.PreChecks != nil {
-		state := b.PreChecks.State
-		if state != nil && b.PreChecks.State.Status == workflow.Completed {
+		state := b.PreChecks.State.Get()
+		if state.Status == workflow.Completed {
 			preChecksCompleted = true
 		}
 		n.PreChecks = Checks(ctx, b.PreChecks, withOptions(opts))
 	}
 	if b.ContChecks != nil {
-		state := b.ContChecks.State
-		if state != nil && state.Status != workflow.Failed {
+		state := b.ContChecks.State.Get()
+		if state.Status != workflow.Failed {
 			contChecksNotFailed = true
 		}
 		n.ContChecks = Checks(ctx, b.ContChecks, withOptions(opts))
 	}
 	if b.PostChecks != nil {
-		state := b.PostChecks.State
-		if state != nil && b.PostChecks.State.Status == workflow.Completed {
+		state := b.PostChecks.State.Get()
+		if state.Status == workflow.Completed {
 			postChecksCompleted = true
 		}
 		n.PostChecks = Checks(ctx, b.PostChecks, withOptions(opts))
 	}
 	if b.DeferredChecks != nil {
-		state := b.DeferredChecks.State
-		if state != nil && b.DeferredChecks.State.Status == workflow.Completed {
+		state := b.DeferredChecks.State.Get()
+		if state.Status == workflow.Completed {
 			deferredChecksCompleted = true
 		}
 		n.DeferredChecks = Checks(ctx, b.DeferredChecks, withOptions(opts))
@@ -299,7 +299,7 @@ func Sequence(ctx context.Context, s *workflow.Sequence, options ...Option) *wor
 
 	if opts.keepState {
 		ns.ID = s.ID
-		ns.State = cloneState(s.State)
+		cloneStateAtomic(&ns.State, &s.State)
 	}
 
 	for i, a := range s.Actions {
@@ -333,7 +333,7 @@ func Action(ctx context.Context, a *workflow.Action, options ...Option) *workflo
 	}
 	opts.callNum++
 
-	if opts.removeCompleted && a.State.Status == workflow.Completed {
+	if opts.removeCompleted && a.State.Get().Status == workflow.Completed {
 		return nil
 	}
 
@@ -348,8 +348,8 @@ func Action(ctx context.Context, a *workflow.Action, options ...Option) *workflo
 
 	if opts.keepState {
 		na.ID = a.ID
-		na.State = cloneState(a.State)
-		na.Attempts = cloneAttempts(a.Attempts)
+		cloneStateAtomic(&na.State, &a.State)
+		na.Attempts.Set(cloneAttempts(a.Attempts.Get()))
 	}
 
 	if !opts.keepSecrets && opts.callNum == 1 {
@@ -359,28 +359,28 @@ func Action(ctx context.Context, a *workflow.Action, options ...Option) *workflo
 	return na
 }
 
-// cloneState clones a *workflow.State.
-func cloneState(state *workflow.State) *workflow.State {
-	if state == nil {
-		return nil
+// cloneStateAtomic clones the state from src AtomicValue[State] into dst AtomicValue[State].
+func cloneStateAtomic(dst, src *workflow.AtomicValue[workflow.State]) {
+	state := src.Get()
+	if state == (workflow.State{}) {
+		return
 	}
-
-	return &workflow.State{
+	dst.Set(workflow.State{
 		Status: state.Status,
 		Start:  state.Start,
 		End:    state.End,
-	}
+	})
 }
 
-// cloneAttempts clones a []*workflow.Attempt.
-func cloneAttempts(attempts []*workflow.Attempt) []*workflow.Attempt {
+// cloneAttempts clones a []workflow.Attempt.
+func cloneAttempts(attempts []workflow.Attempt) []workflow.Attempt {
 	if len(attempts) == 0 {
 		return nil
 	}
 
-	sl := make([]*workflow.Attempt, 0, len(attempts))
+	sl := make([]workflow.Attempt, 0, len(attempts))
 	for _, attempt := range attempts {
-		na := &workflow.Attempt{
+		na := workflow.Attempt{
 			Resp:  deep.MustCopy(attempt.Resp),
 			Err:   cloneErr(attempt.Err),
 			Start: attempt.Start,

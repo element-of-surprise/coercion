@@ -48,7 +48,7 @@ func (r reader) now() time.Time {
 	if r.nowf == nil {
 		return time.Now()
 	}
-	return r.now()
+	return r.nowf()
 }
 
 // Exists implements storage.Reader.Exists(). It returns true if the plan exists.
@@ -201,10 +201,6 @@ func (r reader) matchesFilters(result storage.ListResult, filters storage.Filter
 
 	// Check Status filter
 	if len(filters.ByStatus) > 0 {
-		if result.State == nil {
-			return false
-		}
-
 		if !slices.Contains(filters.ByStatus, result.State.Status) {
 			return false
 		}

@@ -18,6 +18,7 @@ import (
 
 	"github.com/element-of-surprise/coercion/workflow"
 	"github.com/element-of-surprise/coercion/workflow/utils/html/internal/embedded"
+	"github.com/element-of-surprise/coercion/workflow/utils/secrets/secure"
 	"github.com/element-of-surprise/coercion/workflow/utils/walk"
 
 	"github.com/spf13/afero"
@@ -56,7 +57,7 @@ func Render(ctx context.Context, plan *workflow.Plan, options ...RenderOption) (
 	defer bufferPool.Put(ctx, b)
 
 	// Remove any secrets from the plan.
-	workflow.Secure(plan)
+	secure.Plan(plan)
 
 	fs := afero.NewMemMapFs()
 
@@ -205,31 +206,33 @@ func Download(ctx context.Context, plan *workflow.Plan, options ...DownloadOptio
 	const htmlDir = "html"
 
 	// Write our root directory.
-	err = tarWriter.WriteHeader(
-		&tar.Header{
-			Name:     filepath.Join(rootDir, "reports"),
-			Mode:     0755,
-			Typeflag: tar.TypeDir,
-		},
-	)
-	if err != nil {
-		return nil, fmt.Errorf("problem writing root directory to tarball: %w", err)
+	if opts.executable {
+		err = tarWriter.WriteHeader(
+			&tar.Header{
+				Name:     filepath.Join(rootDir, "reports"),
+				Mode:     0755,
+				Typeflag: tar.TypeDir,
+			},
+		)
+		if err != nil {
+			return nil, fmt.Errorf("problem writing root directory to tarball: %w", err)
+		}
 	}
 
 	// Write our reporter binary.
 	if opts.executable {
-		tarWriter.WriteHeader(
+		if err := tarWriter.WriteHeader(
 			&tar.Header{
 				Name: filepath.Join(rootDir, reporterName),
 				Size: int64(len(reportBinary)),
 				Mode: 0770,
 			},
-		)
-	}
-
-	_, err = tarWriter.Write(reportBinary)
-	if err != nil {
-		return nil, err
+		); err != nil {
+			return nil, err
+		}
+		if _, err := tarWriter.Write(reportBinary); err != nil {
+			return nil, err
+		}
 	}
 
 	walkErr := fs.WalkDir(
@@ -276,7 +279,7 @@ func Download(ctx context.Context, plan *workflow.Plan, options ...DownloadOptio
 		},
 	)
 	if walkErr != nil {
-		return nil, err
+		return nil, walkErr
 	}
 	return nil, nil // b gets set in the defer.
 }

@@ -687,8 +687,8 @@ func (f *fakeStorage) patchPlan(ctx context.Context, itemID string, op pathOps, 
 }
 
 type stateObject interface {
-	GetState() *workflow.State
-	SetState(*workflow.State)
+	GetState() workflow.State
+	SetState(workflow.State)
 }
 
 func (f *fakeStorage) patchObject(op pathOps, o stateObject) {
@@ -703,7 +703,7 @@ func (f *fakeStorage) patchObject(op pathOps, o stateObject) {
 			if err != nil {
 				panic(err)
 			}
-			action.Attempts = attempts
+			action.Attempts.Set(attempts)
 		default:
 			panic(fmt.Sprintf("unsupported op Path(%s) on set op", op.Path))
 		}
@@ -714,10 +714,13 @@ func (f *fakeStorage) patchObject(op pathOps, o stateObject) {
 			plan.Reason = op.Value.(workflow.FailureReason)
 		case "/stateStatus":
 			state.Status = op.Value.(workflow.Status)
+			o.SetState(state)
 		case "/stateStart":
 			state.Start = op.Value.(time.Time)
+			o.SetState(state)
 		case "/stateEnd":
 			state.End = op.Value.(time.Time)
+			o.SetState(state)
 		case "/submitTime":
 			plan := o.(*workflow.Plan)
 			plan.SubmitTime = op.Value.(time.Time)

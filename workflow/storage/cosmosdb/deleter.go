@@ -94,8 +94,9 @@ func (d deleter) deletePlan(ctx context.Context, plan *workflow.Plan) error {
 	}
 
 	var ifMatchEtag *azcore.ETag = nil
-	if plan.State.ETag != "" {
-		ifMatchEtag = (*azcore.ETag)(&plan.State.ETag)
+	if plan.State.Get().ETag != "" {
+		etag := plan.State.Get().ETag
+		ifMatchEtag = (*azcore.ETag)(&etag)
 	}
 	itemOpt := &azcosmos.TransactionalBatchItemOptions{
 		IfMatchETag: ifMatchEtag,
@@ -148,8 +149,9 @@ func (d deleter) deleteBlocks(ctx context.Context, batch *azcosmos.Transactional
 
 	for _, block := range blocks {
 		var ifMatchEtag *azcore.ETag = nil
-		if block.State.ETag != "" {
-			ifMatchEtag = (*azcore.ETag)(&block.State.ETag)
+		if block.State.Get().ETag != "" {
+			etag := block.State.Get().ETag
+			ifMatchEtag = (*azcore.ETag)(&etag)
 		}
 		itemOpt := &azcosmos.TransactionalBatchItemOptions{
 			IfMatchETag: ifMatchEtag,
@@ -170,8 +172,9 @@ func (d deleter) deleteChecks(ctx context.Context, batch *azcosmos.Transactional
 	}
 
 	var ifMatchEtag *azcore.ETag = nil
-	if checks.State.ETag != "" {
-		ifMatchEtag = (*azcore.ETag)(&checks.State.ETag)
+	if checks.State.Get().ETag != "" {
+		etag := checks.State.Get().ETag
+		ifMatchEtag = (*azcore.ETag)(&etag)
 	}
 	itemOpt := &azcosmos.TransactionalBatchItemOptions{
 		IfMatchETag: ifMatchEtag,
@@ -195,8 +198,9 @@ func (d deleter) deleteSeqs(ctx context.Context, batch *azcosmos.TransactionalBa
 
 	for _, seq := range seqs {
 		var ifMatchEtag *azcore.ETag = nil
-		if seq.State.ETag != "" {
-			ifMatchEtag = (*azcore.ETag)(&seq.State.ETag)
+		if seq.State.Get().ETag != "" {
+			etag := seq.State.Get().ETag
+			ifMatchEtag = (*azcore.ETag)(&etag)
 		}
 		itemOpt := &azcosmos.TransactionalBatchItemOptions{
 			IfMatchETag: ifMatchEtag,
@@ -214,8 +218,9 @@ func (d deleter) deleteActions(ctx context.Context, batch *azcosmos.Transactiona
 
 	for _, action := range actions {
 		var ifMatchEtag *azcore.ETag = nil
-		if action.State.ETag != "" {
-			ifMatchEtag = (*azcore.ETag)(&action.State.ETag)
+		if action.State.Get().ETag != "" {
+			etag := action.State.Get().ETag
+			ifMatchEtag = (*azcore.ETag)(&etag)
 		}
 		itemOpt := &azcosmos.TransactionalBatchItemOptions{
 			IfMatchETag: ifMatchEtag,

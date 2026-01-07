@@ -3,7 +3,6 @@ package workflow
 
 import (
 	"fmt"
-	"reflect"
 	"strings"
 	"time"
 
@@ -165,10 +164,12 @@ type Plan struct {
 	Blocks []*Block
 
 	// State is the internal state of the object. Should not be set by the user.
-	State *State
+	State AtomicValue[State]
 	// SubmitTime is the time that the object was submitted. This is only
 	// set for the Plan object
 	SubmitTime time.Time
+	// RuntimeUpdate is the last time the engine updated the object.
+	RuntimeUpdate AtomicValue[time.Time]
 	// Reason is the reason that the object failed.
 	// This will be set to FRUnknown if not in a failed state.
 	Reason FailureReason
@@ -188,13 +189,13 @@ func (p *Plan) SetID(id uuid.UUID) {
 // This violates Go naming for getters, but this is because we expose State on most objects by the
 // State name (unlike most getter/setters). This is here to enable an interface for getting State on
 // all objects.
-func (p *Plan) GetState() *State {
-	return p.State
+func (p *Plan) GetState() State {
+	return p.State.Get()
 }
 
 // SetState is a setter for the State settings.
-func (p *Plan) SetState(state *State) {
-	p.State = state
+func (p *Plan) SetState(state State) {
+	p.State.Set(state)
 }
 
 // Type implements the Object.Type().
@@ -211,9 +212,11 @@ func (p *Plan) Defaults() {
 		return
 	}
 	p.ID = NewV7()
-	p.State = &State{
-		Status: NotStarted,
-	}
+	p.State.Set(
+		State{
+			Status: NotStarted,
+		},
+	)
 }
 
 func (p *Plan) validate(ctx context.Context) ([]validator, error) {
@@ -223,7 +226,7 @@ func (p *Plan) validate(ctx context.Context) ([]validator, error) {
 	if p.ID != uuid.Nil {
 		return nil, errors.New("id should not be set by the user")
 	}
-	if p.State != nil {
+	if p.State.Get() != (State{}) {
 		return nil, errors.New("state should not be set by the user")
 	}
 
@@ -266,7 +269,7 @@ type Checks struct {
 	Actions []*Action
 
 	// State represents the internal state of the object. Should not be set by the user.
-	State *State
+	State AtomicValue[State]
 
 	planID uuid.UUID
 }
@@ -297,13 +300,13 @@ func (c *Checks) SetID(id uuid.UUID) {
 }
 
 // GetState is a getter for the State settings.
-func (c *Checks) GetState() *State {
-	return c.State
+func (c *Checks) GetState() State {
+	return c.State.Get()
 }
 
 // SetState is a setter for the State settings.
-func (c *Checks) SetState(state *State) {
-	c.State = state
+func (c *Checks) SetState(state State) {
+	c.State.Set(state)
 }
 
 // Type implements the Object.Type().
@@ -320,9 +323,9 @@ func (c *Checks) Defaults() {
 		return
 	}
 	c.ID = NewV7()
-	c.State = &State{
+	c.State.Set(State{
 		Status: NotStarted,
-	}
+	})
 }
 
 func (c *Checks) validate(ctx context.Context) ([]validator, error) {
@@ -340,7 +343,7 @@ func (c *Checks) validate(ctx context.Context) ([]validator, error) {
 	if len(c.Actions) == 0 {
 		return nil, fmt.Errorf("at least one action is required")
 	}
-	if c.State != nil {
+	if c.State.Get() != (State{}) {
 		return nil, fmt.Errorf("internal settings should not be set by the user")
 	}
 
@@ -398,7 +401,7 @@ type Block struct {
 	ToleratedFailures int
 
 	// State represents settings that should not be set by the user, but users can query.
-	State *State
+	State AtomicValue[State]
 
 	planID uuid.UUID
 }
@@ -429,13 +432,13 @@ func (b *Block) SetPlanID(u uuid.UUID) {
 }
 
 // GetState is a getter for the State settings.
-func (b *Block) GetState() *State {
-	return b.State
+func (b *Block) GetState() State {
+	return b.State.Get()
 }
 
 // SetState is a setter for the State settings.
-func (b *Block) SetState(state *State) {
-	b.State = state
+func (b *Block) SetState(state State) {
+	b.State.Set(state)
 }
 
 // Type implements the Object.Type().
@@ -455,9 +458,9 @@ func (b *Block) Defaults() {
 	if b.Concurrency < 1 {
 		b.Concurrency = 1
 	}
-	b.State = &State{
+	b.State.Set(State{
 		Status: NotStarted,
-	}
+	})
 }
 
 func (b *Block) validate(ctx context.Context) ([]validator, error) {
@@ -480,7 +483,7 @@ func (b *Block) validate(ctx context.Context) ([]validator, error) {
 		return nil, fmt.Errorf("description is required")
 	}
 
-	if b.State != nil {
+	if b.State.Get() != (State{}) {
 		return nil, fmt.Errorf("internal settings should not be set by the user")
 	}
 
@@ -515,7 +518,7 @@ type Sequence struct {
 	Actions []*Action
 
 	// State represents settings that should not be set by the user, but users can query.
-	State *State
+	State AtomicValue[State]
 
 	planID uuid.UUID
 }
@@ -534,13 +537,13 @@ func (s *Sequence) SetID(id uuid.UUID) {
 }
 
 // GetState is a getter for the State settings.
-func (s *Sequence) GetState() *State {
-	return s.State
+func (s *Sequence) GetState() State {
+	return s.State.Get()
 }
 
 // SetState is a setter for the State settings.
-func (s *Sequence) SetState(state *State) {
-	s.State = state
+func (s *Sequence) SetState(state State) {
+	s.State.Set(state)
 }
 
 // GetPlanID returns the Plan ID that the object belongs to.
@@ -568,9 +571,9 @@ func (s *Sequence) Defaults() {
 		return
 	}
 	s.ID = NewV7()
-	s.State = &State{
+	s.State.Set(State{
 		Status: NotStarted,
-	}
+	})
 }
 
 func (s *Sequence) validate(ctx context.Context) ([]validator, error) {
@@ -593,7 +596,7 @@ func (s *Sequence) validate(ctx context.Context) ([]validator, error) {
 		return nil, fmt.Errorf("description is required")
 	}
 
-	if s.State != nil {
+	if s.State.Get() != (State{}) {
 		return nil, fmt.Errorf("internal settings should not be set by the user")
 	}
 
@@ -628,7 +631,7 @@ type Attempt struct {
 }
 
 // self simply returns itself. This is here to allows use in a generic interface for equality operations.
-func (a *Attempt) self() *Attempt {
+func (a Attempt) self() Attempt {
 	return a
 }
 
@@ -653,9 +656,9 @@ type Action struct {
 	// Req is the request object that is passed to the plugin.
 	Req any
 	// Attempts is the attempts of the action. This should not be set by the user.
-	Attempts []*Attempt `json:",omitempty"`
+	Attempts AtomicSlice[Attempt] `json:",omitempty"`
 	// State represents settings that should not be set by the user, but users can query.
-	State *State
+	State AtomicValue[State]
 
 	planID uuid.UUID
 
@@ -677,13 +680,13 @@ func (a *Action) SetID(id uuid.UUID) {
 }
 
 // GetState is a getter for the State settings.
-func (a *Action) GetState() *State {
-	return a.State
+func (a *Action) GetState() State {
+	return a.State.Get()
 }
 
 // SetState is a setter for the State settings.
-func (a *Action) SetState(state *State) {
-	a.State = state
+func (a *Action) SetState(state State) {
+	a.State.Set(state)
 }
 
 // GetPlanID returns the Plan ID that the object belongs to.
@@ -711,9 +714,9 @@ func (a *Action) Defaults() {
 		return
 	}
 	a.ID = NewV7()
-	a.State = &State{
+	a.State.Set(State{
 		Status: NotStarted,
-	}
+	})
 }
 
 // HasRegister determines if a Register has been set.
@@ -739,7 +742,7 @@ func (a *Action) validate(ctx context.Context) ([]validator, error) {
 		return nil, fmt.Errorf("Action object(%s): %w", a.Name, err)
 	}
 
-	if a.State != nil {
+	if a.State.Get() != (State{}) {
 		return nil, fmt.Errorf("internal settings should not be set by the user")
 	}
 	if a.Timeout == 0 {
@@ -759,7 +762,7 @@ func (a *Action) validate(ctx context.Context) ([]validator, error) {
 	if strings.TrimSpace(a.Plugin) == "" {
 		return nil, fmt.Errorf("plugin is required")
 	}
-	if a.Attempts != nil {
+	if len(a.Attempts.Get()) != 0 {
 		return nil, fmt.Errorf("attempts should not be set by the user")
 	}
 
@@ -781,14 +784,12 @@ func (a *Action) validate(ctx context.Context) ([]validator, error) {
 }
 
 // FinalAttempt returns the last attempt of the action.
-func (a *Action) FinalAttempt() *Attempt {
-	if len(a.Attempts) == 0 {
-		return nil
+func (a *Action) FinalAttempt() Attempt {
+	attempts := a.Attempts.Get()
+	if len(attempts) == 0 {
+		return Attempt{}
 	}
-	if len(a.Attempts) == 0 {
-		return nil
-	}
-	return a.Attempts[len(a.Attempts)-1]
+	return attempts[len(attempts)-1]
 }
 
 // self simply returns itself. This is here to allows use in a generic interface for equality operations.
@@ -881,64 +882,6 @@ func Validate(p *Plan) error {
 		}
 	}
 	return nil
-}
-
-// Secure sets all fields in anywhere in the Plan that are tagged with `coerce:"secure"` to their zero value.
-func Secure(v *Plan) {
-	secure(v)
-}
-
-func secure(v any) {
-	val := reflect.ValueOf(v)
-	if val.Kind() == reflect.Ptr {
-		val = val.Elem()
-	}
-	if val.Kind() != reflect.Struct {
-		return
-	}
-
-	typ := val.Type()
-	for i := 0; i < val.NumField(); i++ {
-		field := val.Field(i)
-		if !field.CanSet() {
-			field = field.Addr()
-		}
-
-		tags := getTags(typ.Field(i))
-		if tags.hasTag("secure") {
-			field.Set(reflect.Zero(field.Type()))
-			continue
-		}
-
-		// Recursively coerce nested structs
-		if field.Kind() == reflect.Struct || (field.Kind() == reflect.Ptr && field.Elem().Kind() == reflect.Struct) {
-			secure(field.Addr().Interface())
-		}
-	}
-}
-
-// tags is a set of tags for a field.
-type tags map[string]bool
-
-func (t tags) hasTag(tag string) bool {
-	if t == nil {
-		return false
-	}
-	return t[tag]
-}
-
-// getTags returns the tags for a field.
-func getTags(f reflect.StructField) tags {
-	strTags := f.Tag.Get("coerce")
-	if strings.TrimSpace(strTags) == "" {
-		return nil
-	}
-	t := make(tags)
-	for _, tag := range strings.Split(strTags, ",") {
-		tag = strings.TrimSpace(strings.ToLower(tag))
-		t[tag] = true
-	}
-	return t
 }
 
 // NewV7 generates a new UUID. This is a wrapper around uuid.NewV7

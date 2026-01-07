@@ -218,7 +218,7 @@ func (w *Workstream) Status(ctx context.Context, id uuid.UUID, interval time.Dur
 				if !yield(Result[*workflow.Plan]{Data: plan, Err: nil}) {
 					return
 				}
-				if plan.State.Status != workflow.Running {
+				if plan.State.Get().Status != workflow.Running {
 					return
 				}
 			}

@@ -31,14 +31,15 @@ func (u checksUpdater) UpdateChecks(ctx context.Context, check *workflow.Checks)
 	defer u.mu.Unlock()
 
 	patch := azcosmos.PatchOperations{}
-	patch.AppendReplace("/stateStatus", check.State.Status)
-	patch.AppendReplace("/stateStart", check.State.Start)
-	patch.AppendReplace("/stateEnd", check.State.End)
+	patch.AppendReplace("/stateStatus", check.State.Get().Status)
+	patch.AppendReplace("/stateStart", check.State.Get().Start)
+	patch.AppendReplace("/stateEnd", check.State.Get().End)
 
 	itemOpt := itemOptions(u.defaultIOpts)
 	var ifMatchEtag *azcore.ETag = nil
-	if check.State.ETag != "" {
-		ifMatchEtag = (*azcore.ETag)(&check.State.ETag)
+	if check.State.Get().ETag != "" {
+		etag := check.State.Get().ETag
+		ifMatchEtag = (*azcore.ETag)(&etag)
 	}
 	itemOpt.IfMatchEtag = ifMatchEtag
 
@@ -49,7 +50,9 @@ func (u checksUpdater) UpdateChecks(ctx context.Context, check *workflow.Checks)
 		return errors.E(ctx, errors.CatUser, errors.TypeStorageUpdate, err)
 	}
 
-	check.State.ETag = string(resp.ETag)
+	state := check.State.Get()
+	state.ETag = string(resp.ETag)
+	check.State.Set(state)
 
 	return nil
 }

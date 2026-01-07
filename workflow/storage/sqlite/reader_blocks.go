@@ -89,10 +89,11 @@ func (p reader) blockRowToBlock(ctx context.Context, conn *sqlite.Conn, stmt *sq
 	b.Descr = stmt.GetText("descr")
 	b.EntranceDelay = time.Duration(stmt.GetInt64("entrancedelay"))
 	b.ExitDelay = time.Duration(stmt.GetInt64("exitdelay"))
-	b.State, err = fieldToState(stmt)
+	state, err := fieldToState(stmt)
 	if err != nil {
 		return nil, fmt.Errorf("blockRowToBlock: %w", err)
 	}
+	b.State.Set(*state)
 	b.Concurrency = int(stmt.GetInt64("concurrency"))
 	b.ToleratedFailures = int(stmt.GetInt64("toleratedfailures"))
 	b.BypassChecks, err = p.fieldToCheck(ctx, "bypasschecks", conn, stmt)

@@ -180,11 +180,11 @@ func recoveryTestStage(ctx context.Context, stage int, reg *registry.Register, c
 		ch <- tr
 	}()
 
-	if result.State.Status != workflow.Completed {
-		tr.Err = fmt.Errorf("workflow did not complete successfully(%s)", result.State.Status)
+	if result.State.Get().Status != workflow.Completed {
+		tr.Err = fmt.Errorf("workflow did not complete successfully(%s)", result.State.Get().Status)
 		return
 	}
-	plugResp := result.PreChecks.Actions[0].Attempts[0].Resp.(plugins.Resp)
+	plugResp := result.PreChecks.Actions[0].Attempts.Get()[0].Resp.(plugins.Resp)
 	if plugResp.Arg == "" {
 		tr.Err = fmt.Errorf("planID not found")
 		return
@@ -194,11 +194,11 @@ func recoveryTestStage(ctx context.Context, stage int, reg *registry.Register, c
 		tr.Err = fmt.Errorf("planID not a valid UUID")
 		return
 	}
-	if result.DeferredChecks.State.Status != workflow.Completed {
-		tr.Err = fmt.Errorf("deferred checks did not complete successfully(%s)", result.DeferredChecks.State.Status)
+	if result.DeferredChecks.State.Get().Status != workflow.Completed {
+		tr.Err = fmt.Errorf("deferred checks did not complete successfully(%s)", result.DeferredChecks.State.Get().Status)
 		return
 	}
-	plugResp = result.DeferredChecks.Actions[0].Attempts[0].Resp.(plugins.Resp)
+	plugResp = result.DeferredChecks.Actions[0].Attempts.Get()[0].Resp.(plugins.Resp)
 	if plugResp.Arg == "" {
 		tr.Err = fmt.Errorf("planID not found")
 		return
@@ -210,35 +210,35 @@ func recoveryTestStage(ctx context.Context, stage int, reg *registry.Register, c
 	}
 
 	for _, block := range result.Blocks {
-		if block.State.Status != workflow.Completed {
-			tr.Err = fmt.Errorf("block did not complete successfully(%s)", block.State.Status)
+		if block.State.Get().Status != workflow.Completed {
+			tr.Err = fmt.Errorf("block did not complete successfully(%s)", block.State.Get().Status)
 			return
 		}
-		if block.PreChecks.State.Status != workflow.Completed {
-			tr.Err = fmt.Errorf("block pre checks did not complete successfully(%s)", block.PreChecks.State.Status)
+		if block.PreChecks.State.Get().Status != workflow.Completed {
+			tr.Err = fmt.Errorf("block pre checks did not complete successfully(%s)", block.PreChecks.State.Get().Status)
 			return
 		}
 		if err := testPlugResp(block.PreChecks.Actions[0], "actionID"); err != nil {
 			tr.Err = fmt.Errorf("block PreChecks: %v", err)
 			return
 		}
-		if block.PostChecks.State.Status != workflow.Completed {
-			tr.Err = fmt.Errorf("block post checks did not complete successfully(%s)", block.PostChecks.State.Status)
+		if block.PostChecks.State.Get().Status != workflow.Completed {
+			tr.Err = fmt.Errorf("block post checks did not complete successfully(%s)", block.PostChecks.State.Get().Status)
 			return
 		}
 		if err := testPlugResp(block.PostChecks.Actions[0], "actionID"); err != nil {
 			tr.Err = fmt.Errorf("block PostChecks: %v", err)
 			return
 		}
-		if block.ContChecks.State.Status != workflow.Completed {
-			tr.Err = fmt.Errorf("block cont checks did not complete successfully(%s)", block.ContChecks.State.Status)
+		if block.ContChecks.State.Get().Status != workflow.Completed {
+			tr.Err = fmt.Errorf("block cont checks did not complete successfully(%s)", block.ContChecks.State.Get().Status)
 		}
 		if err := testPlugResp(block.ContChecks.Actions[0], "actionID"); err != nil {
 			tr.Err = fmt.Errorf("block ContChecks: %v", err)
 			return
 		}
-		if block.DeferredChecks.State.Status != workflow.Completed {
-			tr.Err = fmt.Errorf("block deferred checks did not complete successfully(%s)", block.DeferredChecks.State.Status)
+		if block.DeferredChecks.State.Get().Status != workflow.Completed {
+			tr.Err = fmt.Errorf("block deferred checks did not complete successfully(%s)", block.DeferredChecks.State.Get().Status)
 			return
 		}
 		if err := testPlugResp(block.DeferredChecks.Actions[0], "actionID"); err != nil {
@@ -247,8 +247,8 @@ func recoveryTestStage(ctx context.Context, stage int, reg *registry.Register, c
 		}
 
 		for _, seq := range block.Sequences {
-			if seq.State.Status != workflow.Completed {
-				tr.Err = fmt.Errorf("sequence did not complete successfully(%s)(%s)", seq.ID, seq.State.Status)
+			if seq.State.Get().Status != workflow.Completed {
+				tr.Err = fmt.Errorf("sequence did not complete successfully(%s)(%s)", seq.ID, seq.State.Get().Status)
 				return
 			}
 			if err := testPlugResp(seq.Actions[1], "actionID"); err != nil {

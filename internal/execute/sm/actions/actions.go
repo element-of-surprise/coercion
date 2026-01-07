@@ -45,8 +45,8 @@ func (r Runner) Start(req statemachine.Request[Data]) statemachine.Request[Data]
 	updater := req.Data.Updater
 
 	// This means that it is a recovered action.
-	if action.State.Status != workflow.NotStarted {
-		switch action.State.Status {
+	if action.State.Get().Status != workflow.NotStarted {
+		switch action.State.Get().Status {
 		case workflow.Running:
 			req.Next = r.GetPlugin
 			return req
@@ -57,15 +57,17 @@ func (r Runner) Start(req statemachine.Request[Data]) statemachine.Request[Data]
 		default:
 			// This is a bug. We should never be in this state. The most likely would be Stopped.
 			// But this workflow should have never gotten here.
-			req.Err = fmt.Errorf("action is in an unsupported state: %v", action.State.Status)
+			req.Err = fmt.Errorf("action is in an unsupported state: %v", action.State.Get().Status)
 			req.Next = nil
 			return req
 		}
 
 	}
 
-	action.State.Start = r.now()
-	action.State.Status = workflow.Running
+	state := action.State.Get()
+	state.Start = r.now()
+	state.Status = workflow.Running
+	action.State.Set(state)
 
 	if err := updater.UpdateAction(req.Ctx, action); err != nil {
 		log.Fatalf("failed to write Action: %v", err)
@@ -126,12 +128,13 @@ func (r Runner) End(req statemachine.Request[Data]) statemachine.Request[Data] {
 	action := req.Data.Action
 	updater := req.Data.Updater
 
-	action.State.Status = workflow.Completed
+	state := action.State.Get()
+	state.Status = workflow.Completed
 	if req.Data.err != nil {
-		action.State.Status = workflow.Failed
+		state.Status = workflow.Failed
 	}
-
-	action.State.End = r.now()
+	state.End = r.now()
+	action.State.Set(state)
 
 	if err := updater.UpdateAction(req.Ctx, action); err != nil {
 		log.Fatalf("failed to write Action: %v", err)
@@ -153,7 +156,7 @@ func unexpectedTypeMsg(plugin plugins.Plugin, got, want any) string {
 // exec runs the action once using the plugin and writes the result to the store, unless the action
 // has exceeded the maximum number of retries. In that case, it returns a permanent error.
 func (r Runner) exec(ctx context.Context, action *workflow.Action, plugin plugins.Plugin, updater storage.ActionUpdater) error {
-	if len(action.Attempts) > action.Retries {
+	if len(action.Attempts.Get()) > action.Retries {
 		return exponential.ErrPermanent
 	}
 
@@ -163,11 +166,11 @@ func (r Runner) exec(ctx context.Context, action *workflow.Action, plugin plugin
 		}
 	}()
 
-	attempt := &workflow.Attempt{
+	attempt := workflow.Attempt{
 		Start: r.now(),
 	}
 	defer func() {
-		action.Attempts = append(action.Attempts, attempt)
+		action.Attempts.Append(attempt)
 	}()
 
 	runCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), action.Timeout)

@@ -48,23 +48,77 @@ type Resp struct {
 func makePlan() *workflow.Plan {
 	// Example Action with no "Output" or "Number", just a simple Status
 	actionWithAttempts := func(name string, status workflow.Status, numAttempts int) *workflow.Action {
-		attempts := make([]*workflow.Attempt, numAttempts)
+		attempts := make([]workflow.Attempt, numAttempts)
 		for i := range attempts {
-			attempts[i] = &workflow.Attempt{
+			attempts[i] = workflow.Attempt{
 				Resp: Resp{
 					FieldA: "FieldA",
 				},
 			}
 		}
-		return &workflow.Action{
+		action := &workflow.Action{
 			ID:   NewV7(),
 			Name: name,
-			State: &workflow.State{
-				Status: status,
-			},
-			Attempts: attempts,
 		}
+		action.Attempts.Set(attempts)
+		action.State.Set(workflow.State{Status: status})
+		return action
 	}
+
+	preChecks := &workflow.Checks{
+		ID: NewV7(),
+		Actions: []*workflow.Action{
+			actionWithAttempts("Verify User Permissions", workflow.Completed, 3),
+		},
+	}
+
+	contChecks := &workflow.Checks{
+		ID: NewV7(),
+		Actions: []*workflow.Action{
+			actionWithAttempts("Check Site is Reliable", workflow.Completed, 1),
+			actionWithAttempts("Check Network Connectivity", workflow.Completed, 1),
+		},
+	}
+
+	blockPreChecks := &workflow.Checks{
+		ID: NewV7(),
+		Actions: []*workflow.Action{
+			actionWithAttempts("Check Cloud Credentials", workflow.Completed, 2),
+		},
+	}
+	blockPreChecks.State.Set(workflow.State{Status: workflow.Completed})
+
+	seq := &workflow.Sequence{
+		ID:   NewV7(),
+		Name: "Setup Kubernetes Cluster",
+		Actions: []*workflow.Action{
+			actionWithAttempts("Setup Kubernetes Cluster", workflow.Running, 2),
+		},
+	}
+	seq.State.Set(workflow.State{Status: workflow.Completed})
+
+	blockPostChecks := &workflow.Checks{
+		ID: NewV7(),
+		Actions: []*workflow.Action{
+			actionWithAttempts("Validate Cluster Configuration", workflow.Completed, 1),
+		},
+	}
+	blockPostChecks.State.Set(workflow.State{Status: workflow.Completed})
+
+	block := &workflow.Block{
+		ID:         NewV7(),
+		Name:       "Initialize Environment",
+		PreChecks:  blockPreChecks,
+		Sequences:  []*workflow.Sequence{seq},
+		PostChecks: blockPostChecks,
+	}
+	block.State.Set(workflow.State{Status: workflow.Running})
+
+	postChecks := &workflow.Checks{
+		ID:      NewV7(),
+		Actions: []*workflow.Action{actionWithAttempts("Cleanup Temporary Files", workflow.Completed, 1)},
+	}
+	postChecks.State.Set(workflow.State{Status: workflow.Completed})
 
 	// Sample workflow plan generation
 	plan := &workflow.Plan{
@@ -73,56 +127,11 @@ func makePlan() *workflow.Plan {
 		Descr:      "This plan deploys multiple microservices in a staged approach.",
 		GroupID:    NewV7(),
 		SubmitTime: time.Now(),
-		State:      &workflow.State{Status: workflow.Running},
-		PreChecks: &workflow.Checks{
-			ID: NewV7(),
-			Actions: []*workflow.Action{
-				actionWithAttempts("Verify User Permissions", workflow.Completed, 3),
-			},
-		},
-		ContChecks: &workflow.Checks{
-			ID: NewV7(),
-			Actions: []*workflow.Action{
-				actionWithAttempts("Check Site is Reliable", workflow.Completed, 1),
-				actionWithAttempts("Check Network Connectivity", workflow.Completed, 1),
-			},
-		},
-		Blocks: []*workflow.Block{
-			{
-				ID:    NewV7(),
-				Name:  "Initialize Environment",
-				State: &workflow.State{Status: workflow.Running},
-				PreChecks: &workflow.Checks{
-					ID:    NewV7(),
-					State: &workflow.State{Status: workflow.Completed},
-					Actions: []*workflow.Action{
-						actionWithAttempts("Check Cloud Credentials", workflow.Completed, 2),
-					},
-				},
-				Sequences: []*workflow.Sequence{
-					{
-						ID:    NewV7(),
-						Name:  "Setup Kubernetes Cluster",
-						State: &workflow.State{Status: workflow.Completed},
-						Actions: []*workflow.Action{
-							actionWithAttempts("Setup Kubernetes Cluster", workflow.Running, 2),
-						},
-					},
-				},
-				PostChecks: &workflow.Checks{
-					ID:    NewV7(),
-					State: &workflow.State{Status: workflow.Completed},
-					Actions: []*workflow.Action{
-						actionWithAttempts("Validate Cluster Configuration", workflow.Completed, 1),
-					},
-				},
-			},
-		},
-		PostChecks: &workflow.Checks{
-			ID:      NewV7(),
-			State:   &workflow.State{Status: workflow.Completed},
-			Actions: []*workflow.Action{actionWithAttempts("Cleanup Temporary Files", workflow.Completed, 1)},
-		},
+		PreChecks:  preChecks,
+		ContChecks: contChecks,
+		Blocks:     []*workflow.Block{block},
+		PostChecks: postChecks,
 	}
+	plan.State.Set(workflow.State{Status: workflow.Running})
 	return plan
 }

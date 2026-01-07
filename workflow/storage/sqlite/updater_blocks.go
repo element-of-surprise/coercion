@@ -39,9 +39,9 @@ func (b blockUpdater) UpdateBlock(ctx context.Context, action *workflow.Block) e
 	stmt := Stmt{}
 	stmt.Query(updateBlock)
 	stmt.SetText("$id", action.ID.String())
-	stmt.SetInt64("$state_status", int64(action.State.Status))
-	stmt.SetInt64("$state_start", action.State.Start.UnixNano())
-	stmt.SetInt64("$state_end", action.State.End.UnixNano())
+	stmt.SetInt64("$state_status", int64(action.State.Get().Status))
+	stmt.SetInt64("$state_start", action.State.Get().Start.UnixNano())
+	stmt.SetInt64("$state_end", action.State.Get().End.UnixNano())
 
 	sStmt, err := stmt.Prepare(conn)
 	if err != nil {

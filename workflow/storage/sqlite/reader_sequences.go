@@ -85,10 +85,11 @@ func (p reader) sequenceRowToSequence(ctx context.Context, conn *sqlite.Conn, st
 	}
 	s.Name = stmt.GetText("name")
 	s.Descr = stmt.GetText("descr")
-	s.State, err = fieldToState(stmt)
+	state, err := fieldToState(stmt)
 	if err != nil {
 		return nil, fmt.Errorf("sequenceRowToSequence: %w", err)
 	}
+	s.State.Set(*state)
 	s.Actions, err = p.fieldToActions(ctx, conn, stmt)
 	if err != nil {
 		return nil, fmt.Errorf("couldn't read sequence actions: %w", err)

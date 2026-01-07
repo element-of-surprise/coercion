@@ -4,7 +4,6 @@ import (
 	"time"
 
 	"github.com/element-of-surprise/coercion/workflow"
-	"github.com/element-of-surprise/coercion/workflow/context"
 	"github.com/element-of-surprise/coercion/workflow/storage"
 	"github.com/element-of-surprise/coercion/workflow/utils/walk"
 	"github.com/gostdlib/base/statemachine"
@@ -116,7 +115,7 @@ func (r *recover) filterPlans(req statemachine.Request[recoverData]) statemachin
 	now := time.Now()
 
 	for i, plan := range req.Data.plans {
-		if lastUpdate(req.Ctx, plan).Add(r.maxAge).Before(now) {
+		if walk.LastUpdate(req.Ctx, plan).Add(r.maxAge).Before(now) {
 			req.Data.agedOut = append(req.Data.agedOut, plan)
 			req.Data.plans[i] = nil
 		}
@@ -135,10 +134,12 @@ func (r *recover) filterPlans(req statemachine.Request[recoverData]) statemachin
 // agedOut marks the plans that have exceeded the recovery time as failed.
 func (r *recover) agedOut(req statemachine.Request[recoverData]) statemachine.Request[recoverData] {
 	for _, plan := range req.Data.agedOut {
-		plan.State.Status = workflow.Failed
+		state := plan.State.Get()
+		state.Status = workflow.Failed
+		state.End = time.Now()
+		plan.State.Set(state)
 		plan.Reason = workflow.FRExceedRecovery
-		plan.State.End = time.Now()
-		runningToFailed(req.Ctx, plan)
+		runningToFailed(plan)
 
 		if err := r.store.UpdatePlan(req.Ctx, plan); err != nil {
 			req.Err = err
@@ -155,39 +156,17 @@ func (r *recover) done(req statemachine.Request[recoverData]) statemachine.Reque
 }
 
 // runningToFailed marks all objects in running states in the plan as failed.
-func runningToFailed(ctx context.Context, p *workflow.Plan) {
-	p.State.End = time.Now()
+func runningToFailed(p *workflow.Plan) {
+	state := p.State.Get()
+	state.End = time.Now()
+	p.State.Set(state)
 	for item := range walk.Plan(p) {
-		state := item.Value.(getStater).GetState()
-		if state.Status == workflow.Running {
-			state.Status = workflow.Failed
-			state.End = time.Now()
+		state := item.Value.(getSetStates)
+		objState := state.GetState()
+		if objState.Status == workflow.Running {
+			objState.Status = workflow.Failed
+			objState.End = time.Now()
+			state.SetState(objState)
 		}
 	}
-}
-
-type stater interface {
-	GetState() *workflow.State
-}
-
-// lastUpdate returns the last time the object was updated. If it has not been updated, this will return
-// the zero time. Only an object that has been started will have a LastUpdate time.
-func lastUpdate(ctx context.Context, p *workflow.Plan) time.Time {
-	if p == nil {
-		return time.Time{}
-	}
-
-	last := time.Time{}
-
-	for item := range walk.Plan(p) {
-		state := item.Value.(stater).GetState()
-		if state.Start.After(last) {
-			last = state.Start
-		}
-		if state.End.After(last) {
-			last = state.End
-		}
-	}
-
-	return last
 }

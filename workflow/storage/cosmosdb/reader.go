@@ -260,7 +260,7 @@ func (r reader) listResultsFunc(item []byte) (storage.ListResult, error) {
 		Name:       resp.Name,
 		Descr:      resp.Descr,
 		SubmitTime: resp.SubmitTime,
-		State: &workflow.State{
+		State: workflow.State{
 			Status: resp.StateStatus,
 			Start:  resp.StateStart,
 			End:    resp.StateEnd,

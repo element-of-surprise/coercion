@@ -121,7 +121,7 @@ func (r recovery) recoverPlan(ctx context.Context, containerName string, planID 
 	}
 
 	// Only recover if the plan is not currently running
-	if plan.State != nil && plan.State.Status == workflow.Running {
+	if plan.State.Get().Status == workflow.Running {
 		return nil // Plan is running, don't interfere
 	}
 

@@ -16,6 +16,37 @@ var pConfig = pretty.Config{
 	PrintStringers: true,
 }
 
+func newActionWithStateAndAttempts(state *workflow.State, attempts []workflow.Attempt) *workflow.Action {
+	a := &workflow.Action{}
+	a.Attempts.Set(attempts)
+	a.State.Set(*state)
+	return a
+}
+
+func newChecksWithStateAndActionsRecov(state *workflow.State, actions []*workflow.Action) *workflow.Checks {
+	c := &workflow.Checks{Actions: actions}
+	c.State.Set(*state)
+	return c
+}
+
+func newSequenceWithStateAndActionsRecov(state *workflow.State, actions []*workflow.Action) *workflow.Sequence {
+	s := &workflow.Sequence{Actions: actions}
+	s.State.Set(*state)
+	return s
+}
+
+func newBlockWithStateSeqsChecks(state *workflow.State, seqs []*workflow.Sequence, bypass, pre, cont, post *workflow.Checks) *workflow.Block {
+	b := &workflow.Block{Sequences: seqs, BypassChecks: bypass, PreChecks: pre, ContChecks: cont, PostChecks: post}
+	b.State.Set(*state)
+	return b
+}
+
+func newPlanWithStateBlocksChecks(state *workflow.State, blocks []*workflow.Block, bypass, pre, cont, post, deferred *workflow.Checks) *workflow.Plan {
+	p := &workflow.Plan{Blocks: blocks, BypassChecks: bypass, PreChecks: pre, ContChecks: cont, PostChecks: post, DeferredChecks: deferred}
+	p.State.Set(*state)
+	return p
+}
+
 func TestFixAction(t *testing.T) {
 	now := time.Now()
 	tests := []struct {
@@ -24,72 +55,29 @@ func TestFixAction(t *testing.T) {
 		want   *workflow.Action
 	}{
 		{
-			name: "action not running, no change",
-			action: &workflow.Action{
-				State: &workflow.State{Status: workflow.Completed},
-				Attempts: []*workflow.Attempt{
-					{Start: now, End: now.Add(1)},
-				},
-			},
-			want: &workflow.Action{
-				State: &workflow.State{Status: workflow.Completed},
-				Attempts: []*workflow.Attempt{
-					{Start: now, End: now.Add(1)},
-				},
-			},
+			name:   "action not running, no change",
+			action: newActionWithStateAndAttempts(&workflow.State{Status: workflow.Completed}, []workflow.Attempt{{Start: now, End: now.Add(1)}}),
+			want:   newActionWithStateAndAttempts(&workflow.State{Status: workflow.Completed}, []workflow.Attempt{{Start: now, End: now.Add(1)}}),
 		},
 		{
-			name: "running action, empty attempts, reset",
-			action: &workflow.Action{
-				State:    &workflow.State{Status: workflow.Running, Start: now, End: now},
-				Attempts: []*workflow.Attempt{},
-			},
-			want: &workflow.Action{
-				State:    &workflow.State{Status: workflow.NotStarted},
-				Attempts: nil,
-			},
+			name:   "running action, empty attempts, reset",
+			action: newActionWithStateAndAttempts(&workflow.State{Status: workflow.Running, Start: now, End: now}, []workflow.Attempt{}),
+			want:   newActionWithStateAndAttempts(&workflow.State{Status: workflow.NotStarted}, nil),
 		},
 		{
-			name: "running action with attempts that didn't finish, reset",
-			action: &workflow.Action{
-				State: &workflow.State{Status: workflow.Running, Start: now},
-				Attempts: []*workflow.Attempt{
-					{Start: now},
-				},
-			},
-			want: &workflow.Action{
-				State: &workflow.State{Status: workflow.NotStarted},
-			},
+			name:   "running action with attempts that didn't finish, reset",
+			action: newActionWithStateAndAttempts(&workflow.State{Status: workflow.Running, Start: now}, []workflow.Attempt{{Start: now}}),
+			want:   newActionWithStateAndAttempts(&workflow.State{Status: workflow.NotStarted}, nil),
 		},
 		{
-			name: "running action with attempts that have been completed, no reset",
-			action: &workflow.Action{
-				State: &workflow.State{Status: workflow.Running, Start: now},
-				Attempts: []*workflow.Attempt{
-					{Start: now, End: now.Add(1)},
-				},
-			},
-			want: &workflow.Action{
-				State: &workflow.State{Status: workflow.Completed, Start: now, End: now.Add(1)},
-				Attempts: []*workflow.Attempt{
-					{Start: now, End: now.Add(1)},
-				},
-			},
+			name:   "running action with attempts that have been completed, no reset",
+			action: newActionWithStateAndAttempts(&workflow.State{Status: workflow.Running, Start: now}, []workflow.Attempt{{Start: now, End: now.Add(1)}}),
+			want:   newActionWithStateAndAttempts(&workflow.State{Status: workflow.Completed, Start: now, End: now.Add(1)}, []workflow.Attempt{{Start: now, End: now.Add(1)}}),
 		},
 		{
-			name: "running action with attempts that have been failed, no reset",
-			action: &workflow.Action{
-				State: &workflow.State{Status: workflow.Running, Start: now},
-				Attempts: []*workflow.Attempt{
-					{Err: &plugins.Error{}, Start: now, End: now.Add(1)},
-				},
-			},
-			want: &workflow.Action{
-				State: &workflow.State{Status: workflow.Failed, Start: now, End: now.Add(1)},
-				Attempts: []*workflow.Attempt{
-					{Err: &plugins.Error{}, Start: now, End: now.Add(1)},
-				},
-			},
+			name:   "running action with attempts that have been failed, no reset",
+			action: newActionWithStateAndAttempts(&workflow.State{Status: workflow.Running, Start: now}, []workflow.Attempt{{Err: &plugins.Error{}, Start: now, End: now.Add(1)}}),
+			want:   newActionWithStateAndAttempts(&workflow.State{Status: workflow.Failed, Start: now, End: now.Add(1)}, []workflow.Attempt{{Err: &plugins.Error{}, Start: now, End: now.Add(1)}}),
 		},
 	}
 
@@ -114,63 +102,43 @@ func TestFixChecks(t *testing.T) {
 			want:   nil,
 		},
 		{
-			name: "checks not running, no reset",
-			checks: &workflow.Checks{
-				State: &workflow.State{Status: workflow.Completed},
-			},
-			want: &workflow.Checks{
-				State: &workflow.State{Status: workflow.Completed},
-			},
+			name:   "checks not running, no reset",
+			checks: newChecksWithStateAndActionsRecov(&workflow.State{Status: workflow.Completed}, nil),
+			want:   newChecksWithStateAndActionsRecov(&workflow.State{Status: workflow.Completed}, nil),
 		},
 		{
-			name: "running checks with completed action, marks as completed",
-			checks: &workflow.Checks{
-				State: &workflow.State{Status: workflow.Running, Start: now, End: now},
-				Actions: []*workflow.Action{
-					{State: &workflow.State{Status: workflow.Running, Start: now}, Attempts: []*workflow.Attempt{{Start: now, End: now.Add(1)}}},
-				},
-			},
-			want: &workflow.Checks{
-				State: &workflow.State{Status: workflow.Completed, Start: now, End: now},
-				Actions: []*workflow.Action{
-					{State: &workflow.State{Status: workflow.Completed, Start: now, End: now.Add(1)}, Attempts: []*workflow.Attempt{{Start: now, End: now.Add(1)}}},
-				},
-			},
+			name:   "running checks with completed action, marks as completed",
+			checks: newChecksWithStateAndActionsRecov(&workflow.State{Status: workflow.Running, Start: now, End: now}, []*workflow.Action{newActionWithStateAndAttempts(&workflow.State{Status: workflow.Running, Start: now}, []workflow.Attempt{{Start: now, End: now.Add(1)}})}),
+			want:   newChecksWithStateAndActionsRecov(&workflow.State{Status: workflow.Completed, Start: now, End: now}, []*workflow.Action{newActionWithStateAndAttempts(&workflow.State{Status: workflow.Completed, Start: now, End: now.Add(1)}, []workflow.Attempt{{Start: now, End: now.Add(1)}})}),
 		},
 		{
-			name: "running checks with incomplete action, resets",
-			checks: &workflow.Checks{
-				State: &workflow.State{Status: workflow.Running, Start: now, End: now},
-				Actions: []*workflow.Action{
-					{State: &workflow.State{Status: workflow.Running, Start: now}, Attempts: []*workflow.Attempt{{Start: now}}},
-				},
-			},
-			want: &workflow.Checks{
-				State: &workflow.State{Status: workflow.NotStarted},
-				Actions: []*workflow.Action{
-					{State: &workflow.State{Status: workflow.NotStarted}, Attempts: nil},
-				},
-			},
+			name:   "running checks with incomplete action, resets",
+			checks: newChecksWithStateAndActionsRecov(&workflow.State{Status: workflow.Running, Start: now, End: now}, []*workflow.Action{newActionWithStateAndAttempts(&workflow.State{Status: workflow.Running, Start: now}, []workflow.Attempt{{Start: now}})}),
+			want:   newChecksWithStateAndActionsRecov(&workflow.State{Status: workflow.NotStarted}, []*workflow.Action{newActionWithStateAndAttempts(&workflow.State{Status: workflow.NotStarted}, nil)}),
 		},
 	}
 
 	for _, test := range tests {
 		// Save the original status to detect if fixChecks changed it
 		var originalStatus workflow.Status
-		if test.checks != nil && test.checks.State != nil {
-			originalStatus = test.checks.State.Status
+		if test.checks != nil {
+			originalStatus = test.checks.State.Get().Status
 		}
 
 		fixChecks(test.checks)
 
 		// For checks that were Running and got marked as Completed by fixChecks, the End time is set to time.Now()
 		// We need to exclude it from comparison but verify it was set
-		if test.checks != nil && test.want != nil && originalStatus == workflow.Running && test.checks.State.Status == workflow.Completed && test.want.State.Status == workflow.Completed {
+		if test.checks != nil && test.want != nil && originalStatus == workflow.Running && test.checks.State.Get().Status == workflow.Completed && test.want.State.Get().Status == workflow.Completed {
 			// Save the actual end time
-			actualEnd := test.checks.State.End
+			actualEnd := test.checks.State.Get().End
 			// Set both to zero for comparison
-			test.checks.State.End = time.Time{}
-			test.want.State.End = time.Time{}
+			checksState := test.checks.State.Get()
+			checksState.End = time.Time{}
+			test.checks.State.Set(checksState)
+			wantState := test.want.State.Get()
+			wantState.End = time.Time{}
+			test.want.State.Set(wantState)
 			if diff := pConfig.Compare(test.want, test.checks); diff != "" {
 				t.Errorf("TestFixChecks(%s): -want/+got):\n%s", test.name, diff)
 			}
@@ -195,108 +163,86 @@ func TestFixSeq(t *testing.T) {
 	}{
 		{
 			name: "sequence not running, no change",
-			seq: &workflow.Sequence{
-				State: &workflow.State{Status: workflow.Completed, End: now},
-			},
-			want: &workflow.Sequence{
-				State: &workflow.State{Status: workflow.Completed},
-			},
+			seq:  newSequenceWithStateAndActionsRecov(&workflow.State{Status: workflow.Completed, End: now}, nil),
+			want: newSequenceWithStateAndActionsRecov(&workflow.State{Status: workflow.Completed}, nil),
 		},
 		{
 			name: "running sequence, no actions completed, reset sequence",
-			seq: &workflow.Sequence{
-				State: &workflow.State{Status: workflow.Running, Start: now},
-				Actions: []*workflow.Action{
-					{State: &workflow.State{Status: workflow.Running}},
-					{State: &workflow.State{Status: workflow.Running}},
-				},
-			},
-			want: &workflow.Sequence{
-				State: &workflow.State{Status: workflow.NotStarted},
-				Actions: []*workflow.Action{
-					{State: &workflow.State{Status: workflow.NotStarted}},
-					{State: &workflow.State{Status: workflow.NotStarted}},
-				},
-			},
+			seq: newSequenceWithStateAndActionsRecov(&workflow.State{Status: workflow.Running, Start: now}, []*workflow.Action{
+				newActionWithStateAndAttempts(&workflow.State{Status: workflow.Running}, nil),
+				newActionWithStateAndAttempts(&workflow.State{Status: workflow.Running}, nil),
+			}),
+			want: newSequenceWithStateAndActionsRecov(&workflow.State{Status: workflow.NotStarted}, []*workflow.Action{
+				newActionWithStateAndAttempts(&workflow.State{Status: workflow.NotStarted}, nil),
+				newActionWithStateAndAttempts(&workflow.State{Status: workflow.NotStarted}, nil),
+			}),
 		},
 		{
 			name: "running sequence, an action was stopped, sequence is stopped",
-			seq: &workflow.Sequence{
-				State: &workflow.State{Status: workflow.Running, Start: now},
-				Actions: []*workflow.Action{
-					{State: &workflow.State{Status: workflow.Completed}},
-					{State: &workflow.State{Status: workflow.Stopped, End: now}},
-					{State: &workflow.State{Status: workflow.Running}},
-				},
-			},
-			want: &workflow.Sequence{
-				State: &workflow.State{Status: workflow.Stopped, Start: now},
-				Actions: []*workflow.Action{
-					{State: &workflow.State{Status: workflow.Completed}},
-					{State: &workflow.State{Status: workflow.Stopped}},
-					{State: &workflow.State{Status: workflow.Stopped}},
-				},
-			},
+			seq: newSequenceWithStateAndActionsRecov(&workflow.State{Status: workflow.Running, Start: now}, []*workflow.Action{
+				newActionWithStateAndAttempts(&workflow.State{Status: workflow.Completed}, nil),
+				newActionWithStateAndAttempts(&workflow.State{Status: workflow.Stopped, End: now}, nil),
+				newActionWithStateAndAttempts(&workflow.State{Status: workflow.Running}, nil),
+			}),
+			want: newSequenceWithStateAndActionsRecov(&workflow.State{Status: workflow.Stopped, Start: now}, []*workflow.Action{
+				newActionWithStateAndAttempts(&workflow.State{Status: workflow.Completed}, nil),
+				newActionWithStateAndAttempts(&workflow.State{Status: workflow.Stopped}, nil),
+				newActionWithStateAndAttempts(&workflow.State{Status: workflow.Stopped}, nil),
+			}),
 		},
 		{
 			name: "running sequence, all actions completed, complete sequence",
-			seq: &workflow.Sequence{
-				State: &workflow.State{Status: workflow.Running, Start: now},
-				Actions: []*workflow.Action{
-					{State: &workflow.State{Status: workflow.Completed}},
-					{State: &workflow.State{Status: workflow.Completed}},
-				},
-			},
-			want: &workflow.Sequence{
-				State: &workflow.State{Status: workflow.Completed, Start: now},
-				Actions: []*workflow.Action{
-					{State: &workflow.State{Status: workflow.Completed}},
-					{State: &workflow.State{Status: workflow.Completed}},
-				},
-			},
+			seq: newSequenceWithStateAndActionsRecov(&workflow.State{Status: workflow.Running, Start: now}, []*workflow.Action{
+				newActionWithStateAndAttempts(&workflow.State{Status: workflow.Completed}, nil),
+				newActionWithStateAndAttempts(&workflow.State{Status: workflow.Completed}, nil),
+			}),
+			want: newSequenceWithStateAndActionsRecov(&workflow.State{Status: workflow.Completed, Start: now}, []*workflow.Action{
+				newActionWithStateAndAttempts(&workflow.State{Status: workflow.Completed}, nil),
+				newActionWithStateAndAttempts(&workflow.State{Status: workflow.Completed}, nil),
+			}),
 		},
 		{
 			name: "running sequence, some actions completed, stays running",
-			seq: &workflow.Sequence{
-				State: &workflow.State{Status: workflow.Running, Start: now},
-				Actions: []*workflow.Action{
-					{State: &workflow.State{Status: workflow.Completed}},
-					{State: &workflow.State{Status: workflow.Running}},
-					{State: &workflow.State{Status: workflow.Completed}},
-				},
-			},
-			want: &workflow.Sequence{
-				State: &workflow.State{Status: workflow.Running, Start: now},
-				Actions: []*workflow.Action{
-					{State: &workflow.State{Status: workflow.Completed}},
-					{State: &workflow.State{Status: workflow.NotStarted}},
-					{State: &workflow.State{Status: workflow.Completed}},
-				},
-			},
+			seq: newSequenceWithStateAndActionsRecov(&workflow.State{Status: workflow.Running, Start: now}, []*workflow.Action{
+				newActionWithStateAndAttempts(&workflow.State{Status: workflow.Completed}, nil),
+				newActionWithStateAndAttempts(&workflow.State{Status: workflow.Running}, nil),
+				newActionWithStateAndAttempts(&workflow.State{Status: workflow.Completed}, nil),
+			}),
+			want: newSequenceWithStateAndActionsRecov(&workflow.State{Status: workflow.Running, Start: now}, []*workflow.Action{
+				newActionWithStateAndAttempts(&workflow.State{Status: workflow.Completed}, nil),
+				newActionWithStateAndAttempts(&workflow.State{Status: workflow.NotStarted}, nil),
+				newActionWithStateAndAttempts(&workflow.State{Status: workflow.Completed}, nil),
+			}),
 		},
 	}
 
 	for _, test := range tests {
 		fixSeq(test.seq)
-		if test.seq.State.Status == workflow.Stopped {
-			if test.seq.State.End.IsZero() {
+		if test.seq.State.Get().Status == workflow.Stopped {
+			if test.seq.State.Get().End.IsZero() {
 				t.Errorf("TestFixSeq(%s): got seq.State.End == 0, want non-zero", test.name)
 			}
-			test.seq.State.End = time.Time{} // Reset time so we can compare
+			seqState := test.seq.State.Get()
+			seqState.End = time.Time{} // Reset time so we can compare
+			test.seq.State.Set(seqState)
 			for _, a := range test.seq.Actions {
-				if a.State.Status == workflow.Stopped {
-					if a.State.End.IsZero() {
+				if a.State.Get().Status == workflow.Stopped {
+					if a.State.Get().End.IsZero() {
 						t.Errorf("TestFixSeq(%s): got action.End == 0, want non-zero", test.name)
 					}
-					a.State.End = time.Time{} // Reset time so we can compare
+					aState := a.State.Get()
+					aState.End = time.Time{} // Reset time so we can compare
+					a.State.Set(aState)
 				}
 			}
 		}
-		if test.seq.State.Status == workflow.Completed {
-			if test.seq.State.End.IsZero() {
+		if test.seq.State.Get().Status == workflow.Completed {
+			if test.seq.State.Get().End.IsZero() {
 				t.Errorf("TestFixSeq(%s): got seq.State.End == 0, want non-zero", test.name)
 			}
-			test.seq.State.End = time.Time{} // Reset time so we can compare
+			seqState := test.seq.State.Get()
+			seqState.End = time.Time{} // Reset time so we can compare
+			test.seq.State.Set(seqState)
 		}
 		if diff := pConfig.Compare(test.want, test.seq); diff != "" {
 			t.Errorf("TestFixSeq(%s): -want/+got:\n%s", test.name, diff)
@@ -312,134 +258,72 @@ func TestFixBlock(t *testing.T) {
 	}{
 		{
 			name: "block not running, no change",
-			b: &workflow.Block{
-				State: &workflow.State{Status: workflow.Completed},
-			},
-			want: &workflow.Block{
-				State: &workflow.State{Status: workflow.Completed},
-			},
+			b:    newBlockWithStateSeqsChecks(&workflow.State{Status: workflow.Completed}, nil, nil, nil, nil, nil),
+			want: newBlockWithStateSeqsChecks(&workflow.State{Status: workflow.Completed}, nil, nil, nil, nil, nil),
 		},
 		{
 			name: "running block, prechecks failed, block fails",
-			b: &workflow.Block{
-				State:     &workflow.State{Status: workflow.Running},
-				PreChecks: &workflow.Checks{State: &workflow.State{Status: workflow.Failed}},
-			},
-			want: &workflow.Block{
-				State:     &workflow.State{Status: workflow.Failed},
-				PreChecks: &workflow.Checks{State: &workflow.State{Status: workflow.Failed}},
-			},
+			b:    newBlockWithStateSeqsChecks(&workflow.State{Status: workflow.Running}, nil, nil, newChecksWithStateAndActionsRecov(&workflow.State{Status: workflow.Failed}, nil), nil, nil),
+			want: newBlockWithStateSeqsChecks(&workflow.State{Status: workflow.Failed}, nil, nil, newChecksWithStateAndActionsRecov(&workflow.State{Status: workflow.Failed}, nil), nil, nil),
 		},
 		{
 			name: "running block, contChecks failed, block fails",
-			b: &workflow.Block{
-				State:      &workflow.State{Status: workflow.Running},
-				PreChecks:  &workflow.Checks{State: &workflow.State{Status: workflow.Completed}},
-				ContChecks: &workflow.Checks{State: &workflow.State{Status: workflow.Failed}},
-			},
-			want: &workflow.Block{
-				State:      &workflow.State{Status: workflow.Failed},
-				PreChecks:  &workflow.Checks{State: &workflow.State{Status: workflow.Completed}},
-				ContChecks: &workflow.Checks{State: &workflow.State{Status: workflow.Failed}},
-			},
+			b:    newBlockWithStateSeqsChecks(&workflow.State{Status: workflow.Running}, nil, nil, newChecksWithStateAndActionsRecov(&workflow.State{Status: workflow.Completed}, nil), newChecksWithStateAndActionsRecov(&workflow.State{Status: workflow.Failed}, nil), nil),
+			want: newBlockWithStateSeqsChecks(&workflow.State{Status: workflow.Failed}, nil, nil, newChecksWithStateAndActionsRecov(&workflow.State{Status: workflow.Completed}, nil), newChecksWithStateAndActionsRecov(&workflow.State{Status: workflow.Failed}, nil), nil),
 		},
 		{
 			name: "running block, postChecks failed, block fails",
-			b: &workflow.Block{
-				State:      &workflow.State{Status: workflow.Failed},
-				PreChecks:  &workflow.Checks{State: &workflow.State{Status: workflow.Completed}},
-				ContChecks: &workflow.Checks{State: &workflow.State{Status: workflow.Completed}},
-				PostChecks: &workflow.Checks{State: &workflow.State{Status: workflow.Failed}},
-				Sequences: []*workflow.Sequence{
-					{State: &workflow.State{Status: workflow.Completed}},
-					{State: &workflow.State{Status: workflow.Completed}},
-				},
-			},
-			want: &workflow.Block{
-				State:      &workflow.State{Status: workflow.Failed},
-				PreChecks:  &workflow.Checks{State: &workflow.State{Status: workflow.Completed}},
-				ContChecks: &workflow.Checks{State: &workflow.State{Status: workflow.Completed}},
-				PostChecks: &workflow.Checks{State: &workflow.State{Status: workflow.Failed}},
-				Sequences: []*workflow.Sequence{
-					{State: &workflow.State{Status: workflow.Completed}},
-					{State: &workflow.State{Status: workflow.Completed}},
-				},
-			},
+			b: newBlockWithStateSeqsChecks(&workflow.State{Status: workflow.Failed}, []*workflow.Sequence{
+				newSequenceWithStateAndActionsRecov(&workflow.State{Status: workflow.Completed}, nil),
+				newSequenceWithStateAndActionsRecov(&workflow.State{Status: workflow.Completed}, nil),
+			}, nil, newChecksWithStateAndActionsRecov(&workflow.State{Status: workflow.Completed}, nil), newChecksWithStateAndActionsRecov(&workflow.State{Status: workflow.Completed}, nil), newChecksWithStateAndActionsRecov(&workflow.State{Status: workflow.Failed}, nil)),
+			want: newBlockWithStateSeqsChecks(&workflow.State{Status: workflow.Failed}, []*workflow.Sequence{
+				newSequenceWithStateAndActionsRecov(&workflow.State{Status: workflow.Completed}, nil),
+				newSequenceWithStateAndActionsRecov(&workflow.State{Status: workflow.Completed}, nil),
+			}, nil, newChecksWithStateAndActionsRecov(&workflow.State{Status: workflow.Completed}, nil), newChecksWithStateAndActionsRecov(&workflow.State{Status: workflow.Completed}, nil), newChecksWithStateAndActionsRecov(&workflow.State{Status: workflow.Failed}, nil)),
 		},
 		{
 			name: "running block, all sequences completed, no postchecks, leaves running",
-			b: &workflow.Block{
-				State: &workflow.State{Status: workflow.Running},
-				Sequences: []*workflow.Sequence{
-					{State: &workflow.State{Status: workflow.Completed}},
-					{State: &workflow.State{Status: workflow.Completed}},
-				},
-			},
-			want: &workflow.Block{
-				State: &workflow.State{Status: workflow.Running},
-				Sequences: []*workflow.Sequence{
-					{State: &workflow.State{Status: workflow.Completed}},
-					{State: &workflow.State{Status: workflow.Completed}},
-				},
-			},
+			b: newBlockWithStateSeqsChecks(&workflow.State{Status: workflow.Running}, []*workflow.Sequence{
+				newSequenceWithStateAndActionsRecov(&workflow.State{Status: workflow.Completed}, nil),
+				newSequenceWithStateAndActionsRecov(&workflow.State{Status: workflow.Completed}, nil),
+			}, nil, nil, nil, nil),
+			want: newBlockWithStateSeqsChecks(&workflow.State{Status: workflow.Running}, []*workflow.Sequence{
+				newSequenceWithStateAndActionsRecov(&workflow.State{Status: workflow.Completed}, nil),
+				newSequenceWithStateAndActionsRecov(&workflow.State{Status: workflow.Completed}, nil),
+			}, nil, nil, nil, nil),
 		},
 		{
 			name: "running block, all sequences completed, postcheck completed, leaves running",
-			b: &workflow.Block{
-				State:      &workflow.State{Status: workflow.Running},
-				PostChecks: &workflow.Checks{State: &workflow.State{Status: workflow.Completed}},
-				Sequences: []*workflow.Sequence{
-					{State: &workflow.State{Status: workflow.Completed}},
-					{State: &workflow.State{Status: workflow.Completed}},
-				},
-			},
-			want: &workflow.Block{
-				State:      &workflow.State{Status: workflow.Running},
-				PostChecks: &workflow.Checks{State: &workflow.State{Status: workflow.Completed}},
-				Sequences: []*workflow.Sequence{
-					{State: &workflow.State{Status: workflow.Completed}},
-					{State: &workflow.State{Status: workflow.Completed}},
-				},
-			},
+			b: newBlockWithStateSeqsChecks(&workflow.State{Status: workflow.Running}, []*workflow.Sequence{
+				newSequenceWithStateAndActionsRecov(&workflow.State{Status: workflow.Completed}, nil),
+				newSequenceWithStateAndActionsRecov(&workflow.State{Status: workflow.Completed}, nil),
+			}, nil, nil, nil, newChecksWithStateAndActionsRecov(&workflow.State{Status: workflow.Completed}, nil)),
+			want: newBlockWithStateSeqsChecks(&workflow.State{Status: workflow.Running}, []*workflow.Sequence{
+				newSequenceWithStateAndActionsRecov(&workflow.State{Status: workflow.Completed}, nil),
+				newSequenceWithStateAndActionsRecov(&workflow.State{Status: workflow.Completed}, nil),
+			}, nil, nil, nil, newChecksWithStateAndActionsRecov(&workflow.State{Status: workflow.Completed}, nil)),
 		},
 		{
 			name: "running block, one sequence stopped, block stops",
-			b: &workflow.Block{
-				State: &workflow.State{Status: workflow.Running},
-				Sequences: []*workflow.Sequence{
-					{State: &workflow.State{Status: workflow.Completed}},
-					{State: &workflow.State{Status: workflow.Stopped}},
-					{State: &workflow.State{Status: workflow.Running}},
-				},
-			},
-			want: &workflow.Block{
-				State: &workflow.State{Status: workflow.Stopped},
-				Sequences: []*workflow.Sequence{
-					{State: &workflow.State{Status: workflow.Stopped}},
-					{State: &workflow.State{Status: workflow.Stopped}},
-				},
-			},
+			b: newBlockWithStateSeqsChecks(&workflow.State{Status: workflow.Running}, []*workflow.Sequence{
+				newSequenceWithStateAndActionsRecov(&workflow.State{Status: workflow.Completed}, nil),
+				newSequenceWithStateAndActionsRecov(&workflow.State{Status: workflow.Stopped}, nil),
+				newSequenceWithStateAndActionsRecov(&workflow.State{Status: workflow.Running}, nil),
+			}, nil, nil, nil, nil),
+			want: newBlockWithStateSeqsChecks(&workflow.State{Status: workflow.Stopped}, []*workflow.Sequence{
+				newSequenceWithStateAndActionsRecov(&workflow.State{Status: workflow.Stopped}, nil),
+				newSequenceWithStateAndActionsRecov(&workflow.State{Status: workflow.Stopped}, nil),
+			}, nil, nil, nil, nil),
 		},
 		{
 			name: "running block, bypass checks completed, block state completed",
-			b: &workflow.Block{
-				State: &workflow.State{Status: workflow.Running},
-				BypassChecks: &workflow.Checks{
-					State: &workflow.State{Status: workflow.Completed},
-				},
-				Sequences: []*workflow.Sequence{
-					{State: &workflow.State{Status: workflow.NotStarted}},
-				},
-			},
-			want: &workflow.Block{
-				State: &workflow.State{Status: workflow.Completed},
-				BypassChecks: &workflow.Checks{
-					State: &workflow.State{Status: workflow.Completed},
-				},
-				Sequences: []*workflow.Sequence{
-					{State: &workflow.State{Status: workflow.NotStarted}},
-				},
-			},
+			b: newBlockWithStateSeqsChecks(&workflow.State{Status: workflow.Running}, []*workflow.Sequence{
+				newSequenceWithStateAndActionsRecov(&workflow.State{Status: workflow.NotStarted}, nil),
+			}, newChecksWithStateAndActionsRecov(&workflow.State{Status: workflow.Completed}, nil), nil, nil, nil),
+			want: newBlockWithStateSeqsChecks(&workflow.State{Status: workflow.Completed}, []*workflow.Sequence{
+				newSequenceWithStateAndActionsRecov(&workflow.State{Status: workflow.NotStarted}, nil),
+			}, newChecksWithStateAndActionsRecov(&workflow.State{Status: workflow.Completed}, nil), nil, nil, nil),
 		},
 	}
 
@@ -450,8 +334,8 @@ func TestFixBlock(t *testing.T) {
 			t.Fatalf("TestFixBlock(%s): failed to create vault: %v", test.name, err)
 		}
 		(&States{store: vault}).fixBlock(test.b)
-		if test.want.State.Status != test.b.State.Status {
-			t.Errorf("TestFixBlock(%s): got state %v, want %v", test.name, test.b.State.Status, test.want.State.Status)
+		if test.want.State.Get().Status != test.b.State.Get().Status {
+			t.Errorf("TestFixBlock(%s): got state %v, want %v", test.name, test.b.State.Get().Status, test.want.State.Get().Status)
 		}
 	}
 }
@@ -464,91 +348,40 @@ func TestFixPlan(t *testing.T) {
 	}{
 		{
 			name: "plan not running, no change",
-			plan: &workflow.Plan{
-				State: &workflow.State{Status: workflow.Completed},
-			},
-			want: &workflow.Plan{
-				State: &workflow.State{Status: workflow.Completed},
-			},
+			plan: newPlanWithStateBlocksChecks(&workflow.State{Status: workflow.Completed}, nil, nil, nil, nil, nil, nil),
+			want: newPlanWithStateBlocksChecks(&workflow.State{Status: workflow.Completed}, nil, nil, nil, nil, nil, nil),
 		},
 		{
 			name: "running plan, bypass checks completed, plan completes",
-			plan: &workflow.Plan{
-				State: &workflow.State{Status: workflow.Running},
-				BypassChecks: &workflow.Checks{
-					State: &workflow.State{Status: workflow.Completed},
-				},
-			},
-			want: &workflow.Plan{
-				State: &workflow.State{Status: workflow.Completed},
-				BypassChecks: &workflow.Checks{
-					State: &workflow.State{Status: workflow.Completed},
-				},
-			},
+			plan: newPlanWithStateBlocksChecks(&workflow.State{Status: workflow.Running}, nil, newChecksWithStateAndActionsRecov(&workflow.State{Status: workflow.Completed}, nil), nil, nil, nil, nil),
+			want: newPlanWithStateBlocksChecks(&workflow.State{Status: workflow.Completed}, nil, newChecksWithStateAndActionsRecov(&workflow.State{Status: workflow.Completed}, nil), nil, nil, nil, nil),
 		},
 		{
 			name: "running plan, prechecks failed, plan fails",
-			plan: &workflow.Plan{
-				State: &workflow.State{Status: workflow.Running},
-				PreChecks: &workflow.Checks{
-					State: &workflow.State{Status: workflow.Failed},
-				},
-			},
-			want: &workflow.Plan{
-				State: &workflow.State{Status: workflow.Failed},
-				PreChecks: &workflow.Checks{
-					State: &workflow.State{Status: workflow.Failed},
-				},
-			},
+			plan: newPlanWithStateBlocksChecks(&workflow.State{Status: workflow.Running}, nil, nil, newChecksWithStateAndActionsRecov(&workflow.State{Status: workflow.Failed}, nil), nil, nil, nil),
+			want: newPlanWithStateBlocksChecks(&workflow.State{Status: workflow.Failed}, nil, nil, newChecksWithStateAndActionsRecov(&workflow.State{Status: workflow.Failed}, nil), nil, nil, nil),
 		},
 		{
 			name: "running plan, all blocks completed, postchecks/contchecks completed, deferred checks completed, plan completes",
-			plan: &workflow.Plan{
-				State: &workflow.State{Status: workflow.Running},
-				Blocks: []*workflow.Block{
-					{State: &workflow.State{Status: workflow.Completed}},
-					{State: &workflow.State{Status: workflow.Completed}},
-				},
-				PostChecks: &workflow.Checks{
-					State: &workflow.State{Status: workflow.Completed},
-				},
-				DeferredChecks: &workflow.Checks{
-					State: &workflow.State{Status: workflow.Completed},
-				},
-			},
-			want: &workflow.Plan{
-				State: &workflow.State{Status: workflow.Completed},
-				Blocks: []*workflow.Block{
-					{State: &workflow.State{Status: workflow.Completed}},
-					{State: &workflow.State{Status: workflow.Completed}},
-				},
-				PostChecks: &workflow.Checks{
-					State: &workflow.State{Status: workflow.Completed},
-				},
-				ContChecks: &workflow.Checks{
-					State: &workflow.State{Status: workflow.Completed},
-				},
-				DeferredChecks: &workflow.Checks{
-					State: &workflow.State{Status: workflow.Completed},
-				},
-			},
+			plan: newPlanWithStateBlocksChecks(&workflow.State{Status: workflow.Running}, []*workflow.Block{
+				newBlockWithStateSeqsChecks(&workflow.State{Status: workflow.Completed}, nil, nil, nil, nil, nil),
+				newBlockWithStateSeqsChecks(&workflow.State{Status: workflow.Completed}, nil, nil, nil, nil, nil),
+			}, nil, nil, nil, newChecksWithStateAndActionsRecov(&workflow.State{Status: workflow.Completed}, nil), newChecksWithStateAndActionsRecov(&workflow.State{Status: workflow.Completed}, nil)),
+			want: newPlanWithStateBlocksChecks(&workflow.State{Status: workflow.Completed}, []*workflow.Block{
+				newBlockWithStateSeqsChecks(&workflow.State{Status: workflow.Completed}, nil, nil, nil, nil, nil),
+				newBlockWithStateSeqsChecks(&workflow.State{Status: workflow.Completed}, nil, nil, nil, nil, nil),
+			}, nil, nil, newChecksWithStateAndActionsRecov(&workflow.State{Status: workflow.Completed}, nil), newChecksWithStateAndActionsRecov(&workflow.State{Status: workflow.Completed}, nil), newChecksWithStateAndActionsRecov(&workflow.State{Status: workflow.Completed}, nil)),
 		},
 		{
 			name: "running plan, block failed, plan fails",
-			plan: &workflow.Plan{
-				State: &workflow.State{Status: workflow.Running},
-				Blocks: []*workflow.Block{
-					{State: &workflow.State{Status: workflow.Failed}},
-					{State: &workflow.State{Status: workflow.Completed}},
-				},
-			},
-			want: &workflow.Plan{
-				State: &workflow.State{Status: workflow.Failed},
-				Blocks: []*workflow.Block{
-					{State: &workflow.State{Status: workflow.Failed}},
-					{State: &workflow.State{Status: workflow.Completed}},
-				},
-			},
+			plan: newPlanWithStateBlocksChecks(&workflow.State{Status: workflow.Running}, []*workflow.Block{
+				newBlockWithStateSeqsChecks(&workflow.State{Status: workflow.Failed}, nil, nil, nil, nil, nil),
+				newBlockWithStateSeqsChecks(&workflow.State{Status: workflow.Completed}, nil, nil, nil, nil, nil),
+			}, nil, nil, nil, nil, nil),
+			want: newPlanWithStateBlocksChecks(&workflow.State{Status: workflow.Failed}, []*workflow.Block{
+				newBlockWithStateSeqsChecks(&workflow.State{Status: workflow.Failed}, nil, nil, nil, nil, nil),
+				newBlockWithStateSeqsChecks(&workflow.State{Status: workflow.Completed}, nil, nil, nil, nil, nil),
+			}, nil, nil, nil, nil, nil),
 		},
 	}
 
@@ -559,8 +392,8 @@ func TestFixPlan(t *testing.T) {
 			t.Fatalf("TestFixPlan(%s): failed to create vault: %v", test.name, err)
 		}
 		(&States{store: vault}).fixPlan(test.plan)
-		if test.plan.State.Status != test.want.State.Status {
-			t.Errorf("TestFixPlan(%s): got status %v, want %v", test.name, test.plan.State.Status, test.want.State.Status)
+		if test.plan.State.Get().Status != test.want.State.Get().Status {
+			t.Errorf("TestFixPlan(%s): got status %v, want %v", test.name, test.plan.State.Get().Status, test.want.State.Get().Status)
 		}
 	}
 }
@@ -572,8 +405,8 @@ func TestChecksFailed(t *testing.T) {
 		want bool
 	}{
 		{"nil checks", nil, false},
-		{"checks failed", &workflow.Checks{State: &workflow.State{Status: workflow.Failed}}, true},
-		{"checks completed", &workflow.Checks{State: &workflow.State{Status: workflow.Completed}}, false},
+		{"checks failed", newChecksWithStateAndActionsRecov(&workflow.State{Status: workflow.Failed}, nil), true},
+		{"checks completed", newChecksWithStateAndActionsRecov(&workflow.State{Status: workflow.Completed}, nil), false},
 	}
 	for _, test := range tests {
 		if got := checksFailed(test.c); got != test.want {
@@ -589,8 +422,8 @@ func TestChecksCompleted(t *testing.T) {
 		want bool
 	}{
 		{"nil checks", nil, true},
-		{"checks completed", &workflow.Checks{State: &workflow.State{Status: workflow.Completed}}, true},
-		{"checks running", &workflow.Checks{State: &workflow.State{Status: workflow.Running}}, false},
+		{"checks completed", newChecksWithStateAndActionsRecov(&workflow.State{Status: workflow.Completed}, nil), true},
+		{"checks running", newChecksWithStateAndActionsRecov(&workflow.State{Status: workflow.Running}, nil), false},
 	}
 	for _, test := range tests {
 		if got := checksCompleted(test.c); got != test.want {
@@ -605,8 +438,8 @@ func TestSkipBlock(t *testing.T) {
 		b    block
 		want bool
 	}{
-		{"completed block", block{block: &workflow.Block{State: &workflow.State{Status: workflow.Completed}}}, true},
-		{"running block", block{block: &workflow.Block{State: &workflow.State{Status: workflow.Running}}}, false},
+		{"completed block", block{block: newBlockWithStateSeqsChecks(&workflow.State{Status: workflow.Completed}, nil, nil, nil, nil, nil)}, true},
+		{"running block", block{block: newBlockWithStateSeqsChecks(&workflow.State{Status: workflow.Running}, nil, nil, nil, nil, nil)}, false},
 	}
 	for _, test := range tests {
 		if got := skipBlock(test.b); got != test.want {
@@ -621,10 +454,10 @@ func TestIsCompleted(t *testing.T) {
 		o    workflow.Object
 		want bool
 	}{
-		{"completed object", &workflow.Block{State: &workflow.State{Status: workflow.Completed}}, true},
-		{"running object", &workflow.Plan{State: &workflow.State{Status: workflow.Running}}, false},
-		{"failed object", &workflow.Sequence{State: &workflow.State{Status: workflow.Failed}}, true},
-		{"stopped object", &workflow.Action{State: &workflow.State{Status: workflow.Stopped}}, true},
+		{"completed object", newBlockWithStateSeqsChecks(&workflow.State{Status: workflow.Completed}, nil, nil, nil, nil, nil), true},
+		{"running object", newPlanWithStateBlocksChecks(&workflow.State{Status: workflow.Running}, nil, nil, nil, nil, nil, nil), false},
+		{"failed object", newSequenceWithStateAndActionsRecov(&workflow.State{Status: workflow.Failed}, nil), true},
+		{"stopped object", newActionWithStateAndAttempts(&workflow.State{Status: workflow.Stopped}, nil), true},
 	}
 	for _, test := range tests {
 		if got := isCompleted(test.o); got != test.want {

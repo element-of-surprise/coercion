@@ -38,7 +38,7 @@ type setters interface {
 	// SetID is a setter for the ID field.
 	SetID(uuid.UUID)
 	// SetState is a setter for the State settings.
-	SetState(*workflow.State)
+	SetState(workflow.State)
 }
 
 type setPlanIDer interface {
@@ -64,18 +64,24 @@ func NewTestPlan() *workflow.Plan {
 		Descr:  "action",
 		Plugin: plugins.HelloPluginName,
 		Req:    plugins.HelloReq{Say: "hello"},
-		Attempts: []*workflow.Attempt{
-			{
-				Err:   &pluglib.Error{Message: "internal error"},
-				Start: time.Now().Add(-1 * time.Minute).UTC(),
-				End:   time.Now().UTC(),
-			},
-			{
-				Resp:  plugins.HelloResp{Said: "hello"},
-				Start: time.Now().Add(-1 * time.Second).UTC(),
-				End:   time.Now().UTC(),
-			},
-		},
+		Attempts: func() workflow.AtomicSlice[workflow.Attempt] {
+			var a workflow.AtomicSlice[workflow.Attempt]
+			a.Set(
+				[]workflow.Attempt{
+					{
+						Err:   &pluglib.Error{Message: "internal error"},
+						Start: time.Now().Add(-1 * time.Minute).UTC(),
+						End:   time.Now().UTC(),
+					},
+					{
+						Resp:  plugins.HelloResp{Said: "hello"},
+						Start: time.Now().Add(-1 * time.Second).UTC(),
+						End:   time.Now().UTC(),
+					},
+				},
+			)
+			return a
+		}(),
 	}
 
 	build.AddChecks(builder.PreChecks, &workflow.Checks{})
@@ -144,7 +150,7 @@ func NewTestPlan() *workflow.Plan {
 			item.Value.(setPlanIDer).SetPlanID(plan.ID)
 		}
 		setter.SetState(
-			&workflow.State{
+			workflow.State{
 				Status: workflow.Running,
 				Start:  time.Now().UTC(),
 				End:    time.Now().UTC(),

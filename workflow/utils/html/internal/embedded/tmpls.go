@@ -101,7 +101,7 @@ func calcCompleted[T supportedCalcs](v T) completed {
 	switch x := a.(type) {
 	case *workflow.Plan:
 		for _, b := range x.Blocks {
-			switch b.State.Status {
+			switch b.State.Get().Status {
 			case workflow.Completed:
 				c.Completed++
 			case workflow.Running:
@@ -113,7 +113,7 @@ func calcCompleted[T supportedCalcs](v T) completed {
 		c.Total = len(x.Blocks)
 	case *workflow.Block:
 		for _, seq := range x.Sequences {
-			switch seq.State.Status {
+			switch seq.State.Get().Status {
 			case workflow.Running:
 				c.Running++
 			case workflow.Failed:
@@ -125,7 +125,7 @@ func calcCompleted[T supportedCalcs](v T) completed {
 		c.Total = len(x.Sequences)
 	case *workflow.Checks:
 		for _, act := range x.Actions {
-			switch act.State.Status {
+			switch act.State.Get().Status {
 			case workflow.Running:
 				c.Running++
 			case workflow.Failed:
@@ -137,7 +137,7 @@ func calcCompleted[T supportedCalcs](v T) completed {
 		c.Total = len(x.Actions)
 	case []*workflow.Sequence:
 		for _, seq := range x {
-			switch seq.State.Status {
+			switch seq.State.Get().Status {
 			case workflow.Running:
 				c.Running++
 			case workflow.Failed:
@@ -149,7 +149,7 @@ func calcCompleted[T supportedCalcs](v T) completed {
 		c.Total = len(x)
 	case *workflow.Sequence:
 		for _, act := range x.Actions {
-			switch act.State.Status {
+			switch act.State.Get().Status {
 			case workflow.Running:
 				c.Running++
 			case workflow.Failed:
@@ -162,7 +162,9 @@ func calcCompleted[T supportedCalcs](v T) completed {
 	default:
 		panic("unsupported type")
 	}
-	c.Percent = (c.Completed * 100) / c.Total
+	if c.Total > 0 {
+		c.Percent = (c.Completed * 100) / c.Total
+	}
 	return c
 }
 

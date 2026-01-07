@@ -39,11 +39,11 @@ func (a actionUpdater) UpdateAction(ctx context.Context, action *workflow.Action
 	stmt := Stmt{}
 	stmt.Query(updateAction)
 	stmt.SetText("$id", action.ID.String())
-	stmt.SetInt64("$state_status", int64(action.State.Status))
-	stmt.SetInt64("$state_start", action.State.Start.UnixNano())
-	stmt.SetInt64("$state_end", action.State.End.UnixNano())
+	stmt.SetInt64("$state_status", int64(action.State.Get().Status))
+	stmt.SetInt64("$state_start", action.State.Get().Start.UnixNano())
+	stmt.SetInt64("$state_end", action.State.Get().End.UnixNano())
 
-	b, err := encodeAttempts(action.Attempts)
+	b, err := encodeAttempts(action.Attempts.Get())
 	if err != nil {
 		return errors.E(ctx, errors.CatInternal, errors.TypeBug, fmt.Errorf("ActionWriter.Write: %w", err))
 	}

@@ -46,13 +46,13 @@ func (p reader) docToSequence(ctx context.Context, planID azcosmos.PartitionKey,
 		Key:   resp.Key,
 		Name:  resp.Name,
 		Descr: resp.Descr,
-		State: &workflow.State{
-			Status: resp.StateStatus,
-			Start:  resp.StateStart,
-			End:    resp.StateEnd,
-			ETag:   string(resp.ETag),
-		},
 	}
+	s.State.Set(workflow.State{
+		Status: resp.StateStatus,
+		Start:  resp.StateStart,
+		End:    resp.StateEnd,
+		ETag:   string(resp.ETag),
+	})
 	s.SetPlanID(resp.PlanID)
 	s.Actions, err = p.idsToActions(ctx, planID, resp.Actions)
 	if err != nil {

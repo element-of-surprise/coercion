@@ -134,8 +134,8 @@ func (r reader) fetchRunningPlan(ctx context.Context, containerName string, id u
 		Meta:       entry.Meta,
 		SubmitTime: lr.SubmitTime,
 		Reason:     entry.Reason,
-		State:      lr.State,
 	}
+	plan.State.Set(lr.State)
 
 	if entry.BypassChecks != uuid.Nil {
 		plan.BypassChecks, err = r.fetchChecks(ctx, containerName, id, entry.BypassChecks)
@@ -422,9 +422,10 @@ func (r reader) fixActions(ctx context.Context, plan *workflow.Plan) error {
 		}
 
 		// Fix Attempt.Resp for all attempts
-		for _, attempt := range action.Attempts {
-			if attempt.Resp != nil {
-				respBytes, err := json.Marshal(attempt.Resp)
+		attempts := action.Attempts.Get()
+		for i := range attempts {
+			if attempts[i].Resp != nil {
+				respBytes, err := json.Marshal(attempts[i].Resp)
 				if err != nil {
 					return fmt.Errorf("failed to marshal attempt resp: %w", err)
 				}
@@ -440,10 +441,11 @@ func (r reader) fixActions(ctx context.Context, plan *workflow.Plan) error {
 							return fmt.Errorf("failed to unmarshal attempt resp: %w", err)
 						}
 					}
-					attempt.Resp = resp
+					attempts[i].Resp = resp
 				}
 			}
 		}
+		action.Attempts.Set(attempts)
 
 		return nil
 	}

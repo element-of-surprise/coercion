@@ -31,10 +31,10 @@ func (u actionUpdater) UpdateAction(ctx context.Context, action *workflow.Action
 	defer u.mu.Unlock()
 
 	patch := azcosmos.PatchOperations{}
-	patch.AppendReplace("/stateStatus", action.State.Status)
-	patch.AppendReplace("/stateStart", action.State.Start)
-	patch.AppendReplace("/stateEnd", action.State.End)
-	attempts, err := encodeAttempts(action.Attempts)
+	patch.AppendReplace("/stateStatus", action.State.Get().Status)
+	patch.AppendReplace("/stateStart", action.State.Get().Start)
+	patch.AppendReplace("/stateEnd", action.State.Get().End)
+	attempts, err := encodeAttempts(action.Attempts.Get())
 	if err != nil {
 		return errors.E(ctx, errors.CatInternal, errors.TypeBug, err)
 	}
@@ -42,8 +42,9 @@ func (u actionUpdater) UpdateAction(ctx context.Context, action *workflow.Action
 
 	itemOpt := itemOptions(u.defaultIOpts)
 	var ifMatchEtag *azcore.ETag = nil
-	if action.State.ETag != "" {
-		ifMatchEtag = (*azcore.ETag)(&action.State.ETag)
+	if action.State.Get().ETag != "" {
+		etag := action.State.Get().ETag
+		ifMatchEtag = (*azcore.ETag)(&etag)
 	}
 	itemOpt.IfMatchEtag = ifMatchEtag
 
@@ -54,7 +55,9 @@ func (u actionUpdater) UpdateAction(ctx context.Context, action *workflow.Action
 		return errors.E(ctx, errors.CatUser, errors.TypeStorageUpdate, err)
 	}
 
-	action.State.ETag = string(resp.ETag)
+	state := action.State.Get()
+	state.ETag = string(resp.ETag)
+	action.State.Set(state)
 
 	return nil
 }

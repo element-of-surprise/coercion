@@ -43,21 +43,21 @@ func (p reader) docToBlock(ctx context.Context, response *azcosmos.ItemResponse)
 	}
 
 	b := &workflow.Block{
-		ID:            resp.ID,
-		Key:           resp.Key,
-		Name:          resp.Name,
-		Descr:         resp.Descr,
-		EntranceDelay: resp.EntranceDelay,
-		ExitDelay:     resp.ExitDelay,
-		State: &workflow.State{
-			Status: resp.StateStatus,
-			Start:  resp.StateStart,
-			End:    resp.StateEnd,
-			ETag:   string(resp.ETag),
-		},
+		ID:                resp.ID,
+		Key:               resp.Key,
+		Name:              resp.Name,
+		Descr:             resp.Descr,
+		EntranceDelay:     resp.EntranceDelay,
+		ExitDelay:         resp.ExitDelay,
 		Concurrency:       resp.Concurrency,
 		ToleratedFailures: resp.ToleratedFailures,
 	}
+	b.State.Set(workflow.State{
+		Status: resp.StateStatus,
+		Start:  resp.StateStart,
+		End:    resp.StateEnd,
+		ETag:   string(resp.ETag),
+	})
 	b.SetPlanID(resp.PlanID)
 
 	k := key(resp.PlanID)

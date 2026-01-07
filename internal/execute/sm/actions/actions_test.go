@@ -21,6 +21,12 @@ import (
 	"github.com/kylelemons/godebug/pretty"
 )
 
+func newActionWithState(state *workflow.State) *workflow.Action {
+	a := &workflow.Action{}
+	a.State.Set(*state)
+	return a
+}
+
 type fakeUpdater struct {
 	updates  []*workflow.Action
 	index    int
@@ -58,22 +64,16 @@ func TestStart(t *testing.T) {
 		return now
 	}
 
+	action := newActionWithState(&workflow.State{})
 	data := Data{
-		Action: &workflow.Action{
-			State: &workflow.State{},
-		},
+		Action:  action,
 		Updater: newFakeUpdater(),
 	}
 
 	sm := Runner{nower: nower}
 	req := sm.Start(statemachine.Request[Data]{Ctx: context.Background(), Data: data, Next: sm.Start})
 
-	wantAction := &workflow.Action{
-		State: &workflow.State{
-			Start:  now,
-			Status: workflow.Running,
-		},
-	}
+	wantAction := newActionWithState(&workflow.State{Start: now, Status: workflow.Running})
 
 	if diff := pretty.Compare(wantAction, req.Data.Action); diff != "" {
 		t.Errorf("TestStart: Action: -want/+got:\n%s", diff)
@@ -176,74 +176,44 @@ func TestExecute(t *testing.T) {
 		{
 			name: "Failed after a retry",
 			data: Data{
-				Action: &workflow.Action{
-					State:   &workflow.State{},
-					Plugin:  testplugin.Name,
-					Timeout: 1 * time.Second,
-					Retries: 1,
-					Req:     testplugin.Req{},
-				},
+				Action: func() *workflow.Action {
+					a := &workflow.Action{Plugin: testplugin.Name, Timeout: 1 * time.Second, Retries: 1, Req: testplugin.Req{}}
+					a.State.Set(workflow.State{})
+					return a
+				}(),
 				plugin: &testplugin.Plugin{
 					Responses: []any{pluginErr, pluginErr},
 				},
 			},
 			wantData: Data{
-				Action: &workflow.Action{
-					State:   &workflow.State{},
-					Plugin:  testplugin.Name,
-					Timeout: 1 * time.Second,
-					Retries: 1,
-					Req:     testplugin.Req{},
-					Attempts: []*workflow.Attempt{
-						{
-							Err:   &plugins.Error{Message: pluginErr.Error()},
-							Start: now,
-							End:   now,
-						},
-						{
-							Err:   &plugins.Error{Message: pluginErr.Error()},
-							Start: now,
-							End:   now,
-						},
-					},
-				},
+				Action: func() *workflow.Action {
+					a := &workflow.Action{Plugin: testplugin.Name, Timeout: 1 * time.Second, Retries: 1, Req: testplugin.Req{}}
+					a.Attempts.Set([]workflow.Attempt{{Err: &plugins.Error{Message: pluginErr.Error()}, Start: now, End: now}, {Err: &plugins.Error{Message: pluginErr.Error()}, Start: now, End: now}})
+					a.State.Set(workflow.State{})
+					return a
+				}(),
 				err: exponential.ErrPermanent,
 			},
 		},
 		{
 			name: "Success after retry",
 			data: Data{
-				Action: &workflow.Action{
-					State:   &workflow.State{},
-					Plugin:  testplugin.Name,
-					Timeout: 1 * time.Second,
-					Retries: 1,
-					Req:     testplugin.Req{},
-				},
+				Action: func() *workflow.Action {
+					a := &workflow.Action{Plugin: testplugin.Name, Timeout: 1 * time.Second, Retries: 1, Req: testplugin.Req{}}
+					a.State.Set(workflow.State{})
+					return a
+				}(),
 				plugin: &testplugin.Plugin{
 					Responses: []any{pluginErr, testplugin.Resp{Arg: "ok"}},
 				},
 			},
 			wantData: Data{
-				Action: &workflow.Action{
-					State:   &workflow.State{},
-					Plugin:  testplugin.Name,
-					Timeout: 1 * time.Second,
-					Retries: 1,
-					Req:     testplugin.Req{},
-					Attempts: []*workflow.Attempt{
-						{
-							Err:   &plugins.Error{Message: pluginErr.Error()},
-							Start: now,
-							End:   now,
-						},
-						{
-							Resp:  testplugin.Resp{Arg: "ok"},
-							Start: now,
-							End:   now,
-						},
-					},
-				},
+				Action: func() *workflow.Action {
+					a := &workflow.Action{Plugin: testplugin.Name, Timeout: 1 * time.Second, Retries: 1, Req: testplugin.Req{}}
+					a.Attempts.Set([]workflow.Attempt{{Err: &plugins.Error{Message: pluginErr.Error()}, Start: now, End: now}, {Resp: testplugin.Resp{Arg: "ok"}, Start: now, End: now}})
+					a.State.Set(workflow.State{})
+					return a
+				}(),
 			},
 		},
 	}
@@ -289,34 +259,20 @@ func TestEnd(t *testing.T) {
 		{
 			name: "Data had error, so action should be marked as failed",
 			data: Data{
-				Action: &workflow.Action{
-					State: &workflow.State{},
-				},
+				Action:  newActionWithState(&workflow.State{}),
 				Updater: newFakeUpdater(),
 				err:     errors.New("fake error"),
 			},
-			wantDBAction: &workflow.Action{
-				State: &workflow.State{
-					Status: workflow.Failed,
-					End:    now,
-				},
-			},
-			wantErr: true,
+			wantDBAction: newActionWithState(&workflow.State{Status: workflow.Failed, End: now}),
+			wantErr:      true,
 		},
 		{
 			name: "Data had no error, so action should be marked as completed",
 			data: Data{
-				Action: &workflow.Action{
-					State: &workflow.State{},
-				},
+				Action:  newActionWithState(&workflow.State{}),
 				Updater: newFakeUpdater(),
 			},
-			wantDBAction: &workflow.Action{
-				State: &workflow.State{
-					Status: workflow.Completed,
-					End:    now,
-				},
-			},
+			wantDBAction: newActionWithState(&workflow.State{Status: workflow.Completed, End: now}),
 		},
 	}
 
@@ -361,11 +317,12 @@ func TestExec(t *testing.T) {
 			plugin: &testplugin.Plugin{
 				AlwaysRespond: true,
 			},
-			action: &workflow.Action{
-				Attempts: []*workflow.Attempt{{}, {}},
-				Retries:  1,
-				State:    &workflow.State{},
-			},
+			action: func() *workflow.Action {
+				a := &workflow.Action{Retries: 1}
+				a.Attempts.Set([]workflow.Attempt{{}, {}})
+				a.State.Set(workflow.State{})
+				return a
+			}(),
 			wantErr:      true,
 			errPermanent: true,
 			wantAttempts: []*workflow.Attempt{{}, {}},
@@ -378,11 +335,11 @@ func TestExec(t *testing.T) {
 					testplugin.Resp{Arg: "ok"},
 				},
 			},
-			action: &workflow.Action{
-				Req:     testplugin.Req{Arg: "error", Sleep: time.Second},
-				Timeout: 10 * time.Millisecond,
-				State:   &workflow.State{},
-			},
+			action: func() *workflow.Action {
+				a := &workflow.Action{Req: testplugin.Req{Arg: "error", Sleep: time.Second}, Timeout: 10 * time.Millisecond}
+				a.State.Set(workflow.State{})
+				return a
+			}(),
 			wantAttempts: []*workflow.Attempt{
 				{
 					Err: &plugins.Error{
@@ -402,11 +359,11 @@ func TestExec(t *testing.T) {
 					struct{ Hello string }{},
 				},
 			},
-			action: &workflow.Action{
-				Req:     testplugin.Req{Arg: "ok"},
-				Timeout: 100 * time.Millisecond,
-				State:   &workflow.State{},
-			},
+			action: func() *workflow.Action {
+				a := &workflow.Action{Req: testplugin.Req{Arg: "ok"}, Timeout: 100 * time.Millisecond}
+				a.State.Set(workflow.State{})
+				return a
+			}(),
 			wantAttempts: []*workflow.Attempt{
 				{
 					Err: &plugins.Error{
@@ -428,11 +385,11 @@ func TestExec(t *testing.T) {
 					testplugin.Resp{Arg: "ok"},
 				},
 			},
-			action: &workflow.Action{
-				Req:     testplugin.Req{Arg: "ok"},
-				Timeout: 100 * time.Millisecond,
-				State:   &workflow.State{},
-			},
+			action: func() *workflow.Action {
+				a := &workflow.Action{Req: testplugin.Req{Arg: "ok"}, Timeout: 100 * time.Millisecond}
+				a.State.Set(workflow.State{})
+				return a
+			}(),
 			wantAttempts: []*workflow.Attempt{
 				{
 					Resp:  &testplugin.Resp{Arg: "ok"},
@@ -466,7 +423,7 @@ func TestExec(t *testing.T) {
 			}
 		}
 
-		if diff := pretty.Compare(test.wantAttempts, test.action.Attempts); diff != "" {
+		if diff := pretty.Compare(test.wantAttempts, test.action.Attempts.Get()); diff != "" {
 			t.Errorf("TestExec(%s): unexpected last attempt: -want/+got:\n%s", test.name, diff)
 		}
 	}

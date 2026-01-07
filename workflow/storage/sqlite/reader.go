@@ -149,7 +149,7 @@ func (r reader) buildSearchQuery(filters storage.Filters) (string, []any, map[st
 			if i == 0 {
 				build.WriteString(fmt.Sprintf(" state_status = %s", name))
 			} else {
-				build.WriteString(fmt.Sprintf(" AND state_status = %s", name))
+				build.WriteString(fmt.Sprintf(" OR state_status = %s", name))
 			}
 		}
 	}
@@ -242,7 +242,7 @@ func (r reader) listResultsFunc(stmt *sqlite.Stmt) (storage.ListResult, error) {
 	result.Name = stmt.GetText("name")
 	result.Descr = stmt.GetText("descr")
 	result.SubmitTime = time.Unix(0, stmt.GetInt64("submit_time"))
-	result.State = &workflow.State{
+	result.State = workflow.State{
 		Status: workflow.Status(stmt.GetInt64("state_status")),
 		Start:  time.Unix(0, stmt.GetInt64("state_start")),
 		End:    time.Unix(0, stmt.GetInt64("state_end")),

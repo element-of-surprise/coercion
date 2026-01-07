@@ -24,7 +24,7 @@ func TestDelete(t *testing.T) {
 	for item := range walk.Plan(planWithETag) {
 		setter := item.Value.(setters)
 		setter.SetState(
-			&workflow.State{
+			workflow.State{
 				Status: workflow.Running,
 				Start:  time.Now().UTC(),
 				End:    time.Now().UTC(),
