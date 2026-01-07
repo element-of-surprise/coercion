@@ -44,6 +44,22 @@ type NoSecrets struct {
 	}
 }
 
+type WithSlice struct {
+	Users []User
+}
+
+type WithMap struct {
+	Configs map[string]Config
+}
+
+type WithPtrSlice struct {
+	Users []*User
+}
+
+type WithPtrMap struct {
+	Configs map[string]*Config
+}
+
 type tagsStruct struct {
 	FieldA string `coerce:"secure"`
 	FieldB string `coerce:"secure,ignored"`
@@ -83,7 +99,7 @@ func TestGetTags(t *testing.T) {
 	}
 }
 
-func TestItem(t *testing.T) {
+func TestWalkValue(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
@@ -180,12 +196,139 @@ func TestItem(t *testing.T) {
 				return nc
 			}(),
 		},
+		{
+			name: "Success: slice of structs with secure fields",
+			input: []User{
+				{Username: "john", Password: "secret1"},
+				{Username: "jane", Password: "secret2"},
+			},
+			want: []User{
+				{Username: "john", Password: ""},
+				{Username: "jane", Password: ""},
+			},
+		},
+		{
+			name:  "Success: empty slice returns unchanged",
+			input: []User{},
+			want:  []User{},
+		},
+		{
+			name: "Success: slice of pointers to structs with secure fields",
+			input: []*User{
+				{Username: "john", Password: "secret1"},
+				{Username: "jane", Password: "secret2"},
+			},
+			want: []*User{
+				{Username: "john", Password: ""},
+				{Username: "jane", Password: ""},
+			},
+		},
+		{
+			name: "Success: map with struct values with secure fields",
+			input: map[string]Config{
+				"prod": {APIKey: "prod-key", Endpoint: "https://prod.example.com"},
+				"dev":  {APIKey: "dev-key", Endpoint: "https://dev.example.com"},
+			},
+			want: map[string]Config{
+				"prod": {APIKey: "", Endpoint: "https://prod.example.com"},
+				"dev":  {APIKey: "", Endpoint: "https://dev.example.com"},
+			},
+		},
+		{
+			name:  "Success: empty map returns unchanged",
+			input: map[string]Config{},
+			want:  map[string]Config{},
+		},
+		{
+			name: "Success: map with pointer to struct values with secure fields",
+			input: map[string]*Config{
+				"prod": {APIKey: "prod-key", Endpoint: "https://prod.example.com"},
+				"dev":  {APIKey: "dev-key", Endpoint: "https://dev.example.com"},
+			},
+			want: map[string]*Config{
+				"prod": {APIKey: "", Endpoint: "https://prod.example.com"},
+				"dev":  {APIKey: "", Endpoint: "https://dev.example.com"},
+			},
+		},
+		{
+			name: "Success: struct containing slice of structs",
+			input: WithSlice{
+				Users: []User{
+					{Username: "john", Password: "secret1"},
+					{Username: "jane", Password: "secret2"},
+				},
+			},
+			want: WithSlice{
+				Users: []User{
+					{Username: "john", Password: ""},
+					{Username: "jane", Password: ""},
+				},
+			},
+		},
+		{
+			name: "Success: struct containing map of structs",
+			input: WithMap{
+				Configs: map[string]Config{
+					"prod": {APIKey: "prod-key", Endpoint: "https://prod.example.com"},
+				},
+			},
+			want: WithMap{
+				Configs: map[string]Config{
+					"prod": {APIKey: "", Endpoint: "https://prod.example.com"},
+				},
+			},
+		},
+		{
+			name: "Success: struct containing slice of pointer structs",
+			input: WithPtrSlice{
+				Users: []*User{
+					{Username: "john", Password: "secret1"},
+				},
+			},
+			want: WithPtrSlice{
+				Users: []*User{
+					{Username: "john", Password: ""},
+				},
+			},
+		},
+		{
+			name: "Success: struct containing map of pointer structs",
+			input: WithPtrMap{
+				Configs: map[string]*Config{
+					"prod": {APIKey: "prod-key", Endpoint: "https://prod.example.com"},
+				},
+			},
+			want: WithPtrMap{
+				Configs: map[string]*Config{
+					"prod": {APIKey: "", Endpoint: "https://prod.example.com"},
+				},
+			},
+		},
+		{
+			name:  "Success: slice of non-structs returns unchanged",
+			input: []string{"a", "b", "c"},
+			want:  []string{"a", "b", "c"},
+		},
+		{
+			name:  "Success: map with non-struct values returns unchanged",
+			input: map[string]int{"a": 1, "b": 2},
+			want:  map[string]int{"a": 1, "b": 2},
+		},
+		{
+			name:  "Success: nil value returns unchanged",
+			input: nil,
+			want:  nil,
+		},
 	}
 
 	for _, test := range tests {
-		got := item(test.input)
+		got, err := walkValue(test.input, "", scrubHandler)
+		if err != nil {
+			t.Errorf("TestWalkValue(%s): unexpected error: %v", test.name, err)
+			continue
+		}
 		if diff := pretty.Compare(test.want, got); diff != "" {
-			t.Errorf("TestItem(%s): -want/+got:\n%s", test.name, diff)
+			t.Errorf("TestWalkValue(%s): -want/+got:\n%s", test.name, diff)
 		}
 	}
 }

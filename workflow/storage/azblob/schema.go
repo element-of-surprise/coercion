@@ -6,6 +6,7 @@ import (
 	"reflect"
 	"strings"
 	"time"
+	"unique"
 
 	"github.com/element-of-surprise/coercion/plugins"
 	"github.com/element-of-surprise/coercion/plugins/registry"
@@ -384,6 +385,8 @@ func entryToChecks(entry checksEntry) (*workflow.Checks, error) {
 	return c, nil
 }
 
+var stateZero = unique.Make(workflow.State{})
+
 // sequenceToEntry converts a workflow.Sequence to a sequencesEntry.
 func sequenceToEntry(s *workflow.Sequence, pos int) (sequencesEntry, error) {
 	if s == nil {
@@ -404,7 +407,7 @@ func sequenceToEntry(s *workflow.Sequence, pos int) (sequencesEntry, error) {
 		StateStatus: workflow.NotStarted,
 	}
 
-	if state := s.State.Get(); state != (workflow.State{}) {
+	if state := s.State.Get(); unique.Make(state) != stateZero {
 		entry.StateStatus = state.Status
 		entry.StateStart = state.Start
 		entry.StateEnd = state.End

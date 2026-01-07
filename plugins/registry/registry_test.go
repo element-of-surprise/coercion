@@ -2,10 +2,11 @@ package registry
 
 import (
 	"errors"
-	"reflect"
 	"testing"
 	"time"
 
+	"github.com/element-of-surprise/coercion/plugins"
+	"github.com/element-of-surprise/coercion/workflow/context"
 	"github.com/gostdlib/base/retry/exponential"
 	"github.com/kylelemons/godebug/pretty"
 )
@@ -93,132 +94,123 @@ func TestValidatePolicy(t *testing.T) {
 	}
 }
 
-// Example structs for testing
-type User struct {
-	Username string
-	Password string // should trigger the secret regex
-	Email    string
+// Fake plugin request/response types for testing.
+type secureReq struct {
+	Data     string
+	Password string `coerce:"secure"`
 }
 
-type User2 struct {
-	Username string
-	Password string `coerce:"ignore"`
+type secureResp struct {
+	Result string
+	Token  string `coerce:"secure"`
 }
 
-type Config struct {
-	APIKey   string // should trigger the secret regex
-	Endpoint string
+type insecureReq struct {
+	Data     string
+	Password string // Missing coerce tag - should trigger error
 }
 
-type NestedConfig struct {
-	Detail struct {
-		SigningKey string // should trigger the secret regex
+type insecureResp struct {
+	Result string
+	Token  string // Missing coerce tag - should trigger error
+}
+
+// fakePlugin implements plugins.Plugin for testing.
+type fakePlugin struct {
+	name     string
+	req      any
+	resp     any
+	isCheck  bool
+	policy   exponential.Policy
+	initErr  error
+}
+
+func (f *fakePlugin) Name() string                                         { return f.name }
+func (f *fakePlugin) Execute(ctx context.Context, req any) (any, *plugins.Error) { return nil, nil }
+func (f *fakePlugin) ValidateReq(req any) error                            { return nil }
+func (f *fakePlugin) Request() any                                         { return f.req }
+func (f *fakePlugin) Response() any                                        { return f.resp }
+func (f *fakePlugin) IsCheck() bool                                        { return f.isCheck }
+func (f *fakePlugin) RetryPolicy() exponential.Policy                      { return f.policy }
+func (f *fakePlugin) Init() error                                          { return f.initErr }
+
+func validPolicy() exponential.Policy {
+	return exponential.Policy{
+		InitialInterval:     100 * time.Millisecond,
+		Multiplier:          2.0,
+		RandomizationFactor: 0.5,
+		MaxInterval:         60 * time.Second,
 	}
 }
 
-type NestedConfig2 struct {
-	Detail struct {
-		SigningKey string `coerce:"secure"`
-	}
-}
-
-type NoSecrets struct {
-	Detail struct {
-		NothingHere string
-	}
-}
-
-// TestFindSecrets function
-func TestFindSecrets(t *testing.T) {
+func TestRegister(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		name  string
-		value any
-		err   bool
+		name    string
+		plugin  plugins.Plugin
+		wantErr bool
 	}{
 		{
-			name:  "No secrets",
-			value: &NoSecrets{},
+			name: "Success: plugin with secure request and response",
+			plugin: &fakePlugin{
+				name:   "test-plugin-secure",
+				req:    secureReq{},
+				resp:   secureResp{},
+				policy: validPolicy(),
+			},
+			wantErr: false,
 		},
 		{
-			name:  "Secrets field in User struct called Password, but it is not set",
-			value: &User{Username: "john_doe", Email: "john@example.com"},
-			err:   true,
+			name: "Error: plugin with insecure request field",
+			plugin: &fakePlugin{
+				name:   "test-plugin-insecure-req",
+				req:    insecureReq{},
+				resp:   secureResp{},
+				policy: validPolicy(),
+			},
+			wantErr: true,
 		},
 		{
-			name:  "Secrets field in User struct called Password, but field annotated with ignore",
-			value: &User2{Username: "john_doe", Password: "supersecret"},
+			name: "Error: plugin with insecure response field",
+			plugin: &fakePlugin{
+				name:   "test-plugin-insecure-resp",
+				req:    secureReq{},
+				resp:   insecureResp{},
+				policy: validPolicy(),
+			},
+			wantErr: true,
 		},
 		{
-			name:  "WithSecretPassword",
-			value: &User{Password: "supersecret"},
-			err:   true,
+			name: "Error: plugin with both insecure request and response",
+			plugin: &fakePlugin{
+				name:   "test-plugin-insecure-both",
+				req:    insecureReq{},
+				resp:   insecureResp{},
+				policy: validPolicy(),
+			},
+			wantErr: true,
 		},
 		{
-			name:  "ConfigWithAPIKey",
-			value: Config{APIKey: "12345"},
-			err:   true,
-		},
-		{
-			name:  "NestedConfigWithSigningKey",
-			value: NestedConfig{Detail: struct{ SigningKey string }{SigningKey: "key123"}},
-			err:   true,
-		},
-		{
-			name: "NestedConfigWithSecureSigningKey, but field annotated with secure",
-			value: &NestedConfig2{Detail: struct {
-				SigningKey string `coerce:"secure"`
-			}{SigningKey: "key123"}},
+			name: "Success: plugin with non-struct request and response",
+			plugin: &fakePlugin{
+				name:   "test-plugin-non-struct",
+				req:    "string-request",
+				resp:   42,
+				policy: validPolicy(),
+			},
+			wantErr: false,
 		},
 	}
 
 	for _, test := range tests {
-		err := findSecrets(test.value, "")
+		reg := New()
+		err := reg.Register(test.plugin)
 		switch {
-		case err == nil && test.err:
-			t.Errorf("TestFindSecrets(%v): got err == nil, want err != nil", test.name)
-		case err != nil && !test.err:
-			t.Errorf("TestFindSecrets(%v): got err != %v, want err == nil", test.name, err)
-		}
-	}
-}
-
-type tagsStruct struct {
-	FieldA string `coerce:"secure"`
-	FieldB string `coerce:"secure,ignored"`
-	FieldC string `coerce:" "`
-}
-
-func TestGetTags(t *testing.T) {
-	t.Parallel()
-
-	tests := []struct {
-		name string
-		f    reflect.StructField
-		want tags
-	}{
-		{
-			name: "Success: FieldA",
-			f:    reflect.TypeOf(tagsStruct{}).Field(0),
-			want: tags{"secure": true},
-		},
-		{
-			name: "Success: FieldB",
-			f:    reflect.TypeOf(tagsStruct{}).Field(1),
-			want: tags{"secure": true, "ignored": true},
-		},
-		{
-			name: "Success: FieldC",
-			f:    reflect.TypeOf(tagsStruct{}).Field(2),
-			want: nil,
-		},
-	}
-
-	for _, test := range tests {
-		got := getTags(test.f)
-		if diff := pretty.Compare(test.want, got); diff != "" {
-			t.Errorf("TestGetTags(%s): -want/+got:\n%s", test.name, diff)
+		case err == nil && test.wantErr:
+			t.Errorf("TestRegister(%s): got err == nil, want err != nil", test.name)
+		case err != nil && !test.wantErr:
+			t.Errorf("TestRegister(%s): got err == %v, want err == nil", test.name, err)
 		}
 	}
 }
