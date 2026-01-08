@@ -33,15 +33,15 @@
                 </tr>
                 <tr>
                     <th>Start time</th>
-                    <td class="hover:bg-yellow-400">{{time .State.Start}}</td>
+                    <td class="hover:bg-yellow-400">{{time .State.Get.Start}}</td>
                 </tr>
                 <tr>
                     <th>End time</th>
-                    <td class="hover:bg-yellow-400">{{time .State.End}}</td>
+                    <td class="hover:bg-yellow-400">{{time .State.Get.End}}</td>
                 </tr>
                 <tr>
                     <th>Status</th>
-                    <td class="hover:bg-yellow-400"><span style="color:{{statusColor .State.Status}}">{{.State.Status}}</span></td>
+                    <td class="hover:bg-yellow-400"><span style="color:{{statusColor .State.Get.Status}}">{{.State.Get.Status}}</span></td>
                 </tr>
             </table>
         </div> {{/*<div class="summary m-5 p-5">*/}}
@@ -70,7 +70,7 @@
                     <tr class="group">
                         <td class="group-hover:bg-yellow-400"><a href="./actions/{{.ID}}.html">{{.Name}}</a></td>
                         <td class="group-hover:bg-yellow-400">{{.Descr}}</td>
-                        <td class="group-hover:bg-yellow-400"><span style="color:{{statusColor .State.Status}}">{{.State.Status}}</span></td>
+                        <td class="group-hover:bg-yellow-400"><span style="color:{{statusColor .State.Get.Status}}">{{.State.Get.Status}}</span></td>
                     </tr>
                 {{end}} {{/*{{range .Actions}}*/}}
             </table>
@@ -101,7 +101,7 @@
                     <tr class="group">
                         <td class="group-hover:bg-yellow-400"><a href="./actions/{{.ID}}.html">{{.Name}}</a></td>
                         <td class="group-hover:bg-yellow-400">{{.Descr}}</td>
-                        <td class="group-hover:bg-yellow-400"><span style="color:{{statusColor .State.Status}}">{{.State.Status}}</span></td>
+                        <td class="group-hover:bg-yellow-400"><span style="color:{{statusColor .State.Get.Status}}">{{.State.Get.Status}}</span></td>
                     </tr>
                 {{end}} {{/*{{range .Actions}}*/}}
             </table>
@@ -132,7 +132,7 @@
                     <tr class="group">
                         <td class="group-hover:bg-yellow-400"><a href="./actions/{{.ID}}.html">{{.Name}}</a></td>
                         <td class="group-hover:bg-yellow-400">{{.Descr}}</td>
-                        <td class="group-hover:bg-yellow-400"><span style="color:{{statusColor .State.Status}}">{{.State.Status}}</span></td>
+                        <td class="group-hover:bg-yellow-400"><span style="color:{{statusColor .State.Get.Status}}">{{.State.Get.Status}}</span></td>
                     </tr>
                 {{end}}
             </table>
@@ -163,7 +163,7 @@
                     <tr class="group">
                         <td class="group-hover:bg-yellow-400"><a href="./actions/{{.ID}}.html">{{.Name}}</a></td>
                         <td class="group-hover:bg-yellow-400">{{.Descr}}</td>
-                        <td class="group-hover:bg-yellow-400"><span style="color:{{statusColor .State.Status}}">{{.State.Status}}</span></td>
+                        <td class="group-hover:bg-yellow-400"><span style="color:{{statusColor .State.Get.Status}}">{{.State.Get.Status}}</span></td>
                     </tr>
                 {{end}} {{/*{{range .Actions}}*/}}
             </table>
@@ -194,7 +194,7 @@
                     <tr class="group">
                         <td class="group-hover:bg-yellow-400"><a href="./actions/{{.ID}}.html">{{.Name}}</a></td>
                         <td class="group-hover:bg-yellow-400">{{.Descr}}</td>
-                        <td class="group-hover:bg-yellow-400"><span style="color:{{statusColor .State.Status}}">{{.State.Status}}</span></td>
+                        <td class="group-hover:bg-yellow-400"><span style="color:{{statusColor .State.Get.Status}}">{{.State.Get.Status}}</span></td>
                     </tr>
                 {{end}} {{/*{{range .Actions}}*/}}
             </table>
@@ -235,18 +235,18 @@
                 </tr>
                 <tr>
                     <th>Start Time</th>
-                    {{ if isZeroTime .State.Start}}
+                    {{ if isZeroTime .State.Get.Start}}
                     <td class="hover:bg-yellow-400">-</td>
                     {{else}}
-                    <td class="hover:bg-yellow-400">{{time .State.Start}}</td>
+                    <td class="hover:bg-yellow-400">{{time .State.Get.Start}}</td>
                     {{end}}
                 </tr>
                     <tr>
                     <th>End Time</th>
-                    {{if isZeroTime .State.End}}
+                    {{if isZeroTime .State.Get.End}}
                     <td class="hover:bg-yellow-400">-</td>
                     {{else}}
-                    <td class="hover:bg-yellow-400">{{time .State.End}}</td>
+                    <td class="hover:bg-yellow-400">{{time .State.Get.End}}</td>
                     {{end}}
                 </tr>
                 <tr>
@@ -267,7 +267,7 @@
                 </tr>
                 <tr>
                     <th>Status</th>
-                    <td class="hover:bg-yellow-400"><span style="color:{{statusColor .State.Status}}">{{.State.Status}}</span></td>
+                    <td class="hover:bg-yellow-400"><span style="color:{{statusColor .State.Get.Status}}">{{.State.Get.Status}}</span></td>
                 </tr>
             </table>
         </div>
@@ -296,7 +296,7 @@
                     <tr class="group">
                         <td class="group-hover:bg-yellow-400"><a href="./actions/{{.ID}}.html">{{.Name}}</a></td>
                         <td class="group-hover:bg-yellow-400">{{.Descr}}</td>
-                        <td class="group-hover:bg-yellow-400"><span style="color:{{statusColor .State.Status}}">{{.State.Status}}</span></td>
+                        <td class="group-hover:bg-yellow-400"><span style="color:{{statusColor .State.Get.Status}}">{{.State.Get.Status}}</span></td>
                     </tr>
                 {{end}}
             </table>
@@ -327,7 +327,7 @@
                     <tr class="group">
                         <td class="group-hover:bg-yellow-400"><a href="./actions/{{.ID}}.html">{{.Name}}</a></td>
                         <td class="group-hover:bg-yellow-400">{{.Descr}}</td>
-                        <td class="group-hover:bg-yellow-400"><span style="color:{{statusColor .State.Status}}">{{.State.Status}}</span></td>
+                        <td class="group-hover:bg-yellow-400"><span style="color:{{statusColor .State.Get.Status}}">{{.State.Get.Status}}</span></td>
                     </tr>
                 {{end}}
             </table>
@@ -358,7 +358,7 @@
                     <tr class="group">
                         <td class="group-hover:bg-yellow-400"><a href="./actions/{{.ID}}.html">{{.Name}}</a></td>
                         <td class="group-hover:bg-yellow-400">{{.Descr}}</td>
-                        <td class="group-hover:bg-yellow-400"><span style="color:{{statusColor .State.Status}}">{{.State.Status}}</span></td>
+                        <td class="group-hover:bg-yellow-400"><span style="color:{{statusColor .State.Get.Status}}">{{.State.Get.Status}}</span></td>
                     </tr>
                 {{end}}
             </table>
@@ -389,7 +389,7 @@
                     <tr class="group">
                         <td class="group-hover:bg-yellow-400"><a href="./actions/{{.ID}}.html">{{.Name}}</a></td>
                         <td class="group-hover:bg-yellow-400">{{.Descr}}</td>
-                        <td class="group-hover:bg-yellow-400"><span style="color:{{statusColor .State.Status}}">{{.State.Status}}</span></td>
+                        <td class="group-hover:bg-yellow-400"><span style="color:{{statusColor .State.Get.Status}}">{{.State.Get.Status}}</span></td>
                     </tr>
                 {{end}}
             </table>
@@ -420,7 +420,7 @@
                     <tr class="group">
                         <td class="group-hover:bg-yellow-400"><a href="./actions/{{.ID}}.html">{{.Name}}</a></td>
                         <td class="group-hover:bg-yellow-400">{{.Descr}}</td>
-                        <td class="group-hover:bg-yellow-400"><span style="color:{{statusColor .State.Status}}">{{.State.Status}}</span></td>
+                        <td class="group-hover:bg-yellow-400"><span style="color:{{statusColor .State.Get.Status}}">{{.State.Get.Status}}</span></td>
                     </tr>
                 {{end}}
             </table>
@@ -451,7 +451,7 @@
                     <tr class="group">
                         <td class="group-hover:bg-yellow-400"><a href="./sequences/{{.ID}}.html">{{.Name}}</a></td>
                         <td class="group-hover:bg-yellow-400">{{.Descr}}</td>
-                        <td class="group-hover:bg-yellow-400"><span style="color:{{statusColor .State.Status}}">{{.State.Status}}</span></td>
+                        <td class="group-hover:bg-yellow-400"><span style="color:{{statusColor .State.Get.Status}}">{{.State.Get.Status}}</span></td>
                     </tr>
                 {{end}}
             </table>

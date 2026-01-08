@@ -34,15 +34,15 @@
                 </tr>
                 <tr>
                     <th>Start</th>
-                    <td class="hover:bg-yellow-400">{{time .State.Start}}</td>
+                    <td class="hover:bg-yellow-400">{{time .State.Get.Start}}</td>
                 </tr>
                 <tr>
                     <th>End</th>
-                    <td class="hover:bg-yellow-400">{{time .State.End}}</td>
+                    <td class="hover:bg-yellow-400">{{time .State.Get.End}}</td>
                 </tr>
                 <tr>
                     <th>Status</th>
-                    <td class="hover:bg-yellow-400"><span style="color:{{statusColor .State.Status}}">{{.State.Status}}</span></td>
+                    <td class="hover:bg-yellow-400"><span style="color:{{statusColor .State.Get.Status}}">{{.State.Get.Status}}</span></td>
                 </tr>
             </table>
         </div>
@@ -60,7 +60,7 @@
                     <th class="header text-left">Response</th>
                     <th class="header text-left">Status</th>
                 </tr>
-                {{range $i, $attempt := .Attempts}}
+                {{range $i, $attempt := .Attempts.Get}}
                     <tr class="group">
                         <td class="group-hover:bg-yellow-400">{{$i}}</td>
                         {{if .Err}}
