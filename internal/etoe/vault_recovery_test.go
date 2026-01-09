@@ -522,6 +522,202 @@ func TestAzblobRetentionRecovery(t *testing.T) {
 	log.Println("All retention boundary checks passed")
 }
 
+// TestAzblobOrphanedEntryRead tests that reading a plan with only an entry blob (orphaned entry)
+// returns a "not found" error and cleans up the orphaned entry.
+// This test cannot run in parallel as it modifies the vault state.
+func TestAzblobOrphanedEntryRead(t *testing.T) {
+	flag.Parse()
+
+	if *vaultType != "azblob" {
+		t.Skip("Skipping azblob orphaned entry read test: vault type is not azblob")
+	}
+
+	ctx := context.Background()
+	initGlobals()
+
+	azblobVault, ok := vault.(*azblob.Vault)
+	if !ok {
+		t.Fatalf("[TestAzblobOrphanedEntryRead]: expected vault to be *azblob.Vault, got %T", vault)
+	}
+
+	// Create a simple plan for testing
+	plan, err := createSimpleOrphanedPlan()
+	if err != nil {
+		t.Fatalf("[TestAzblobOrphanedEntryRead]: failed to create plan: %v", err)
+	}
+
+	log.Printf("[TestAzblobOrphanedEntryRead]: Creating orphaned entry for plan %s", plan.ID)
+
+	// Create only the entry blob (no object blob) - simulating a failed creation
+	if err := azblobVault.CreateOrphanedEntry(ctx, plan); err != nil {
+		t.Fatalf("[TestAzblobOrphanedEntryRead]: failed to create orphaned entry: %v", err)
+	}
+
+	// Verify entry blob exists before read attempt
+	entryExists, err := azblobVault.BlobExists(ctx, plan.ID, "entry")
+	if err != nil {
+		t.Fatalf("[TestAzblobOrphanedEntryRead]: failed to check entry blob existence: %v", err)
+	}
+	if !entryExists {
+		t.Fatalf("[TestAzblobOrphanedEntryRead]: entry blob should exist before read attempt")
+	}
+
+	// Verify object blob does NOT exist
+	objectExists, err := azblobVault.BlobExists(ctx, plan.ID, "object")
+	if err != nil {
+		t.Fatalf("[TestAzblobOrphanedEntryRead]: failed to check object blob existence: %v", err)
+	}
+	if objectExists {
+		t.Fatalf("[TestAzblobOrphanedEntryRead]: object blob should NOT exist (this is an orphaned entry test)")
+	}
+
+	// Try to read the plan - should fail with "not found"
+	_, err = vault.Read(ctx, plan.ID)
+	if err == nil {
+		t.Fatalf("[TestAzblobOrphanedEntryRead]: expected error when reading orphaned entry, got nil")
+	}
+
+	log.Printf("[TestAzblobOrphanedEntryRead]: Read correctly failed with error: %v", err)
+
+	// Verify the orphaned entry blob was cleaned up
+	entryExists, err = azblobVault.BlobExists(ctx, plan.ID, "entry")
+	if err != nil {
+		t.Fatalf("[TestAzblobOrphanedEntryRead]: failed to check entry blob existence after read: %v", err)
+	}
+	if entryExists {
+		t.Errorf("[TestAzblobOrphanedEntryRead]: orphaned entry blob should have been deleted after read attempt")
+	} else {
+		log.Printf("[TestAzblobOrphanedEntryRead]: Orphaned entry blob correctly cleaned up")
+	}
+
+	log.Println("[TestAzblobOrphanedEntryRead]: Test passed - orphaned entry was detected and cleaned up on read")
+}
+
+// TestAzblobOrphanedEntryRecovery tests that recovery correctly handles orphaned entries
+// by deleting them instead of trying to recover them.
+// This test cannot run in parallel as it modifies the vault state.
+func TestAzblobOrphanedEntryRecovery(t *testing.T) {
+	flag.Parse()
+
+	if *vaultType != "azblob" {
+		t.Skip("Skipping azblob orphaned entry recovery test: vault type is not azblob")
+	}
+
+	ctx := context.Background()
+	initGlobals()
+
+	azblobVault, ok := vault.(*azblob.Vault)
+	if !ok {
+		t.Fatalf("[TestAzblobOrphanedEntryRecovery]: expected vault to be *azblob.Vault, got %T", vault)
+	}
+
+	// Create a simple plan for testing
+	plan, err := createSimpleOrphanedPlan()
+	if err != nil {
+		t.Fatalf("[TestAzblobOrphanedEntryRecovery]: failed to create plan: %v", err)
+	}
+
+	log.Printf("[TestAzblobOrphanedEntryRecovery]: Creating orphaned entry for plan %s", plan.ID)
+
+	// Create only the entry blob (no object blob) - simulating a failed creation
+	if err := azblobVault.CreateOrphanedEntry(ctx, plan); err != nil {
+		t.Fatalf("[TestAzblobOrphanedEntryRecovery]: failed to create orphaned entry: %v", err)
+	}
+
+	// Verify entry blob exists before recovery
+	entryExists, err := azblobVault.BlobExists(ctx, plan.ID, "entry")
+	if err != nil {
+		t.Fatalf("[TestAzblobOrphanedEntryRecovery]: failed to check entry blob existence: %v", err)
+	}
+	if !entryExists {
+		t.Fatalf("[TestAzblobOrphanedEntryRecovery]: entry blob should exist before recovery")
+	}
+
+	// Close the vault and recreate it to trigger recovery
+	if err := vault.Close(ctx); err != nil {
+		log.Printf("[TestAzblobOrphanedEntryRecovery]: Warning: error closing vault: %v", err)
+	}
+
+	log.Println("[TestAzblobOrphanedEntryRecovery]: Recreating vault to trigger recovery...")
+	if err := createVault(ctx); err != nil {
+		t.Fatalf("[TestAzblobOrphanedEntryRecovery]: failed to recreate vault: %v", err)
+	}
+
+	// Re-get the vault reference after recreation
+	azblobVault, ok = vault.(*azblob.Vault)
+	if !ok {
+		t.Fatalf("[TestAzblobOrphanedEntryRecovery]: expected vault to be *azblob.Vault after recreation, got %T", vault)
+	}
+
+	// Create a workstream to trigger recovery
+	log.Println("[TestAzblobOrphanedEntryRecovery]: Creating workstream to trigger recovery...")
+	_, err = workstream.New(ctx, reg, vault)
+	if err != nil {
+		t.Fatalf("[TestAzblobOrphanedEntryRecovery]: failed to create workstream: %v", err)
+	}
+
+	// Give recovery time to run
+	time.Sleep(5 * time.Second)
+
+	// Verify the orphaned entry blob was cleaned up by recovery
+	entryExists, err = azblobVault.BlobExists(ctx, plan.ID, "entry")
+	if err != nil {
+		t.Fatalf("[TestAzblobOrphanedEntryRecovery]: failed to check entry blob existence after recovery: %v", err)
+	}
+	if entryExists {
+		t.Errorf("[TestAzblobOrphanedEntryRecovery]: orphaned entry blob should have been deleted by recovery")
+	} else {
+		log.Printf("[TestAzblobOrphanedEntryRecovery]: Orphaned entry blob correctly cleaned up by recovery")
+	}
+
+	log.Println("[TestAzblobOrphanedEntryRecovery]: Test passed - orphaned entry was detected and cleaned up by recovery")
+}
+
+// createSimpleOrphanedPlan creates a simple plan for orphaned entry testing.
+func createSimpleOrphanedPlan() (*workflow.Plan, error) {
+	ctx := context.Background()
+
+	seqs := &workflow.Sequence{
+		Name:  "orphaned-test-sequence",
+		Descr: "Sequence for orphaned entry test",
+		Actions: []*workflow.Action{
+			{
+				Name:    "orphaned-test-action",
+				Descr:   "Action for orphaned entry test",
+				Plugin:  testplugin.Name,
+				Timeout: 30 * time.Second,
+				Req:     testplugin.Req{Sleep: 1 * time.Second, Arg: "orphaned"},
+			},
+		},
+	}
+
+	build, err := builder.New("orphaned-entry-test", "Test plan for orphaned entry behavior")
+	if err != nil {
+		return nil, fmt.Errorf("failed to create builder: %w", err)
+	}
+
+	build.AddBlock(
+		builder.BlockArgs{
+			Name:        "orphaned-test-block",
+			Descr:       "Block for orphaned entry test",
+			Concurrency: 1,
+		},
+	)
+	build.AddSequence(clone.Sequence(ctx, seqs, cloneOpts...)).Up()
+
+	plan, err := build.Plan()
+	if err != nil {
+		return nil, fmt.Errorf("failed to build plan: %w", err)
+	}
+
+	// Set state to NotStarted (non-running)
+	plan.State.Set(workflow.State{
+		Status: workflow.NotStarted,
+	})
+
+	return plan, nil
+}
+
 // createPlanAtTime creates a simple plan with IDs timestamped at the specified time.
 // The plan is in Running state to simulate a plan that was interrupted mid-execution.
 func createPlanAtTime(submitTime time.Time) (*workflow.Plan, error) {

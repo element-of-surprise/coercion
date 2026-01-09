@@ -25,7 +25,7 @@ func setupDeleterTest(t *testing.T) (*blobops.Fake, deleter) {
 	// Create plugin registry
 	reg := registry.New()
 	reg.Register(&testPlugins.HelloPlugin{})
-	
+
 	planMu := planlocks.New(ctx)
 
 	// Create reader
@@ -172,10 +172,12 @@ func createAndUploadTestPlan(ctx context.Context, t *testing.T, fakeClient *blob
 
 	// Upload all sub-objects
 	uploader := &uploader{
-		mu:     planlocks.New(ctx),
-		client: fakeClient,
-		prefix: prefix,
-		pool:   context.Pool(ctx).Limited(ctx, "", 10),
+		mu:          planlocks.New(ctx),
+		client:      fakeClient,
+		prefix:      prefix,
+		planObjPool: context.Pool(ctx).Limited(ctx, "", 5),
+		blockPool:   context.Pool(ctx).Limited(ctx, "", 5),
+		leafObjPool: context.Pool(ctx).Limited(ctx, "", 20),
 	}
 
 	if err := uploader.uploadSubObjects(ctx, containerName, plan); err != nil {
@@ -216,7 +218,7 @@ func TestDelete(t *testing.T) {
 
 			// Verify blobs exist before deletion
 			if !fakeClient.BlobExists(containerName, planEntryBlobName(plan.ID)) {
-				t.Fatalf("[TestDelete]: plan entry blob should exist before deletion")
+				t.Fatalf("TestDelete: plan entry blob should exist before deletion")
 			}
 
 			// Delete the plan
@@ -224,10 +226,10 @@ func TestDelete(t *testing.T) {
 
 			switch {
 			case err == nil && test.wantErr:
-				t.Errorf("[TestDelete](%s): got err == nil, want err != nil", test.name)
+				t.Errorf("TestDelete(%s): got err == nil, want err != nil", test.name)
 				return
 			case err != nil && !test.wantErr:
-				t.Errorf("[TestDelete](%s): got err == %s, want err == nil", test.name, err)
+				t.Errorf("TestDelete(%s): got err == %s, want err == nil", test.name, err)
 				return
 			case err != nil:
 				return
@@ -235,22 +237,22 @@ func TestDelete(t *testing.T) {
 
 			// Verify plan entry blob is deleted
 			if fakeClient.BlobExists(containerName, planEntryBlobName(plan.ID)) {
-				t.Errorf("[TestDelete](%s): plan entry blob should be deleted", test.name)
+				t.Errorf("TestDelete(%s): plan entry blob should be deleted", test.name)
 			}
 
 			// Verify plan object blob is deleted
 			if fakeClient.BlobExists(containerName, planObjectBlobName(plan.ID)) {
-				t.Errorf("[TestDelete](%s): plan object blob should be deleted", test.name)
+				t.Errorf("TestDelete(%s): plan object blob should be deleted", test.name)
 			}
 
 			// Verify checks blobs are deleted
 			if plan.PreChecks != nil {
 				if fakeClient.BlobExists(containerName, checksBlobName(plan.ID, plan.PreChecks.ID)) {
-					t.Errorf("[TestDelete](%s): PreChecks blob should be deleted", test.name)
+					t.Errorf("TestDelete(%s): PreChecks blob should be deleted", test.name)
 				}
 				for _, action := range plan.PreChecks.Actions {
 					if fakeClient.BlobExists(containerName, actionBlobName(plan.ID, action.ID)) {
-						t.Errorf("[TestDelete](%s): PreChecks action blob should be deleted", test.name)
+						t.Errorf("TestDelete(%s): PreChecks action blob should be deleted", test.name)
 					}
 				}
 			}
@@ -259,26 +261,26 @@ func TestDelete(t *testing.T) {
 			if test.withBlocks && len(plan.Blocks) > 0 {
 				for _, block := range plan.Blocks {
 					if fakeClient.BlobExists(containerName, blockBlobName(plan.ID, block.ID)) {
-						t.Errorf("[TestDelete](%s): block blob should be deleted", test.name)
+						t.Errorf("TestDelete(%s): block blob should be deleted", test.name)
 					}
 
 					// Verify block's checks are deleted
 					if block.PreChecks != nil {
 						if fakeClient.BlobExists(containerName, checksBlobName(plan.ID, block.PreChecks.ID)) {
-							t.Errorf("[TestDelete](%s): block PreChecks blob should be deleted", test.name)
+							t.Errorf("TestDelete(%s): block PreChecks blob should be deleted", test.name)
 						}
 					}
 
 					// Verify sequences are deleted
 					for _, seq := range block.Sequences {
 						if fakeClient.BlobExists(containerName, sequenceBlobName(plan.ID, seq.ID)) {
-							t.Errorf("[TestDelete](%s): sequence blob should be deleted", test.name)
+							t.Errorf("TestDelete(%s): sequence blob should be deleted", test.name)
 						}
 
 						// Verify sequence actions are deleted
 						for _, action := range seq.Actions {
 							if fakeClient.BlobExists(containerName, actionBlobName(plan.ID, action.ID)) {
-								t.Errorf("[TestDelete](%s): sequence action blob should be deleted", test.name)
+								t.Errorf("TestDelete(%s): sequence action blob should be deleted", test.name)
 							}
 						}
 					}
@@ -341,10 +343,10 @@ func TestDeletePlanInContainer(t *testing.T) {
 
 			switch {
 			case err == nil && test.wantErr:
-				t.Errorf("[TestDeletePlanInContainer](%s): got err == nil, want err != nil", test.name)
+				t.Errorf("TestDeletePlanInContainer(%s): got err == nil, want err != nil", test.name)
 				return
 			case err != nil && !test.wantErr:
-				t.Errorf("[TestDeletePlanInContainer](%s): got err == %s, want err == nil", test.name, err)
+				t.Errorf("TestDeletePlanInContainer(%s): got err == %s, want err == nil", test.name, err)
 				return
 			case err != nil:
 				return
@@ -353,10 +355,10 @@ func TestDeletePlanInContainer(t *testing.T) {
 			if test.containerExists && test.uploadBlobs {
 				// Verify all blobs are deleted
 				if fakeClient.BlobExists(containerName, planEntryBlobName(plan.ID)) {
-					t.Errorf("[TestDeletePlanInContainer](%s): plan entry blob should be deleted", test.name)
+					t.Errorf("TestDeletePlanInContainer(%s): plan entry blob should be deleted", test.name)
 				}
 				if fakeClient.BlobExists(containerName, planObjectBlobName(plan.ID)) {
-					t.Errorf("[TestDeletePlanInContainer](%s): plan object blob should be deleted", test.name)
+					t.Errorf("TestDeletePlanInContainer(%s): plan object blob should be deleted", test.name)
 				}
 			}
 		})
@@ -388,17 +390,17 @@ func TestDeleteBlockBlobs(t *testing.T) {
 
 			// Verify block blob exists before deletion
 			if !fakeClient.BlobExists(containerName, blockBlobName(plan.ID, block.ID)) {
-				t.Fatalf("[TestDeleteBlockBlobs]: block blob should exist before deletion")
+				t.Fatalf("TestDeleteBlockBlobs: block blob should exist before deletion")
 			}
 
 			err := del.deleteBlockBlobs(ctx, containerName, plan.ID, block)
 
 			switch {
 			case err == nil && test.wantErr:
-				t.Errorf("[TestDeleteBlockBlobs](%s): got err == nil, want err != nil", test.name)
+				t.Errorf("TestDeleteBlockBlobs(%s): got err == nil, want err != nil", test.name)
 				return
 			case err != nil && !test.wantErr:
-				t.Errorf("[TestDeleteBlockBlobs](%s): got err == %s, want err == nil", test.name, err)
+				t.Errorf("TestDeleteBlockBlobs(%s): got err == %s, want err == nil", test.name, err)
 				return
 			case err != nil:
 				return
@@ -406,20 +408,20 @@ func TestDeleteBlockBlobs(t *testing.T) {
 
 			// Verify block blob is deleted
 			if fakeClient.BlobExists(containerName, blockBlobName(plan.ID, block.ID)) {
-				t.Errorf("[TestDeleteBlockBlobs](%s): block blob should be deleted", test.name)
+				t.Errorf("TestDeleteBlockBlobs(%s): block blob should be deleted", test.name)
 			}
 
 			// Verify sequences are deleted
 			for _, seq := range block.Sequences {
 				if fakeClient.BlobExists(containerName, sequenceBlobName(plan.ID, seq.ID)) {
-					t.Errorf("[TestDeleteBlockBlobs](%s): sequence blob should be deleted", test.name)
+					t.Errorf("TestDeleteBlockBlobs(%s): sequence blob should be deleted", test.name)
 				}
 			}
 
 			// Verify block checks are deleted
 			if block.PreChecks != nil {
 				if fakeClient.BlobExists(containerName, checksBlobName(plan.ID, block.PreChecks.ID)) {
-					t.Errorf("[TestDeleteBlockBlobs](%s): block checks blob should be deleted", test.name)
+					t.Errorf("TestDeleteBlockBlobs(%s): block checks blob should be deleted", test.name)
 				}
 			}
 		})
@@ -451,17 +453,17 @@ func TestDeleteSequenceBlobs(t *testing.T) {
 
 			// Verify sequence blob exists before deletion
 			if !fakeClient.BlobExists(containerName, sequenceBlobName(plan.ID, seq.ID)) {
-				t.Fatalf("[TestDeleteSequenceBlobs]: sequence blob should exist before deletion")
+				t.Fatalf("TestDeleteSequenceBlobs: sequence blob should exist before deletion")
 			}
 
 			err := del.deleteSequenceBlobs(ctx, containerName, plan.ID, seq)
 
 			switch {
 			case err == nil && test.wantErr:
-				t.Errorf("[TestDeleteSequenceBlobs](%s): got err == nil, want err != nil", test.name)
+				t.Errorf("TestDeleteSequenceBlobs(%s): got err == nil, want err != nil", test.name)
 				return
 			case err != nil && !test.wantErr:
-				t.Errorf("[TestDeleteSequenceBlobs](%s): got err == %s, want err == nil", test.name, err)
+				t.Errorf("TestDeleteSequenceBlobs(%s): got err == %s, want err == nil", test.name, err)
 				return
 			case err != nil:
 				return
@@ -469,13 +471,13 @@ func TestDeleteSequenceBlobs(t *testing.T) {
 
 			// Verify sequence blob is deleted
 			if fakeClient.BlobExists(containerName, sequenceBlobName(plan.ID, seq.ID)) {
-				t.Errorf("[TestDeleteSequenceBlobs](%s): sequence blob should be deleted", test.name)
+				t.Errorf("TestDeleteSequenceBlobs(%s): sequence blob should be deleted", test.name)
 			}
 
 			// Verify actions are deleted
 			for _, action := range seq.Actions {
 				if fakeClient.BlobExists(containerName, actionBlobName(plan.ID, action.ID)) {
-					t.Errorf("[TestDeleteSequenceBlobs](%s): action blob should be deleted", test.name)
+					t.Errorf("TestDeleteSequenceBlobs(%s): action blob should be deleted", test.name)
 				}
 			}
 		})
@@ -507,17 +509,17 @@ func TestDeleteChecksBlobs(t *testing.T) {
 
 			// Verify checks blob exists before deletion
 			if !fakeClient.BlobExists(containerName, checksBlobName(plan.ID, checks.ID)) {
-				t.Fatalf("[TestDeleteChecksBlobs]: checks blob should exist before deletion")
+				t.Fatalf("TestDeleteChecksBlobs: checks blob should exist before deletion")
 			}
 
 			err := del.deleteChecksBlobs(ctx, containerName, plan.ID, checks)
 
 			switch {
 			case err == nil && test.wantErr:
-				t.Errorf("[TestDeleteChecksBlobs](%s): got err == nil, want err != nil", test.name)
+				t.Errorf("TestDeleteChecksBlobs(%s): got err == nil, want err != nil", test.name)
 				return
 			case err != nil && !test.wantErr:
-				t.Errorf("[TestDeleteChecksBlobs](%s): got err == %s, want err == nil", test.name, err)
+				t.Errorf("TestDeleteChecksBlobs(%s): got err == %s, want err == nil", test.name, err)
 				return
 			case err != nil:
 				return
@@ -525,13 +527,13 @@ func TestDeleteChecksBlobs(t *testing.T) {
 
 			// Verify checks blob is deleted
 			if fakeClient.BlobExists(containerName, checksBlobName(plan.ID, checks.ID)) {
-				t.Errorf("[TestDeleteChecksBlobs](%s): checks blob should be deleted", test.name)
+				t.Errorf("TestDeleteChecksBlobs(%s): checks blob should be deleted", test.name)
 			}
 
 			// Verify actions are deleted
 			for _, action := range checks.Actions {
 				if fakeClient.BlobExists(containerName, actionBlobName(plan.ID, action.ID)) {
-					t.Errorf("[TestDeleteChecksBlobs](%s): action blob should be deleted", test.name)
+					t.Errorf("TestDeleteChecksBlobs(%s): action blob should be deleted", test.name)
 				}
 			}
 		})
@@ -577,10 +579,10 @@ func TestDeleteActionBlob(t *testing.T) {
 
 			switch {
 			case err == nil && test.wantErr:
-				t.Errorf("[TestDeleteActionBlob](%s): got err == nil, want err != nil", test.name)
+				t.Errorf("TestDeleteActionBlob(%s): got err == nil, want err != nil", test.name)
 				return
 			case err != nil && !test.wantErr:
-				t.Errorf("[TestDeleteActionBlob](%s): got err == %s, want err == nil", test.name, err)
+				t.Errorf("TestDeleteActionBlob(%s): got err == %s, want err == nil", test.name, err)
 				return
 			case err != nil:
 				return
@@ -588,7 +590,7 @@ func TestDeleteActionBlob(t *testing.T) {
 
 			// Verify action blob is deleted
 			if fakeClient.BlobExists(containerName, actionBlobName(plan.ID, action.ID)) {
-				t.Errorf("[TestDeleteActionBlob](%s): action blob should be deleted", test.name)
+				t.Errorf("TestDeleteActionBlob(%s): action blob should be deleted", test.name)
 			}
 		})
 	}

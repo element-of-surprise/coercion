@@ -541,17 +541,17 @@ func TestRecoveryContainerNames(t *testing.T) {
 
 			switch {
 			case err == nil && test.wantErr:
-				t.Errorf("[TestRecoveryContainerNames](%s): got err == nil, want err != nil", test.name)
+				t.Errorf("TestRecoveryContainerNames(%s): got err == nil, want err != nil", test.name)
 				return
 			case err != nil && !test.wantErr:
-				t.Errorf("[TestRecoveryContainerNames](%s): got err == %s, want err == nil", test.name, err)
+				t.Errorf("TestRecoveryContainerNames(%s): got err == %s, want err == nil", test.name, err)
 				return
 			case err != nil:
 				return
 			}
 
 			if diff := pretty.Compare(test.wantContainers, got); diff != "" {
-				t.Errorf("[TestRecoveryContainerNames](%s): -want +got:\n%s", test.name, diff)
+				t.Errorf("TestRecoveryContainerNames(%s): -want +got:\n%s", test.name, diff)
 			}
 		})
 	}

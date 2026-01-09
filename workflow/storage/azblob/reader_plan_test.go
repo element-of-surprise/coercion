@@ -7,8 +7,11 @@ import (
 	"github.com/element-of-surprise/coercion/plugins/registry"
 	"github.com/element-of-surprise/coercion/workflow"
 	"github.com/element-of-surprise/coercion/workflow/context"
+	"github.com/element-of-surprise/coercion/workflow/storage/azblob/internal/blobops"
+	"github.com/element-of-surprise/coercion/workflow/storage/azblob/internal/planlocks"
 	testPlugins "github.com/element-of-surprise/coercion/workflow/storage/sqlite/testing/plugins"
 	"github.com/go-json-experiment/json"
+	"golang.org/x/sync/singleflight"
 )
 
 // makeAction creates a test action with the given parameters and properly initialized State.
@@ -370,5 +373,85 @@ func TestFixActions(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestFetchNonRunningPlanOrphanedEntry(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	fakeClient := blobops.NewFake()
+	prefix := "test"
+
+	reg := registry.New()
+	reg.Register(&testPlugins.HelloPlugin{})
+
+	r := reader{
+		mu:            planlocks.New(ctx),
+		readFlight:    &singleflight.Group{},
+		existsFlight:  &singleflight.Group{},
+		prefix:        prefix,
+		client:        fakeClient,
+		reg:           reg,
+		retentionDays: 14,
+	}
+
+	plan := makePlan(
+		"Test Plan",
+		"Test Description",
+		makeChecks(
+			[]*workflow.Action{
+				makeAction("test action", "test action", testPlugins.HelloPluginName, testPlugins.HelloReq{Say: "hello"}, workflow.NotStarted),
+			},
+			workflow.NotStarted,
+		),
+		[]*workflow.Block{},
+		workflow.NotStarted, // NotStarted, so fetchNonRunningPlan will be called
+	)
+
+	containerName := containerForPlan(prefix, plan.ID)
+
+	if err := fakeClient.EnsureContainer(ctx, containerName); err != nil {
+		t.Fatalf("TestFetchNonRunningPlanOrphanedEntry: failed to create container: %v", err)
+	}
+
+	// Upload ONLY the entry blob (simulating a failed creation where object blob wasn't written)
+	md, err := planToMetadata(ctx, plan)
+	if err != nil {
+		t.Fatalf("TestFetchNonRunningPlanOrphanedEntry: failed to create metadata: %v", err)
+	}
+	md[mdPlanType] = toPtr(ptEntry)
+
+	planEntry, err := planToPlanEntry(plan)
+	if err != nil {
+		t.Fatalf("TestFetchNonRunningPlanOrphanedEntry: failed to create plan entry: %v", err)
+	}
+
+	planEntryData, err := json.Marshal(planEntry)
+	if err != nil {
+		t.Fatalf("TestFetchNonRunningPlanOrphanedEntry: failed to marshal plan entry: %v", err)
+	}
+
+	entryBlobName := planEntryBlobName(plan.ID)
+	if err := fakeClient.UploadBlob(ctx, containerName, entryBlobName, md, planEntryData); err != nil {
+		t.Fatalf("TestFetchNonRunningPlanOrphanedEntry: failed to upload plan entry: %v", err)
+	}
+
+	if !fakeClient.BlobExists(containerName, entryBlobName) {
+		t.Fatalf("TestFetchNonRunningPlanOrphanedEntry: entry blob should exist before fetch")
+	}
+
+	_, err = r.fetchNonRunningPlan(ctx, containerName, plan.ID)
+	if err == nil {
+		t.Fatalf("TestFetchNonRunningPlanOrphanedEntry: expected error when object blob missing")
+	}
+
+	// Verify the error is "not found"
+	if !blobops.IsNotFound(err) {
+		t.Errorf("TestFetchNonRunningPlanOrphanedEntry: expected not found error, got: %v", err)
+	}
+
+	if fakeClient.BlobExists(containerName, entryBlobName) {
+		t.Errorf("TestFetchNonRunningPlanOrphanedEntry: orphaned entry blob should have been deleted")
 	}
 }

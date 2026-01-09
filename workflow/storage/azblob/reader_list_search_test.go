@@ -307,21 +307,21 @@ func TestSearchWithRetentionPeriod(t *testing.T) {
 
 			resultCh, err := r.Search(ctx, test.filters)
 			if err != nil {
-				t.Errorf("[TestSearchWithRetentionPeriod](%s): got err == %v, want err == nil", test.name, err)
+				t.Errorf("TestSearchWithRetentionPeriod(%s): got err == %v, want err == nil", test.name, err)
 				return
 			}
 
 			var results []storage.ListResult
 			for res := range resultCh {
 				if res.Err != nil {
-					t.Errorf("[TestSearchWithRetentionPeriod](%s): got result err == %v", test.name, res.Err)
+					t.Errorf("TestSearchWithRetentionPeriod(%s): got result err == %v", test.name, res.Err)
 					continue
 				}
 				results = append(results, res.Result)
 			}
 
 			if len(results) != test.wantPlanCount {
-				t.Errorf("[TestSearchWithRetentionPeriod](%s): got %d results, want %d", test.name, len(results), test.wantPlanCount)
+				t.Errorf("TestSearchWithRetentionPeriod(%s): got %d results, want %d", test.name, len(results), test.wantPlanCount)
 			}
 		})
 	}
@@ -404,21 +404,21 @@ func TestSearchRecoveryScenario(t *testing.T) {
 
 			resultCh, err := r.Search(ctx, storage.Filters{ByStatus: []workflow.Status{workflow.Running}})
 			if err != nil {
-				t.Errorf("[TestSearchRecoveryScenario](%s): got err == %v, want err == nil", test.name, err)
+				t.Errorf("TestSearchRecoveryScenario(%s): got err == %v, want err == nil", test.name, err)
 				return
 			}
 
 			var results []storage.ListResult
 			for res := range resultCh {
 				if res.Err != nil {
-					t.Errorf("[TestSearchRecoveryScenario](%s): got result err == %v", test.name, res.Err)
+					t.Errorf("TestSearchRecoveryScenario(%s): got result err == %v", test.name, res.Err)
 					continue
 				}
 				results = append(results, res.Result)
 			}
 
 			if len(results) != test.wantRecoveredCount {
-				t.Errorf("[TestSearchRecoveryScenario](%s): got %d recovered plans, want %d. %s", test.name, len(results), test.wantRecoveredCount, test.description)
+				t.Errorf("TestSearchRecoveryScenario(%s): got %d recovered plans, want %d. %s", test.name, len(results), test.wantRecoveredCount, test.description)
 			}
 		})
 	}
@@ -530,21 +530,21 @@ func TestListWithRetentionPeriod(t *testing.T) {
 
 			resultCh, err := r.List(ctx, test.limit)
 			if err != nil {
-				t.Errorf("[TestListWithRetentionPeriod](%s): got err == %v, want err == nil", test.name, err)
+				t.Errorf("TestListWithRetentionPeriod(%s): got err == %v, want err == nil", test.name, err)
 				return
 			}
 
 			var results []storage.ListResult
 			for res := range resultCh {
 				if res.Err != nil {
-					t.Errorf("[TestListWithRetentionPeriod](%s): got result err == %v", test.name, res.Err)
+					t.Errorf("TestListWithRetentionPeriod(%s): got result err == %v", test.name, res.Err)
 					continue
 				}
 				results = append(results, res.Result)
 			}
 
 			if len(results) != test.wantPlanCount {
-				t.Errorf("[TestListWithRetentionPeriod](%s): got %d results, want %d", test.name, len(results), test.wantPlanCount)
+				t.Errorf("TestListWithRetentionPeriod(%s): got %d results, want %d", test.name, len(results), test.wantPlanCount)
 			}
 		})
 	}

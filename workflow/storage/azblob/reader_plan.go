@@ -83,6 +83,7 @@ func (r reader) fetchPlanObjectMeta(ctx context.Context, id uuid.UUID) (planMeta
 }
 
 // fetchNonRunningPlan fetches a non-running plan by downloading the full workflow.Plan object blob.
+// If the object blob doesn't exist but the entry does, the orphaned entry is cleaned up.
 func (r reader) fetchNonRunningPlan(ctx context.Context, containerName string, id uuid.UUID) (*workflow.Plan, error) {
 	// Not running - read the workflow.Plan object blob directly
 	objectBlobName := planObjectBlobName(id)
@@ -90,6 +91,9 @@ func (r reader) fetchNonRunningPlan(ctx context.Context, containerName string, i
 	data, err := r.client.GetBlob(ctx, containerName, objectBlobName)
 	if err != nil {
 		if blobops.IsNotFound(err) {
+			// Object blob doesn't exist but entry does (we got here via entry metadata).
+			// This is an orphaned entry from a failed creation - clean it up.
+			_ = r.client.DeleteBlob(ctx, containerName, planEntryBlobName(id))
 			return nil, err
 		}
 		return nil, errors.E(ctx, errors.CatInternal, errors.TypeStorageGet, fmt.Errorf("failed to download plan object blob: %w", err))

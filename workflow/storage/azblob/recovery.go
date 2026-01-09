@@ -100,12 +100,19 @@ func (r recovery) recoverPlansInContainer(ctx context.Context, containerName str
 }
 
 // recoverPlan recovers a single plan by ensuring all sub-object blobs exist.
+// If the plan entry exists but the object blob doesn't, the orphaned entry is deleted.
 func (r recovery) recoverPlan(ctx context.Context, containerName string, planID uuid.UUID) error {
 	if r.testRecoverPlan != nil && testing.Testing() {
 		return r.testRecoverPlan(ctx, containerName, planID)
 	}
 	pom, err := r.reader.fetchPlanObjectMeta(ctx, planID)
 	if err != nil {
+		if blobops.IsNotFound(err) {
+			// Object blob doesn't exist but entry does - delete the orphaned entry blob.
+			// This can happen if plan creation failed after writing the entry but before writing the object.
+			_ = r.reader.client.DeleteBlob(ctx, containerName, planEntryBlobName(planID))
+			return nil
+		}
 		return errors.E(ctx, errors.CatInternal, errors.TypeStorageGet, fmt.Errorf("failed to read plan object meta for recovery: %w", err))
 	}
 
