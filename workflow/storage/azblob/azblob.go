@@ -135,10 +135,12 @@ func New(ctx context.Context, args Args, options ...Option) (*Vault, error) {
 	opsClient := &blobops.Real{Client: client}
 
 	uploader := &uploader{
-		client: opsClient,
-		mu:     v.mu,
-		prefix: v.prefix,
-		pool:   context.Pool(ctx).Limited(ctx, "azBlobUploader", 20),
+		client:      opsClient,
+		mu:          v.mu,
+		prefix:      v.prefix,
+		planObjPool: context.Pool(ctx).Limited(ctx, "azBlobUploaderTop", 5),
+		blockPool:   context.Pool(ctx).Limited(ctx, "azBlobUploaderSub", 5),
+		leafObjPool: context.Pool(ctx).Limited(ctx, "azBlobUploaderLeaf", 20),
 	}
 
 	v.reader = reader{
@@ -179,6 +181,61 @@ func New(ctx context.Context, args Args, options ...Option) (*Vault, error) {
 // This is intended for testing purposes only.
 func (v *Vault) ReadDirect(ctx context.Context, id uuid.UUID) (*workflow.Plan, error) {
 	return v.reader.ReadDirect(ctx, id)
+}
+
+// CreateOrphanedEntry creates only the entry blob for a plan without creating the object blob.
+// This simulates a failed creation where the entry was written but the object was not.
+// This is intended for testing purposes only.
+func (v *Vault) CreateOrphanedEntry(ctx context.Context, p *workflow.Plan) error {
+	if p == nil {
+		return errors.E(ctx, errors.CatInternal, errors.TypeParameter, fmt.Errorf("plan cannot be nil"))
+	}
+	if p.ID == uuid.Nil {
+		return errors.E(ctx, errors.CatUser, errors.TypeParameter, fmt.Errorf("plan ID cannot be nil"))
+	}
+
+	containerName := containerForPlan(v.prefix, p.ID)
+
+	if err := v.creator.uploader.client.EnsureContainer(ctx, containerName); err != nil {
+		return errors.E(ctx, errors.CatInternal, errors.TypeStorageCreate, fmt.Errorf("failed to create container: %w", err))
+	}
+
+	md, err := planToMetadata(ctx, p)
+	if err != nil {
+		return errors.E(ctx, errors.CatInternal, errors.TypeStoragePut, fmt.Errorf("failed to convert plan to metadata: %w", err))
+	}
+
+	// Upload only the entry blob (no object blob)
+	if err := v.creator.uploader.uploadPlanEntry(ctx, p, md); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// BlobExists checks if a specific blob exists in the container for a plan.
+// blobType should be "entry" or "object" for plan blobs.
+// This is intended for testing purposes only.
+func (v *Vault) BlobExists(ctx context.Context, planID uuid.UUID, blobType string) (bool, error) {
+	containerName := containerForPlan(v.prefix, planID)
+	var blobName string
+	switch blobType {
+	case "entry":
+		blobName = planEntryBlobName(planID)
+	case "object":
+		blobName = planObjectBlobName(planID)
+	default:
+		return false, fmt.Errorf("unknown blob type: %s", blobType)
+	}
+
+	_, err := v.reader.client.GetMetadata(ctx, containerName, blobName)
+	if err == nil {
+		return true, nil
+	}
+	if blobops.IsNotFound(err) {
+		return false, nil
+	}
+	return false, err
 }
 
 // Teardown deletes all containers and blobs with the given prefix. This is intended for use in tests only.

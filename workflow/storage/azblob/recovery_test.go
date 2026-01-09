@@ -43,10 +43,12 @@ func setupRecoveryTest(t *testing.T) (*blobops.Fake, recovery) {
 
 	// Create uploader
 	u := &uploader{
-		mu:     planlocks.New(ctx),
-		client: fakeClient,
-		prefix: prefix,
-		pool:   context.Pool(ctx).Limited(ctx, "", 10),
+		mu:          planlocks.New(ctx),
+		client:      fakeClient,
+		prefix:      prefix,
+		planObjPool: context.Pool(ctx).Limited(ctx, "", 5),
+		blockPool:   context.Pool(ctx).Limited(ctx, "", 10),
+		leafObjPool: context.Pool(ctx).Limited(ctx, "", 20),
 	}
 
 	// Create recovery
@@ -200,12 +202,12 @@ func TestRecoveryBlobExists(t *testing.T) {
 			blobName := "test-blob"
 
 			if err := fakeClient.CreateContainer(ctx, containerName); err != nil {
-				t.Fatalf("[TestRecoveryBlobExists]: failed to create container: %v", err)
+				t.Fatalf("TestRecoveryBlobExists: failed to create container: %v", err)
 			}
 
 			if test.setupBlob {
 				if err := fakeClient.UploadBlob(ctx, containerName, blobName, nil, []byte("test data")); err != nil {
-					t.Fatalf("[TestRecoveryBlobExists]: failed to upload blob: %v", err)
+					t.Fatalf("TestRecoveryBlobExists: failed to upload blob: %v", err)
 				}
 			}
 
@@ -213,19 +215,68 @@ func TestRecoveryBlobExists(t *testing.T) {
 
 			switch {
 			case err == nil && test.wantErr:
-				t.Errorf("[TestRecoveryBlobExists](%s): got err == nil, want err != nil", test.name)
+				t.Errorf("TestRecoveryBlobExists(%s): got err == nil, want err != nil", test.name)
 				return
 			case err != nil && !test.wantErr:
-				t.Errorf("[TestRecoveryBlobExists](%s): got err == %s, want err == nil", test.name, err)
+				t.Errorf("TestRecoveryBlobExists(%s): got err == %s, want err == nil", test.name, err)
 				return
 			case err != nil:
 				return
 			}
 
 			if exists != test.expectedExist {
-				t.Errorf("[TestRecoveryBlobExists](%s): got exists == %v, want exists == %v", test.name, exists, test.expectedExist)
+				t.Errorf("TestRecoveryBlobExists(%s): got exists == %v, want exists == %v", test.name, exists, test.expectedExist)
 			}
 		})
+	}
+}
+
+func TestRecoverPlanOrphanedEntry(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	fakeClient, rec := setupRecoveryTest(t)
+
+	plan := createTestPlan(false)
+	containerName := containerForPlan("test", plan.ID)
+
+	if err := fakeClient.EnsureContainer(ctx, containerName); err != nil {
+		t.Fatalf("TestRecoverPlanOrphanedEntry: failed to create container: %v", err)
+	}
+
+	// Upload ONLY the entry blob (simulating a failed creation where object blob wasn't written)
+	md, err := planToMetadata(ctx, plan)
+	if err != nil {
+		t.Fatalf("TestRecoverPlanOrphanedEntry: failed to create metadata: %v", err)
+	}
+	md[mdPlanType] = toPtr(ptEntry)
+
+	planEntry, err := planToPlanEntry(plan)
+	if err != nil {
+		t.Fatalf("TestRecoverPlanOrphanedEntry: failed to create plan entry: %v", err)
+	}
+
+	planEntryData, err := json.Marshal(planEntry)
+	if err != nil {
+		t.Fatalf("TestRecoverPlanOrphanedEntry: failed to marshal plan entry: %v", err)
+	}
+
+	entryBlobName := planEntryBlobName(plan.ID)
+	if err := fakeClient.UploadBlob(ctx, containerName, entryBlobName, md, planEntryData); err != nil {
+		t.Fatalf("TestRecoverPlanOrphanedEntry: failed to upload plan entry: %v", err)
+	}
+
+	if !fakeClient.BlobExists(containerName, entryBlobName) {
+		t.Fatalf("TestRecoverPlanOrphanedEntry: entry blob should exist before recovery")
+	}
+
+	err = rec.recoverPlan(ctx, containerName, plan.ID)
+	if err != nil {
+		t.Fatalf("TestRecoverPlanOrphanedEntry: got err == %s, want err == nil", err)
+	}
+
+	if fakeClient.BlobExists(containerName, entryBlobName) {
+		t.Errorf("TestRecoverPlanOrphanedEntry: orphaned entry blob should have been deleted")
 	}
 }
 
@@ -302,14 +353,16 @@ func TestRecoverPlan(t *testing.T) {
 			containerName := containerForPlan("test", plan.ID)
 
 			u := &uploader{
-				mu:     planlocks.New(ctx),
-				client: fakeClient,
-				prefix: "test",
-				pool:   context.Pool(ctx).Limited(ctx, "", 10),
+				mu:          planlocks.New(ctx),
+				client:      fakeClient,
+				prefix:      "test",
+				planObjPool: context.Pool(ctx).Limited(ctx, "", 5),
+				blockPool:   context.Pool(ctx).Limited(ctx, "", 5),
+				leafObjPool: context.Pool(ctx).Limited(ctx, "", 20),
 			}
 
 			if err := u.uploadSubObjects(ctx, containerName, plan); err != nil {
-				t.Fatalf("[TestRecoverPlan]: failed to upload sub-objects: %v", err)
+				t.Fatalf("TestRecoverPlan: failed to upload sub-objects: %v", err)
 			}
 
 			// Delete the blobs we want to be missing
@@ -329,7 +382,7 @@ func TestRecoverPlan(t *testing.T) {
 				}
 				if blobName != "" {
 					if err := fakeClient.DeleteBlob(ctx, containerName, blobName); err != nil {
-						t.Fatalf("[TestRecoverPlan]: failed to delete blob %s: %v", blobName, err)
+						t.Fatalf("TestRecoverPlan: failed to delete blob %s: %v", blobName, err)
 					}
 				}
 			}
@@ -338,10 +391,10 @@ func TestRecoverPlan(t *testing.T) {
 
 			switch {
 			case err == nil && test.wantErr:
-				t.Errorf("[TestRecoverPlan](%s): got err == nil, want err != nil", test.name)
+				t.Errorf("TestRecoverPlan(%s): got err == nil, want err != nil", test.name)
 				return
 			case err != nil && !test.wantErr:
-				t.Errorf("[TestRecoverPlan](%s): got err == %s, want err == nil", test.name, err)
+				t.Errorf("TestRecoverPlan(%s): got err == %s, want err == nil", test.name, err)
 				return
 			case err != nil:
 				return
@@ -365,7 +418,7 @@ func TestRecoverPlan(t *testing.T) {
 				if blobName != "" {
 					exists := fakeClient.BlobExists(containerName, blobName)
 					if !exists {
-						t.Errorf("[TestRecoverPlan](%s): expected blob %s to be recovered, but it doesn't exist", test.name, blobName)
+						t.Errorf("TestRecoverPlan(%s): expected blob %s to be recovered, but it doesn't exist", test.name, blobName)
 					}
 				}
 			}
@@ -426,7 +479,7 @@ func TestRecoverPlansInContainer(t *testing.T) {
 
 			// Create container in fake client
 			if err := fakeClient.CreateContainer(ctx, containerName); err != nil {
-				t.Fatalf("[TestRecoverPlansInContainer]: failed to create container: %v", err)
+				t.Fatalf("TestRecoverPlansInContainer: failed to create container: %v", err)
 			}
 
 			plans := make([]*workflow.Plan, test.numPlans)
@@ -472,10 +525,10 @@ func TestRecoverPlansInContainer(t *testing.T) {
 
 			switch {
 			case err == nil && test.wantErr:
-				t.Errorf("[TestRecoverPlansInContainer](%s): got err == nil, want err != nil", test.name)
+				t.Errorf("TestRecoverPlansInContainer(%s): got err == nil, want err != nil", test.name)
 				return
 			case err != nil && !test.wantErr:
-				t.Errorf("[TestRecoverPlansInContainer](%s): got err == %s, want err == nil", test.name, err)
+				t.Errorf("TestRecoverPlansInContainer(%s): got err == %s, want err == nil", test.name, err)
 				return
 			case err != nil:
 				return
@@ -484,7 +537,7 @@ func TestRecoverPlansInContainer(t *testing.T) {
 			// Verify all plans were attempted to be recovered
 			for i, plan := range plans {
 				if _, recovered := recoveredPlans.Get(plan.ID); !recovered {
-					t.Errorf("[TestRecoverPlansInContainer](%s): plan %d (ID: %s) was not recovered", test.name, i, plan.ID)
+					t.Errorf("TestRecoverPlansInContainer(%s): plan %d (ID: %s) was not recovered", test.name, i, plan.ID)
 				}
 			}
 		})
@@ -525,19 +578,21 @@ func TestEnsureActionBlob(t *testing.T) {
 
 			containerName := containerForPlan("test", plan.ID)
 			if err := fakeClient.CreateContainer(ctx, containerName); err != nil {
-				t.Fatalf("[TestEnsureActionBlob]: failed to create container: %v", err)
+				t.Fatalf("TestEnsureActionBlob: failed to create container: %v", err)
 			}
 
 			if test.setupBlob {
 				// Upload the action blob
 				u := &uploader{
-					mu:     planlocks.New(ctx),
-					client: fakeClient,
-					prefix: "test",
-					pool:   context.Pool(ctx).Limited(ctx, "", 10),
+					mu:          planlocks.New(ctx),
+					client:      fakeClient,
+					prefix:      "test",
+					planObjPool: context.Pool(ctx).Limited(ctx, "", 5),
+					blockPool:   context.Pool(ctx).Limited(ctx, "", 5),
+					leafObjPool: context.Pool(ctx).Limited(ctx, "", 20),
 				}
 				if err := u.uploadActionBlob(ctx, containerName, plan.ID, action, 0); err != nil {
-					t.Fatalf("[TestEnsureActionBlob]: failed to upload action blob: %v", err)
+					t.Fatalf("TestEnsureActionBlob: failed to upload action blob: %v", err)
 				}
 			}
 
@@ -551,10 +606,10 @@ func TestEnsureActionBlob(t *testing.T) {
 
 			switch {
 			case err == nil && test.wantErr:
-				t.Errorf("[TestEnsureActionBlob](%s): got err == nil, want err != nil", test.name)
+				t.Errorf("TestEnsureActionBlob(%s): got err == nil, want err != nil", test.name)
 				return
 			case err != nil && !test.wantErr:
-				t.Errorf("[TestEnsureActionBlob](%s): got err == %s, want err == nil", test.name, err)
+				t.Errorf("TestEnsureActionBlob(%s): got err == %s, want err == nil", test.name, err)
 				return
 			case err != nil:
 				return
@@ -564,7 +619,7 @@ func TestEnsureActionBlob(t *testing.T) {
 			actionBlobName := actionBlobName(plan.ID, action.ID)
 			exists := fakeClient.BlobExists(containerName, actionBlobName)
 			if exists != test.wantExists {
-				t.Errorf("[TestEnsureActionBlob](%s): got exists == %v, want exists == %v", test.name, exists, test.wantExists)
+				t.Errorf("TestEnsureActionBlob(%s): got exists == %v, want exists == %v", test.name, exists, test.wantExists)
 			}
 		})
 	}
@@ -604,19 +659,21 @@ func TestEnsureChecksBlob(t *testing.T) {
 
 			containerName := containerForPlan("test", plan.ID)
 			if err := fakeClient.CreateContainer(ctx, containerName); err != nil {
-				t.Fatalf("[TestEnsureChecksBlob]: failed to create container: %v", err)
+				t.Fatalf("TestEnsureChecksBlob: failed to create container: %v", err)
 			}
 
 			if test.setupBlob {
 				// Upload the checks blob and its actions
 				u := &uploader{
-					mu:     planlocks.New(ctx),
-					client: fakeClient,
-					prefix: "test",
-					pool:   context.Pool(ctx).Limited(ctx, "", 10),
+					mu:          planlocks.New(ctx),
+					client:      fakeClient,
+					prefix:      "test",
+					planObjPool: context.Pool(ctx).Limited(ctx, "", 5),
+					blockPool:   context.Pool(ctx).Limited(ctx, "", 5),
+					leafObjPool: context.Pool(ctx).Limited(ctx, "", 20),
 				}
 				if err := u.uploadChecksBlob(ctx, containerName, plan.ID, checks); err != nil {
-					t.Fatalf("[TestEnsureChecksBlob]: failed to upload checks blob: %v", err)
+					t.Fatalf("TestEnsureChecksBlob: failed to upload checks blob: %v", err)
 				}
 			}
 
@@ -630,10 +687,10 @@ func TestEnsureChecksBlob(t *testing.T) {
 
 			switch {
 			case err == nil && test.wantErr:
-				t.Errorf("[TestEnsureChecksBlob](%s): got err == nil, want err != nil", test.name)
+				t.Errorf("TestEnsureChecksBlob(%s): got err == nil, want err != nil", test.name)
 				return
 			case err != nil && !test.wantErr:
-				t.Errorf("[TestEnsureChecksBlob](%s): got err == %s, want err == nil", test.name, err)
+				t.Errorf("TestEnsureChecksBlob(%s): got err == %s, want err == nil", test.name, err)
 				return
 			case err != nil:
 				return
@@ -643,7 +700,7 @@ func TestEnsureChecksBlob(t *testing.T) {
 			checksBlobName := checksBlobName(plan.ID, checks.ID)
 			exists := fakeClient.BlobExists(containerName, checksBlobName)
 			if exists != test.wantExists {
-				t.Errorf("[TestEnsureChecksBlob](%s): got checks blob exists == %v, want exists == %v", test.name, exists, test.wantExists)
+				t.Errorf("TestEnsureChecksBlob(%s): got checks blob exists == %v, want exists == %v", test.name, exists, test.wantExists)
 			}
 
 			// Verify action blobs exist
@@ -651,7 +708,7 @@ func TestEnsureChecksBlob(t *testing.T) {
 				actionBlobName := actionBlobName(plan.ID, action.ID)
 				exists := fakeClient.BlobExists(containerName, actionBlobName)
 				if exists != test.wantExists {
-					t.Errorf("[TestEnsureChecksBlob](%s): got action blob exists == %v, want exists == %v", test.name, exists, test.wantExists)
+					t.Errorf("TestEnsureChecksBlob(%s): got action blob exists == %v, want exists == %v", test.name, exists, test.wantExists)
 				}
 			}
 		})
@@ -692,19 +749,21 @@ func TestEnsureSequenceBlob(t *testing.T) {
 
 			containerName := containerForPlan("test", plan.ID)
 			if err := fakeClient.CreateContainer(ctx, containerName); err != nil {
-				t.Fatalf("[TestEnsureSequenceBlob]: failed to create container: %v", err)
+				t.Fatalf("TestEnsureSequenceBlob: failed to create container: %v", err)
 			}
 
 			if test.setupBlob {
 				// Upload the sequence blob and its actions
 				u := &uploader{
-					mu:     planlocks.New(ctx),
-					client: fakeClient,
-					prefix: "test",
-					pool:   context.Pool(ctx).Limited(ctx, "", 10),
+					mu:          planlocks.New(ctx),
+					client:      fakeClient,
+					prefix:      "test",
+					planObjPool: context.Pool(ctx).Limited(ctx, "", 5),
+					blockPool:   context.Pool(ctx).Limited(ctx, "", 5),
+					leafObjPool: context.Pool(ctx).Limited(ctx, "", 20),
 				}
 				if err := u.uploadSequenceBlob(ctx, containerName, plan.ID, seq, 0); err != nil {
-					t.Fatalf("[TestEnsureSequenceBlob]: failed to upload sequence blob: %v", err)
+					t.Fatalf("TestEnsureSequenceBlob: failed to upload sequence blob: %v", err)
 				}
 			}
 
@@ -718,10 +777,10 @@ func TestEnsureSequenceBlob(t *testing.T) {
 
 			switch {
 			case err == nil && test.wantErr:
-				t.Errorf("[TestEnsureSequenceBlob](%s): got err == nil, want err != nil", test.name)
+				t.Errorf("TestEnsureSequenceBlob(%s): got err == nil, want err != nil", test.name)
 				return
 			case err != nil && !test.wantErr:
-				t.Errorf("[TestEnsureSequenceBlob](%s): got err == %s, want err == nil", test.name, err)
+				t.Errorf("TestEnsureSequenceBlob(%s): got err == %s, want err == nil", test.name, err)
 				return
 			case err != nil:
 				return
@@ -731,7 +790,7 @@ func TestEnsureSequenceBlob(t *testing.T) {
 			seqBlobName := sequenceBlobName(plan.ID, seq.ID)
 			exists := fakeClient.BlobExists(containerName, seqBlobName)
 			if exists != test.wantExists {
-				t.Errorf("[TestEnsureSequenceBlob](%s): got sequence blob exists == %v, want exists == %v", test.name, exists, test.wantExists)
+				t.Errorf("TestEnsureSequenceBlob(%s): got sequence blob exists == %v, want exists == %v", test.name, exists, test.wantExists)
 			}
 
 			// Verify action blobs exist
@@ -739,7 +798,7 @@ func TestEnsureSequenceBlob(t *testing.T) {
 				actionBlobName := actionBlobName(plan.ID, action.ID)
 				exists := fakeClient.BlobExists(containerName, actionBlobName)
 				if exists != test.wantExists {
-					t.Errorf("[TestEnsureSequenceBlob](%s): got action blob exists == %v, want exists == %v", test.name, exists, test.wantExists)
+					t.Errorf("TestEnsureSequenceBlob(%s): got action blob exists == %v, want exists == %v", test.name, exists, test.wantExists)
 				}
 			}
 		})
@@ -780,19 +839,21 @@ func TestEnsureBlockBlob(t *testing.T) {
 
 			containerName := containerForPlan("test", plan.ID)
 			if err := fakeClient.CreateContainer(ctx, containerName); err != nil {
-				t.Fatalf("[TestEnsureBlockBlob]: failed to create container: %v", err)
+				t.Fatalf("TestEnsureBlockBlob: failed to create container: %v", err)
 			}
 
 			if test.setupBlob {
 				// Upload the block blob and its sub-objects
 				u := &uploader{
-					mu:     planlocks.New(ctx),
-					client: fakeClient,
-					prefix: "test",
-					pool:   context.Pool(ctx).Limited(ctx, "", 10),
+					mu:          planlocks.New(ctx),
+					client:      fakeClient,
+					prefix:      "test",
+					planObjPool: context.Pool(ctx).Limited(ctx, "", 5),
+					blockPool:   context.Pool(ctx).Limited(ctx, "", 5),
+					leafObjPool: context.Pool(ctx).Limited(ctx, "", 20),
 				}
 				if err := u.uploadBlockBlob(ctx, containerName, plan.ID, block, 0); err != nil {
-					t.Fatalf("[TestEnsureBlockBlob]: failed to upload block blob: %v", err)
+					t.Fatalf("TestEnsureBlockBlob: failed to upload block blob: %v", err)
 				}
 			}
 
@@ -806,10 +867,10 @@ func TestEnsureBlockBlob(t *testing.T) {
 
 			switch {
 			case err == nil && test.wantErr:
-				t.Errorf("[TestEnsureBlockBlob](%s): got err == nil, want err != nil", test.name)
+				t.Errorf("TestEnsureBlockBlob(%s): got err == nil, want err != nil", test.name)
 				return
 			case err != nil && !test.wantErr:
-				t.Errorf("[TestEnsureBlockBlob](%s): got err == %s, want err == nil", test.name, err)
+				t.Errorf("TestEnsureBlockBlob(%s): got err == %s, want err == nil", test.name, err)
 				return
 			case err != nil:
 				return
@@ -819,7 +880,7 @@ func TestEnsureBlockBlob(t *testing.T) {
 			blockBlobName := blockBlobName(plan.ID, block.ID)
 			exists := fakeClient.BlobExists(containerName, blockBlobName)
 			if exists != test.wantExists {
-				t.Errorf("[TestEnsureBlockBlob](%s): got block blob exists == %v, want exists == %v", test.name, exists, test.wantExists)
+				t.Errorf("TestEnsureBlockBlob(%s): got block blob exists == %v, want exists == %v", test.name, exists, test.wantExists)
 			}
 
 			// Verify sequence blobs exist
@@ -827,7 +888,7 @@ func TestEnsureBlockBlob(t *testing.T) {
 				seqBlobName := sequenceBlobName(plan.ID, seq.ID)
 				exists := fakeClient.BlobExists(containerName, seqBlobName)
 				if exists != test.wantExists {
-					t.Errorf("[TestEnsureBlockBlob](%s): got sequence blob exists == %v, want exists == %v", test.name, exists, test.wantExists)
+					t.Errorf("TestEnsureBlockBlob(%s): got sequence blob exists == %v, want exists == %v", test.name, exists, test.wantExists)
 				}
 			}
 		})

@@ -17,10 +17,12 @@ import (
 
 // uploader uploads a plan and its sub-objects to blob storage.
 type uploader struct {
-	mu     *planlocks.Group
-	client blobops.Ops
-	prefix string
-	pool   *worker.Pool
+	mu          *planlocks.Group
+	client      blobops.Ops
+	prefix      string
+	planObjPool *worker.Pool // For blocks and plan-level checks
+	blockPool   *worker.Pool // For sequences and block-level checks
+	leafObjPool *worker.Pool // For actions (leaf operations)
 }
 
 type uploadPlanType uint8
@@ -137,7 +139,7 @@ func (u *uploader) uploadPlanObject(ctx context.Context, p *workflow.Plan, md ma
 
 // uploadSubObjects uploads all sub-object blobs for a plan.
 func (u *uploader) uploadSubObjects(ctx context.Context, containerName string, p *workflow.Plan) error {
-	g := u.pool.Group()
+	g := u.planObjPool.Group()
 
 	for _, checks := range []*workflow.Checks{p.BypassChecks, p.PreChecks, p.PostChecks, p.ContChecks, p.DeferredChecks} {
 		if ctx.Err() != nil {
@@ -181,7 +183,7 @@ func (u *uploader) uploadBlockBlob(ctx context.Context, containerName string, pl
 		return fmt.Errorf("failed to marshal block: %w", err)
 	}
 
-	g := u.pool.Group()
+	g := u.blockPool.Group()
 
 	blockBlobName := blockBlobName(planID, block.ID)
 	g.Go(
@@ -221,6 +223,8 @@ func (u *uploader) uploadBlockBlob(ctx context.Context, containerName string, pl
 }
 
 // uploadSequenceBlob uploads a sequence blob and all its actions.
+// Uses leafPool for action uploads since actions are leaf operations with no children,
+// avoiding deadlock from nested waits in limited pools.
 func (u *uploader) uploadSequenceBlob(ctx context.Context, containerName string, planID uuid.UUID, seq *workflow.Sequence, pos int) error {
 	seqEntry, err := sequenceToEntry(seq, pos)
 	if err != nil {
@@ -232,7 +236,7 @@ func (u *uploader) uploadSequenceBlob(ctx context.Context, containerName string,
 		return fmt.Errorf("failed to marshal sequence: %w", err)
 	}
 
-	g := u.pool.Group()
+	g := u.leafObjPool.Group()
 
 	seqBlobName := sequenceBlobName(planID, seq.ID)
 	g.Go(
@@ -261,6 +265,8 @@ func (u *uploader) uploadSequenceBlob(ctx context.Context, containerName string,
 }
 
 // uploadChecksBlob uploads a checks blob and all its actions.
+// Uses leafPool for action uploads since actions are leaf operations with no children,
+// avoiding deadlock from nested waits in limited pools.
 func (u *uploader) uploadChecksBlob(ctx context.Context, containerName string, planID uuid.UUID, checks *workflow.Checks) error {
 	checksEntry, err := checksToEntry(checks)
 	if err != nil {
@@ -272,7 +278,7 @@ func (u *uploader) uploadChecksBlob(ctx context.Context, containerName string, p
 		return fmt.Errorf("failed to marshal checks: %w", err)
 	}
 
-	g := u.pool.Group()
+	g := u.leafObjPool.Group()
 
 	checksBlobName := checksBlobName(planID, checks.ID)
 	g.Go(
