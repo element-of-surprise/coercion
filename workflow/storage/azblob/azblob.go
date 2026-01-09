@@ -21,6 +21,7 @@ package azblob
 import (
 	"fmt"
 	"strings"
+	"testing"
 	"time"
 	"unsafe"
 
@@ -187,6 +188,9 @@ func (v *Vault) ReadDirect(ctx context.Context, id uuid.UUID) (*workflow.Plan, e
 // This simulates a failed creation where the entry was written but the object was not.
 // This is intended for testing purposes only.
 func (v *Vault) CreateOrphanedEntry(ctx context.Context, p *workflow.Plan) error {
+	if !testing.Testing() {
+		panic("CreateOrphanedEntry can only be used in testing")
+	}
 	if p == nil {
 		return errors.E(ctx, errors.CatInternal, errors.TypeParameter, fmt.Errorf("plan cannot be nil"))
 	}
@@ -217,6 +221,10 @@ func (v *Vault) CreateOrphanedEntry(ctx context.Context, p *workflow.Plan) error
 // blobType should be "entry" or "object" for plan blobs.
 // This is intended for testing purposes only.
 func (v *Vault) BlobExists(ctx context.Context, planID uuid.UUID, blobType string) (bool, error) {
+	if !testing.Testing() {
+		panic("CreateOrphanedEntry can only be used in testing")
+	}
+
 	containerName := containerForPlan(v.prefix, planID)
 	var blobName string
 	switch blobType {
