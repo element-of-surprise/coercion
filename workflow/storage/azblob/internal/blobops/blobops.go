@@ -110,7 +110,7 @@ func (r *Real) CreateContainer(ctx context.Context, containerName string) error 
 		_, err := containerClient.Create(ctx, nil)
 		if err != nil {
 			if IsConflict(err) {
-				context.Log(ctx).Debug(fmt.Sprintf("container(%s) already exists", containerName))
+				context.Log(ctx).Debug(ctx, fmt.Sprintf("container(%s) already exists", containerName))
 				return nil
 			}
 			if !IsRetriableError(err) {
