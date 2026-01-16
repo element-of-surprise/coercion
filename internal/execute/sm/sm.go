@@ -177,7 +177,7 @@ func (s *States) runtimeUpdate(ctx context.Context, plan *workflow.Plan) {
 		now := s.now()
 		plan.RuntimeUpdate.Set(now)
 		if err := s.store.UpdatePlan(ctx, plan); err != nil {
-			context.Log(ctx).Error(ctx, fmt.Sprintf("failed to write Plan last update time: %v", err))
+			context.Log(ctx).Error(fmt.Sprintf("failed to write Plan last update time: %v", err))
 		}
 	}
 }
@@ -719,7 +719,7 @@ func (s *States) End(req statemachine.Request[Data]) statemachine.Request[Data] 
 	req, err = statemachine.Run("finalStates", req)
 	if err != nil {
 		if errors.Is(err, ErrInternalFailure) {
-			context.Log(req.Ctx).Error(req.Ctx, fmt.Sprintf("failed to calculate final state of Plan: %s", err))
+			context.Log(req.Ctx).Error(fmt.Sprintf("failed to calculate final state of Plan: %s", err))
 		}
 	}
 	req.Next = nil
