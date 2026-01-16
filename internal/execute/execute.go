@@ -212,7 +212,7 @@ func (e *Plans) recover(ctx context.Context) error {
 	}
 
 	if len(req.Data.plans) == 0 {
-		context.Log(ctx).Info(ctx, "coercion: no plans to recover")
+		context.Log(ctx).Info("coercion: no plans to recover")
 		return nil
 	}
 
@@ -220,7 +220,7 @@ func (e *Plans) recover(ctx context.Context) error {
 	// runPlan starts its own goroutine and this is used to signal when the plan has started.
 	recoveryStarted := make([]chan struct{}, 0, len(req.Data.plans))
 	for _, plan := range req.Data.plans {
-		context.Log(ctx).Info(ctx, "coercion: recovered plan", "id", plan.ID, "status", plan.State.Get().Status)
+		context.Log(ctx).Info("coercion: recovered plan", "id", plan.ID, "status", plan.State.Get().Status)
 		w := make(chan struct{})
 		recoveryStarted = append(recoveryStarted, w)
 		e.runPlan(ctx, plan, w)
@@ -268,7 +268,7 @@ func (e *Plans) runPlan(ctx context.Context, plan *workflow.Plan, recoveryStarte
 			// NOTE: We are not handling the error here, as we are not returning it to the caller
 			// and doesn't actually matter. All errors are encapsulated in the Plan's state.
 			if _, err := e.runner(plan.Name, req); err != nil {
-				context.Log(ctx).Error(ctx, "plan execution failed", "id", plan.ID, "error", err)
+				context.Log(ctx).Error("plan execution failed", "id", plan.ID, "error", err)
 			}
 		},
 	)

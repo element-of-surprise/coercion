@@ -286,12 +286,12 @@ func (r reader) listPlansInContainer(ctx context.Context, containerName string) 
 
 			p := blob.Metadata[mdKeyPlanID]
 			if p == nil {
-				context.Log(ctx).Error(ctx, fmt.Sprintf("could not read planID metatadata for entry(%s)", *blob.Name))
+				context.Log(ctx).Error(fmt.Sprintf("could not read planID metatadata for entry(%s)", *blob.Name))
 				continue
 			}
 			pm, err := mapToPlanMeta(blob.Metadata)
 			if err != nil {
-				context.Log(ctx).Error(ctx, fmt.Sprintf("could not parse plan metadata for entry(%s): %v", *blob.Name, err))
+				context.Log(ctx).Error(fmt.Sprintf("could not parse plan metadata for entry(%s): %v", *blob.Name, err))
 				continue
 			}
 

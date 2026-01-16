@@ -11,9 +11,9 @@ import (
 
 // Recovery restarts execution of a Plan that has already started running, but the service crashed before it completed.
 func (s *States) Recovery(req statemachine.Request[Data]) statemachine.Request[Data] {
-	context.Log(req.Ctx).Info(req.Ctx, "recovery state started")
+	context.Log(req.Ctx).Info("recovery state started")
 	defer func() {
-		context.Log(req.Ctx).Info(req.Ctx, "recovery state completed")
+		context.Log(req.Ctx).Info("recovery state completed")
 		if req.Data.RecoveryStarted != nil {
 			close(req.Data.RecoveryStarted)
 		}
