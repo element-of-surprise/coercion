@@ -4,8 +4,6 @@
 package context
 
 import (
-	"log/slog"
-
 	"github.com/element-of-surprise/coercion/workflow/errors"
 	"github.com/gostdlib/base/concurrency/background"
 	"github.com/gostdlib/base/concurrency/worker"
@@ -48,8 +46,11 @@ func Attach(ctx Context) Context {
 	return ctx
 }
 
+// Logger is a wrapper around an *slog.Logger that prevents loss of Context logging attributes.
+type Logger = context.Logger
+
 // Log returns the logger attached to the context. If no logger is attached, it returns log.Default().
-func Log(ctx Context) *slog.Logger {
+func Log(ctx Context) context.Logger {
 	return context.Log(ctx)
 }
 

@@ -120,10 +120,10 @@ func createVault(ctx context.Context) error {
 	case "sqlite":
 		vault, err = sqlite.New(ctx, "", reg, sqlite.WithInMemory(), sqlite.WithCapture(capture))
 	case "cosmosdb":
-		context.Log(ctx).Info(fmt.Sprintf("TestEtoE: Using cosmosdb: %s, %s, %s", *endpoint, *db, *container))
+		context.Log(ctx).Info(ctx, fmt.Sprintf("TestEtoE: Using cosmosdb: %s, %s, %s", *endpoint, *db, *container))
 		vault, err = cosmosdb.New(ctx, *swarm, *endpoint, *db, *container, cred, reg)
 	case "azblob":
-		context.Log(ctx).Info(fmt.Sprintf("TestEtoE: Using azblob: %s", *azblobURL))
+		context.Log(ctx).Info(ctx, fmt.Sprintf("TestEtoE: Using azblob: %s", *azblobURL))
 		args := azblob.Args{
 			Prefix:        *blobPrefix,
 			Endpoint:      *azblobURL,
