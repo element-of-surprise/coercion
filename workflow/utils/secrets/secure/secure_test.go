@@ -66,6 +66,20 @@ type tagsStruct struct {
 	FieldC string `coerce:" "`
 }
 
+type InterfaceWrapper struct {
+	Interface
+}
+
+type Interface interface {
+	MakeNoise() string
+}
+
+type Lion struct {}
+
+func (*Lion) MakeNoise() string {
+	return "roar"
+}
+
 func TestGetTags(t *testing.T) {
 	t.Parallel()
 
@@ -121,6 +135,11 @@ func TestWalkValue(t *testing.T) {
 			name:  "Success: struct with secure tag has field zeroed",
 			input: User{Username: "john", Password: "secret123"},
 			want:  User{Username: "john", Password: ""},
+		},
+		{
+			name:  "Success: interface field with pointer",
+			input: InterfaceWrapper{Interface: &Lion{}},
+			want:  InterfaceWrapper{Interface: &Lion{}},
 		},
 		{
 			name:  "Success: struct without secure tag remains unchanged",
