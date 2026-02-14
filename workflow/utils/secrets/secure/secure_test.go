@@ -66,18 +66,28 @@ type tagsStruct struct {
 	FieldC string `coerce:" "`
 }
 
-type InterfaceWrapper struct {
-	Interface
+type AnimalWrapper struct {
+	Animal	
 }
 
-type Interface interface {
+type Animal interface {
 	MakeNoise() string
 }
 
-type Lion struct {}
+type Dog struct{
+	thoughts string
+}
 
-func (*Lion) MakeNoise() string {
-	return "roar"
+func (*Dog) MakeNoise() string {
+	return "woof"
+}
+
+type Cat struct{
+	thoughts string  `coerce:"secure"`
+}
+
+func (*Cat) MakeNoise() string {
+	return "meow"
 }
 
 func TestGetTags(t *testing.T) {
@@ -137,9 +147,14 @@ func TestWalkValue(t *testing.T) {
 			want:  User{Username: "john", Password: ""},
 		},
 		{
-			name:  "Success: interface field with pointer",
-			input: InterfaceWrapper{Interface: &Lion{}},
-			want:  InterfaceWrapper{Interface: &Lion{}},
+			name:  "Success: interface field with pointer and no tag remains unchanged",
+			input: AnimalWrapper{Animal: &Dog{thoughts: "pet me"}},
+			want:  AnimalWrapper{Animal: &Dog{thoughts: "pet me"}},
+		},
+		{
+			name:  "Success: interface field with pointer and secret thoughts",
+			input: AnimalWrapper{Animal: &Cat{thoughts: "I secretly despise you, human"}},
+			want:  AnimalWrapper{Animal: &Cat{thoughts: ""}},
 		},
 		{
 			name:  "Success: struct without secure tag remains unchanged",
