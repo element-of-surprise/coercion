@@ -166,7 +166,6 @@ func walkStruct(val reflect.Value, wasPtr bool, path string, handler fieldHandle
 		}
 	}
 
-	// Return value or pointer based on what was passed in
 	if wasPtr {
 		return val.Addr().Interface(), nil
 	}
@@ -205,7 +204,6 @@ func walkSlice(val reflect.Value, wasPtr bool, path string, handler fieldHandler
 		}
 		processedVal := reflect.ValueOf(processed)
 
-		// walkValue preserves pointer-ness, so we can set directly
 		newSlice.Index(i).Set(processedVal)
 	}
 
@@ -251,7 +249,6 @@ func walkMap(val reflect.Value, wasPtr bool, path string, handler fieldHandler) 
 		}
 		processedVal := reflect.ValueOf(processed)
 
-		// walkValue preserves pointer-ness, so we can set directly
 		newMap.SetMapIndex(key, processedVal)
 	}
 
