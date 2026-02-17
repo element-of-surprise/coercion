@@ -76,7 +76,7 @@ func walkValue(v any, path string, handler fieldHandler) (any, error) {
 
 	switch val.Kind() {
 	case reflect.Struct:
-		return walkStruct(val, path, handler)
+		return walkStruct(val, isPtr, path, handler)
 	case reflect.Slice:
 		return walkSlice(val, isPtr, path, handler)
 	case reflect.Map:
@@ -92,7 +92,7 @@ func walkValue(v any, path string, handler fieldHandler) (any, error) {
 }
 
 // walkStruct processes a struct value, calling handler for each field.
-func walkStruct(val reflect.Value, path string, handler fieldHandler) (any, error) {
+func walkStruct(val reflect.Value, wasPtr bool, path string, handler fieldHandler) (any, error) {
 	// If not addressable (passed by value), create an addressable copy.
 	if !val.CanAddr() {
 		ptr := reflect.New(val.Type())
@@ -126,7 +126,7 @@ func walkStruct(val reflect.Value, path string, handler fieldHandler) (any, erro
 		// Recursively walk nested structs, slices, maps, and interfaces
 		switch field.Kind() {
 		case reflect.Struct:
-			result, err := walkValue(field.Addr().Interface(), fieldPath, handler)
+			result, err := walkValue(field.Interface(), fieldPath, handler)
 			if err != nil {
 				return nil, err
 			}
@@ -165,6 +165,10 @@ func walkStruct(val reflect.Value, path string, handler fieldHandler) (any, erro
 			}
 		}
 	}
+
+	if wasPtr {
+		return val.Addr().Interface(), nil
+	}
 	return val.Interface(), nil
 }
 
@@ -178,8 +182,7 @@ func walkSlice(val reflect.Value, wasPtr bool, path string, handler fieldHandler
 	}
 
 	elemType := val.Type().Elem()
-	elemIsPtr := elemType.Kind() == reflect.Pointer
-	if elemIsPtr {
+	if elemType.Kind() == reflect.Pointer {
 		elemType = elemType.Elem()
 	}
 
@@ -201,14 +204,7 @@ func walkSlice(val reflect.Value, wasPtr bool, path string, handler fieldHandler
 		}
 		processedVal := reflect.ValueOf(processed)
 
-		// If the original element was a pointer, we need to wrap the result in a pointer
-		if elemIsPtr {
-			ptr := reflect.New(elemType)
-			ptr.Elem().Set(processedVal)
-			newSlice.Index(i).Set(ptr)
-		} else {
-			newSlice.Index(i).Set(processedVal)
-		}
+		newSlice.Index(i).Set(processedVal)
 	}
 
 	if wasPtr {
@@ -229,8 +225,7 @@ func walkMap(val reflect.Value, wasPtr bool, path string, handler fieldHandler) 
 	}
 
 	valueType := val.Type().Elem()
-	valueIsPtr := valueType.Kind() == reflect.Pointer
-	if valueIsPtr {
+	if valueType.Kind() == reflect.Pointer {
 		valueType = valueType.Elem()
 	}
 
@@ -254,14 +249,7 @@ func walkMap(val reflect.Value, wasPtr bool, path string, handler fieldHandler) 
 		}
 		processedVal := reflect.ValueOf(processed)
 
-		// If the original value was a pointer, we need to wrap the result in a pointer
-		if valueIsPtr {
-			ptr := reflect.New(valueType)
-			ptr.Elem().Set(processedVal)
-			newMap.SetMapIndex(key, ptr)
-		} else {
-			newMap.SetMapIndex(key, processedVal)
-		}
+		newMap.SetMapIndex(key, processedVal)
 	}
 
 	if wasPtr {
