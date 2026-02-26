@@ -12,13 +12,13 @@ require (
 	github.com/fatih/color v1.18.0
 	github.com/go-git/go-git/v5 v5.14.0
 	github.com/go-json-experiment/json v0.0.0-20250725192818-e39067aee2d2
-	github.com/gofiber/fiber/v2 v2.52.9
+	github.com/gofiber/fiber/v2 v2.52.12
 	github.com/gofrs/uuid/v5 v5.4.0
 	github.com/google/go-cmp v0.7.0
 	github.com/google/go-github/v61 v61.0.0
 	github.com/google/goexpect v0.0.0-20210430020637-ab937bf7fd6f
 	github.com/google/uuid v1.6.0
-	github.com/gostdlib/base v0.0.0-20260116212050-3ced58f2c61a
+	github.com/gostdlib/base v0.0.0-20260226191444-dcf0f05f9752
 	github.com/inancgumus/screen v0.0.0-20190314163918-06e984b86ed3
 	github.com/kylelemons/godebug v1.1.0
 	github.com/rodaine/table v1.3.0
