@@ -215,7 +215,6 @@ func TestCommitPlan(t *testing.T) {
 	reg.Register(&plugins.CheckPlugin{})
 	reg.Register(&plugins.HelloPlugin{})
 
-	// TODO(element-of-surprise): Add checks to verify the data in the database
 	reader := reader{
 		pool: pool,
 		reg:  reg,
@@ -226,8 +225,41 @@ func TestCommitPlan(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if diff := cmp.Diff(plan, storedPlan, cmp.AllowUnexported(workflow.Action{}, workflow.Block{}, workflow.Checks{}, workflow.Sequence{})); diff != "" {
+	if diff := cmp.Diff(
+		plan,
+		storedPlan,
+		cmp.AllowUnexported(
+			workflow.Action{},
+			workflow.Block{},
+			workflow.Checks{},
+			workflow.Sequence{},
+			workflow.DeferredActions{},
+			workflow.DeferBatch{},
+		),
+	); diff != "" {
 		t.Fatalf("Read plan does not match the original plan: -want/+got:\n%s", diff)
+	}
+
+	// Explicitly verify DeferredActions round-tripped — the top-level cmp.Diff
+	// above covers it, but asserting presence here protects against a future
+	// regression where the DeferredActions reader path is accidentally skipped.
+	if storedPlan.DeferredActions == nil {
+		t.Fatalf("TestCommitPlan: storedPlan.DeferredActions is nil, want non-nil")
+	}
+	if got, want := len(storedPlan.DeferredActions.OnFailure), len(plan.DeferredActions.OnFailure); got != want {
+		t.Fatalf("TestCommitPlan: OnFailure batch count = %d, want %d", got, want)
+	}
+	if got, want := len(storedPlan.DeferredActions.OnSuccess), len(plan.DeferredActions.OnSuccess); got != want {
+		t.Fatalf("TestCommitPlan: OnSuccess batch count = %d, want %d", got, want)
+	}
+	if !storedPlan.DeferredActions.OnFailure[0].FailElement {
+		t.Errorf("TestCommitPlan: OnFailure[0].FailElement = false, want true")
+	}
+	if got, want := storedPlan.DeferredActions.OnFailure[0].Name, "fail-batch"; got != want {
+		t.Errorf("TestCommitPlan: OnFailure[0].Name = %q, want %q", got, want)
+	}
+	if got, want := storedPlan.DeferredActions.OnSuccess[0].Name, "success-batch"; got != want {
+		t.Errorf("TestCommitPlan: OnSuccess[0].Name = %q, want %q", got, want)
 	}
 }
 

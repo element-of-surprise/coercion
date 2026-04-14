@@ -65,7 +65,7 @@ func TestPlanDeferredChecksRouting(t *testing.T) {
 
 	for _, test := range tests {
 		req := statemachine.Request[Data]{
-			Ctx:  context.Background(),
+			Ctx:  t.Context(),
 			Data: Data{Plan: test.plan},
 		}
 
@@ -87,14 +87,22 @@ func TestPlanDeferredActions(t *testing.T) {
 
 	states := &States{}
 
+	// wantCollection describes the expected terminal state of each batch in
+	// either OnFailure or OnSuccess, and the terminal state of each action
+	// inside that batch. Lengths must match the fixture.
+	type wantCollection struct {
+		batchStatuses  []workflow.Status
+		actionStatuses [][]workflow.Status
+	}
+
 	tests := []struct {
-		name             string
-		plan             *workflow.Plan
-		reqErr           error
-		wantNextState    statemachine.State[Data]
-		wantDAStatus     workflow.Status
-		wantOnFailureRan bool
-		wantOnSuccessRan bool
+		name          string
+		plan          *workflow.Plan
+		reqErr        error
+		wantNextState statemachine.State[Data]
+		wantDAStatus  workflow.Status
+		wantOnFailure wantCollection
+		wantOnSuccess wantCollection
 	}{
 		{
 			name: "Success: DeferredActions nil is a no-op",
@@ -107,22 +115,29 @@ func TestPlanDeferredActions(t *testing.T) {
 			wantDAStatus:  workflow.NotStarted,
 		},
 		{
-			name: "Success: Plan succeeded runs OnSuccess",
+			name: "Success: Plan succeeded runs OnSuccess; OnFailure stays NotStarted",
 			plan: func() *workflow.Plan {
 				p := &workflow.Plan{}
 				p.State.Set(workflow.State{})
 				p.DeferredActions = newDA(
 					[]*workflow.DeferBatch{newDABatch(false, "untouched")},
-					[]*workflow.DeferBatch{newDABatch(false, "success")},
+					[]*workflow.DeferBatch{newDABatch(false, "ok")},
 				)
 				return p
 			}(),
-			wantNextState:    states.End,
-			wantDAStatus:     workflow.Completed,
-			wantOnSuccessRan: true,
+			wantNextState: states.End,
+			wantDAStatus:  workflow.Completed,
+			wantOnFailure: wantCollection{
+				batchStatuses:  []workflow.Status{workflow.NotStarted},
+				actionStatuses: [][]workflow.Status{{workflow.NotStarted}},
+			},
+			wantOnSuccess: wantCollection{
+				batchStatuses:  []workflow.Status{workflow.Completed},
+				actionStatuses: [][]workflow.Status{{workflow.Completed}},
+			},
 		},
 		{
-			name: "Success: Plan failed via block Failed runs OnFailure",
+			name: "Success: Plan failed via block Failed runs OnFailure; OnSuccess stays NotStarted",
 			plan: func() *workflow.Plan {
 				p := &workflow.Plan{}
 				p.State.Set(workflow.State{})
@@ -130,33 +145,47 @@ func TestPlanDeferredActions(t *testing.T) {
 				b.State.Set(workflow.State{Status: workflow.Failed})
 				p.Blocks = []*workflow.Block{b}
 				p.DeferredActions = newDA(
-					[]*workflow.DeferBatch{newDABatch(false, "fail")},
+					[]*workflow.DeferBatch{newDABatch(false, "ok")},
 					[]*workflow.DeferBatch{newDABatch(false, "untouched")},
 				)
 				return p
 			}(),
-			wantNextState:    states.End,
-			wantDAStatus:     workflow.Completed,
-			wantOnFailureRan: true,
+			wantNextState: states.End,
+			wantDAStatus:  workflow.Completed,
+			wantOnFailure: wantCollection{
+				batchStatuses:  []workflow.Status{workflow.Completed},
+				actionStatuses: [][]workflow.Status{{workflow.Completed}},
+			},
+			wantOnSuccess: wantCollection{
+				batchStatuses:  []workflow.Status{workflow.NotStarted},
+				actionStatuses: [][]workflow.Status{{workflow.NotStarted}},
+			},
 		},
 		{
-			name: "Success: Plan failed via req.Data.err runs OnFailure",
+			name: "Success: Plan failed via req.Data.err runs OnFailure; OnSuccess stays NotStarted",
 			plan: func() *workflow.Plan {
 				p := &workflow.Plan{}
 				p.State.Set(workflow.State{})
 				p.DeferredActions = newDA(
-					[]*workflow.DeferBatch{newDABatch(false, "fail")},
+					[]*workflow.DeferBatch{newDABatch(false, "ok")},
 					[]*workflow.DeferBatch{newDABatch(false, "untouched")},
 				)
 				return p
 			}(),
-			reqErr:           fmt.Errorf("boom"),
-			wantNextState:    states.End,
-			wantDAStatus:     workflow.Completed,
-			wantOnFailureRan: true,
+			reqErr:        fmt.Errorf("boom"),
+			wantNextState: states.End,
+			wantDAStatus:  workflow.Completed,
+			wantOnFailure: wantCollection{
+				batchStatuses:  []workflow.Status{workflow.Completed},
+				actionStatuses: [][]workflow.Status{{workflow.Completed}},
+			},
+			wantOnSuccess: wantCollection{
+				batchStatuses:  []workflow.Status{workflow.NotStarted},
+				actionStatuses: [][]workflow.Status{{workflow.NotStarted}},
+			},
 		},
 		{
-			name: "Error: FailElement=true batch fails marks DA Failed",
+			name: "Error: FailElement=true batch fails marks DA Failed; action is Failed",
 			plan: func() *workflow.Plan {
 				p := &workflow.Plan{}
 				p.State.Set(workflow.State{})
@@ -166,12 +195,15 @@ func TestPlanDeferredActions(t *testing.T) {
 				)
 				return p
 			}(),
-			wantNextState:    states.End,
-			wantDAStatus:     workflow.Failed,
-			wantOnSuccessRan: true,
+			wantNextState: states.End,
+			wantDAStatus:  workflow.Failed,
+			wantOnSuccess: wantCollection{
+				batchStatuses:  []workflow.Status{workflow.Failed},
+				actionStatuses: [][]workflow.Status{{workflow.Failed}},
+			},
 		},
 		{
-			name: "Success: FailElement=false batch fails leaves DA Completed",
+			name: "Success: FailElement=false batch fails leaves DA Completed; batch is Failed",
 			plan: func() *workflow.Plan {
 				p := &workflow.Plan{}
 				p.State.Set(workflow.State{})
@@ -181,37 +213,74 @@ func TestPlanDeferredActions(t *testing.T) {
 				)
 				return p
 			}(),
-			wantNextState:    states.End,
-			wantDAStatus:     workflow.Completed,
-			wantOnSuccessRan: true,
+			wantNextState: states.End,
+			wantDAStatus:  workflow.Completed,
+			wantOnSuccess: wantCollection{
+				batchStatuses:  []workflow.Status{workflow.Failed},
+				actionStatuses: [][]workflow.Status{{workflow.Failed}},
+			},
 		},
 		{
-			name: "Success: recovered terminal DA is a no-op",
+			name: "Success: recovered terminal DA is a no-op; batch stays NotStarted",
 			plan: func() *workflow.Plan {
 				p := &workflow.Plan{}
 				p.State.Set(workflow.State{})
-				da := newDA(nil, []*workflow.DeferBatch{newDABatch(false, "success")})
+				da := newDA(nil, []*workflow.DeferBatch{newDABatch(false, "ok")})
 				da.State.Set(workflow.State{Status: workflow.Completed})
 				p.DeferredActions = da
 				return p
 			}(),
 			wantNextState: states.End,
 			wantDAStatus:  workflow.Completed,
+			wantOnSuccess: wantCollection{
+				batchStatuses:  []workflow.Status{workflow.NotStarted},
+				actionStatuses: [][]workflow.Status{{workflow.NotStarted}},
+			},
 		},
+	}
+
+	checkCollection := func(t *testing.T, testName, label string, batches []*workflow.DeferBatch, want wantCollection) {
+		t.Helper()
+		if len(want.batchStatuses) == 0 && len(want.actionStatuses) == 0 {
+			return
+		}
+		if len(batches) != len(want.batchStatuses) {
+			t.Errorf("TestPlanDeferredActions(%s): %s batch count = %d, want %d", testName, label, len(batches), len(want.batchStatuses))
+			return
+		}
+		for i, b := range batches {
+			if got := b.State.Get().Status; got != want.batchStatuses[i] {
+				t.Errorf("TestPlanDeferredActions(%s): %s[%d] batch status = %v, want %v", testName, label, i, got, want.batchStatuses[i])
+			}
+			if len(b.Actions) != len(want.actionStatuses[i]) {
+				t.Errorf("TestPlanDeferredActions(%s): %s[%d] action count = %d, want %d", testName, label, i, len(b.Actions), len(want.actionStatuses[i]))
+				continue
+			}
+			for j, a := range b.Actions {
+				if got := a.State.Get().Status; got != want.actionStatuses[i][j] {
+					t.Errorf("TestPlanDeferredActions(%s): %s[%d].Actions[%d] status = %v, want %v", testName, label, i, j, got, want.actionStatuses[i][j])
+				}
+			}
+		}
 	}
 
 	for _, test := range tests {
 		req := statemachine.Request[Data]{
-			Ctx:  context.Background(),
+			Ctx:  t.Context(),
 			Data: Data{Plan: test.plan, err: test.reqErr},
 		}
 
 		s := &States{
 			store: &fakeUpdater{},
 			testActionRunner: func(ctx context.Context, action *workflow.Action, updater storage.ActionUpdater) error {
+				state := action.State.Get()
+				state.Status = workflow.Completed
 				if action.Name == "error" {
+					state.Status = workflow.Failed
+					action.State.Set(state)
 					return fmt.Errorf("error")
 				}
+				action.State.Set(state)
 				return nil
 			},
 		}
@@ -220,27 +289,14 @@ func TestPlanDeferredActions(t *testing.T) {
 		if methodName(req.Next) != methodName(test.wantNextState) {
 			t.Errorf("TestPlanDeferredActions(%s): got next = %v, want %v", test.name, methodName(req.Next), methodName(test.wantNextState))
 		}
-		if test.plan.DeferredActions != nil {
-			if got := test.plan.DeferredActions.State.Get().Status; got != test.wantDAStatus {
-				t.Errorf("TestPlanDeferredActions(%s): got DA status = %v, want %v", test.name, got, test.wantDAStatus)
-			}
-			// OnFailure batches ran iff they left NotStarted; untouched ones stay NotStarted.
-			for _, b := range test.plan.DeferredActions.OnFailure {
-				ranIt := b.State.Get().Status != workflow.NotStarted
-				if test.wantOnFailureRan && !ranIt {
-					t.Errorf("TestPlanDeferredActions(%s): OnFailure batch did not run", test.name)
-				}
-				if !test.wantOnFailureRan && ranIt && test.wantDAStatus != workflow.Completed {
-					t.Errorf("TestPlanDeferredActions(%s): OnFailure batch ran unexpectedly", test.name)
-				}
-			}
-			for _, b := range test.plan.DeferredActions.OnSuccess {
-				ranIt := b.State.Get().Status != workflow.NotStarted
-				if test.wantOnSuccessRan && !ranIt {
-					t.Errorf("TestPlanDeferredActions(%s): OnSuccess batch did not run", test.name)
-				}
-			}
+		if test.plan.DeferredActions == nil {
+			continue
 		}
+		if got := test.plan.DeferredActions.State.Get().Status; got != test.wantDAStatus {
+			t.Errorf("TestPlanDeferredActions(%s): got DA status = %v, want %v", test.name, got, test.wantDAStatus)
+		}
+		checkCollection(t, test.name, "OnFailure", test.plan.DeferredActions.OnFailure, test.wantOnFailure)
+		checkCollection(t, test.name, "OnSuccess", test.plan.DeferredActions.OnSuccess, test.wantOnSuccess)
 	}
 }
 
@@ -345,7 +401,7 @@ func TestRunDeferBatch(t *testing.T) {
 			store:            &fakeUpdater{},
 			testActionRunner: fakeActionRunner,
 		}
-		s.runDeferBatch(context.Background(), test.batch)
+		s.runDeferBatch(t.Context(), test.batch)
 		if got := test.batch.State.Get().Status; got != test.wantStatus {
 			t.Errorf("TestRunDeferBatch(%s): got status = %v, want %v", test.name, got, test.wantStatus)
 		}
@@ -355,10 +411,25 @@ func TestRunDeferBatch(t *testing.T) {
 func TestRunDeferredActions(t *testing.T) {
 	t.Parallel()
 
+	// stateTrackingRunner sets action state on completion/failure so the
+	// test can assert per-action terminal status in addition to per-batch.
+	stateTrackingRunner := func(ctx context.Context, action *workflow.Action, updater storage.ActionUpdater) error {
+		state := action.State.Get()
+		if action.Name == "error" {
+			state.Status = workflow.Failed
+			action.State.Set(state)
+			return fmt.Errorf("error")
+		}
+		state.Status = workflow.Completed
+		action.State.Set(state)
+		return nil
+	}
+
 	tests := []struct {
-		name        string
-		batches     []*workflow.DeferBatch
-		wantTripped bool
+		name              string
+		batches           []*workflow.DeferBatch
+		wantTripped       bool
+		wantBatchStatuses []workflow.Status
 	}{
 		{
 			name:        "Success: no batches",
@@ -370,34 +441,67 @@ func TestRunDeferredActions(t *testing.T) {
 				newDABatch(false, "ok"),
 				newDABatch(true, "ok"),
 			},
-			wantTripped: false,
+			wantTripped:       false,
+			wantBatchStatuses: []workflow.Status{workflow.Completed, workflow.Completed},
 		},
 		{
-			name: "Success: FailElement=false batch fails does not trip",
+			name: "Success: FailElement=false batch fails does not trip; other batches complete",
 			batches: []*workflow.DeferBatch{
 				newDABatch(false, "error"),
 				newDABatch(false, "ok"),
 			},
-			wantTripped: false,
+			wantTripped:       false,
+			wantBatchStatuses: []workflow.Status{workflow.Failed, workflow.Completed},
 		},
 		{
-			name: "Error: FailElement=true batch fails trips",
+			name: "Error: FailElement=true batch fails trips; all batches still reach terminal",
 			batches: []*workflow.DeferBatch{
 				newDABatch(false, "ok"),
 				newDABatch(true, "error"),
 			},
-			wantTripped: true,
+			wantTripped:       true,
+			wantBatchStatuses: []workflow.Status{workflow.Completed, workflow.Failed},
+		},
+		{
+			// Batches execute in parallel: a FailElement=true failure must
+			// not short-circuit the other batches. All three must reach a
+			// terminal status regardless of ordering.
+			name: "Error: mixed batches all reach terminal when FailElement trips",
+			batches: []*workflow.DeferBatch{
+				newDABatch(false, "error"),
+				newDABatch(true, "error"),
+				newDABatch(false, "ok"),
+			},
+			wantTripped:       true,
+			wantBatchStatuses: []workflow.Status{workflow.Failed, workflow.Failed, workflow.Completed},
 		},
 	}
 
 	for _, test := range tests {
 		s := &States{
 			store:            &fakeUpdater{},
-			testActionRunner: fakeActionRunner,
+			testActionRunner: stateTrackingRunner,
 		}
-		got := s.runDeferredActions(context.Background(), test.batches)
+		got := s.runDeferredActions(t.Context(), test.batches)
 		if got != test.wantTripped {
 			t.Errorf("TestRunDeferredActions(%s): got tripped = %v, want %v", test.name, got, test.wantTripped)
+		}
+		if len(test.batches) != len(test.wantBatchStatuses) {
+			continue
+		}
+		for i, b := range test.batches {
+			if got := b.State.Get().Status; got != test.wantBatchStatuses[i] {
+				t.Errorf("TestRunDeferredActions(%s): batch[%d] status = %v, want %v", test.name, i, got, test.wantBatchStatuses[i])
+			}
+			// Each batch has exactly one action in this fixture; it must match
+			// the batch's terminal status (Completed or Failed).
+			if len(b.Actions) != 1 {
+				continue
+			}
+			wantAction := test.wantBatchStatuses[i]
+			if got := b.Actions[0].State.Get().Status; got != wantAction {
+				t.Errorf("TestRunDeferredActions(%s): batch[%d].Actions[0] status = %v, want %v", test.name, i, got, wantAction)
+			}
 		}
 	}
 }

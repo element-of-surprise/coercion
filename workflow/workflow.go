@@ -165,7 +165,7 @@ type Plan struct {
 	// Useful for logging and similar operations. Optional.
 	DeferredChecks *Checks
 	// DeferredActions are actions that are executed after the workflow has completed.
-	// These run before DeferredChecks. This is useful for things like cleanup.
+	// These run after DeferredChecks. This is useful for things like cleanup.
 	DeferredActions *DeferredActions
 	// Blocks is a list of blocks that are executed in sequence.
 	// If a block fails, the workflow will fail.
