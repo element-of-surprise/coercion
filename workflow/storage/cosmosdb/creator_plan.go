@@ -141,6 +141,10 @@ func planToItems(swarm string, p *workflow.Plan) (*itemsContext, error) {
 		}
 	}
 
+	if err := deferredActionsToItems(iCtx, p.DeferredActions); err != nil {
+		return nil, fmt.Errorf("planToItems(deferredActionsToItems): %w", err)
+	}
+
 	if p.Blocks == nil {
 		return nil, fmt.Errorf("commitPlan: plan.Blocks cannot be nil")
 	}
@@ -207,6 +211,9 @@ func planToEntry(swarm string, p *workflow.Plan) (plansEntry, error) {
 	}
 	if p.DeferredChecks != nil {
 		plan.DeferredChecks = p.DeferredChecks.ID
+	}
+	if p.DeferredActions != nil {
+		plan.DeferredActions = p.DeferredActions.ID
 	}
 	plan.SubmitTime = p.SubmitTime
 

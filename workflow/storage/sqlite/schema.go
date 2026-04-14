@@ -6,6 +6,8 @@ var tables = []string{
 	checksSchema,
 	sequencesSchema,
 	actionsSchema,
+	deferredActionsSchema,
+	deferBatchesSchema,
 }
 
 var planSchema = `
@@ -20,6 +22,7 @@ CREATE Table If Not Exists plans (
 	postchecks TEXT,
 	contchecks TEXT,
 	deferredchecks TEXT,
+	deferredactions TEXT,
 	blocks BLOB NOT NULL,
 	state_status INTEGER NOT NULL,
 	state_start INTEGER NOT NULL,
@@ -95,10 +98,39 @@ CREATE Table If Not Exists actions (
     state_end INTEGER NOT NULL
 );`
 
+var deferredActionsSchema = `
+CREATE Table If Not Exists deferredactions (
+    id TEXT PRIMARY KEY,
+    plan_id TEXT NOT NULL,
+    onfailure BLOB,
+    onsuccess BLOB,
+    state_status INTEGER NOT NULL,
+    state_start INTEGER NOT NULL,
+    state_end INTEGER NOT NULL
+);`
+
+var deferBatchesSchema = `
+CREATE Table If Not Exists deferbatches (
+    id TEXT PRIMARY KEY,
+    plan_id TEXT NOT NULL,
+    deferredactions_id TEXT NOT NULL,
+    list_kind TEXT NOT NULL,
+    pos INTEGER NOT NULL,
+    fail_element INTEGER NOT NULL,
+    name TEXT NOT NULL,
+    descr TEXT NOT NULL,
+    actions BLOB,
+    state_status INTEGER NOT NULL,
+    state_start INTEGER NOT NULL,
+    state_end INTEGER NOT NULL
+);`
+
 var indexes = []string{
 	`CREATE INDEX If Not Exists idx_plans ON plans(id, group_id, state_status, state_start, state_end, reason);`,
 	`CREATE INDEX If Not Exists idx_blocks ON blocks(id, key, plan_id, state_status, state_start, state_end);`,
 	`CREATE INDEX If Not Exists idx_checks ON checks(id, key, plan_id, state_status, state_start, state_end);`,
 	`CREATE INDEX If Not Exists idx_sequences ON sequences(id, key, plan_id, state_status, state_start, state_end);`,
 	`CREATE INDEX If Not Exists idx_actions ON actions(id, key, plan_id, state_status, state_start, state_end, plugin);`,
+	`CREATE INDEX If Not Exists idx_deferredactions ON deferredactions(id, plan_id, state_status, state_start, state_end);`,
+	`CREATE INDEX If Not Exists idx_deferbatches ON deferbatches(id, plan_id, deferredactions_id, state_status, state_start, state_end);`,
 }

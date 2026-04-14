@@ -29,6 +29,8 @@ type updater struct {
 	blockUpdater
 	sequenceUpdater
 	actionUpdater
+	deferredActionsUpdater
+	deferBatchUpdater
 
 	reader reader
 	private.Storage
@@ -62,6 +64,16 @@ func newUpdater(mu *sync.RWMutex, client planPatcher, defaultIOpts *azcosmos.Ite
 		client:       client,
 		defaultIOpts: defaultIOpts,
 	}
+	uo.deferredActionsUpdater = deferredActionsUpdater{
+		mu:           mu,
+		client:       client,
+		defaultIOpts: defaultIOpts,
+	}
+	uo.deferBatchUpdater = deferBatchUpdater{
+		mu:           mu,
+		client:       client,
+		defaultIOpts: defaultIOpts,
+	}
 	return uo
 }
 
@@ -78,6 +90,10 @@ func (u updater) UpdateObject(ctx context.Context, o workflow.Object) error {
 		return u.UpdateAction(ctx, o.(*workflow.Action))
 	case workflow.OTSequence:
 		return u.UpdateSequence(ctx, o.(*workflow.Sequence))
+	case workflow.OTDeferredActions:
+		return u.UpdateDeferredActions(ctx, o.(*workflow.DeferredActions))
+	case workflow.OTBatch:
+		return u.UpdateDeferBatch(ctx, o.(*workflow.DeferBatch))
 	}
 	// If UpdateObject is passed a bad object, the whole program is screwed.
 	panic(fmt.Sprintf("bug: cannot update object type %T", o))

@@ -114,6 +114,9 @@ func Plan(ctx context.Context, p *workflow.Plan, options ...Option) *workflow.Pl
 	if p.DeferredChecks != nil {
 		np.DeferredChecks = Checks(ctx, p.DeferredChecks, withOptions(opts))
 	}
+	if p.DeferredActions != nil {
+		np.DeferredActions = DeferredActions(ctx, p.DeferredActions, withOptions(opts))
+	}
 
 	np.Blocks = make([]*workflow.Block, 0, len(p.Blocks))
 	for _, b := range p.Blocks {
@@ -141,6 +144,9 @@ func Plan(ctx context.Context, p *workflow.Plan, options ...Option) *workflow.Pl
 			return np
 		}
 		if p.DeferredChecks != nil && p.DeferredChecks.State.Get().Status == workflow.Failed {
+			return np
+		}
+		if p.DeferredActions != nil && p.DeferredActions.State.Get().Status == workflow.Failed {
 			return np
 		}
 		return nil
@@ -319,6 +325,95 @@ func Sequence(ctx context.Context, s *workflow.Sequence, options ...Option) *wor
 	}
 
 	return ns
+}
+
+// DeferredActions clones a DeferredActions. This includes all sub-objects.
+func DeferredActions(ctx context.Context, da *workflow.DeferredActions, options ...Option) *workflow.DeferredActions {
+	if da == nil {
+		return nil
+	}
+
+	opts := cloneOptions{}
+	for _, o := range options {
+		opts = o(opts)
+	}
+	opts.callNum++
+
+	n := &workflow.DeferredActions{}
+
+	if opts.keepState {
+		n.ID = da.ID
+		cloneStateAtomic(&n.State, &da.State)
+	}
+
+	if len(da.OnFailure) > 0 {
+		n.OnFailure = make([]*workflow.DeferBatch, 0, len(da.OnFailure))
+		for _, b := range da.OnFailure {
+			nb := DeferBatch(ctx, b, withOptions(opts))
+			if nb == nil {
+				continue
+			}
+			n.OnFailure = append(n.OnFailure, nb)
+		}
+	}
+	if len(da.OnSuccess) > 0 {
+		n.OnSuccess = make([]*workflow.DeferBatch, 0, len(da.OnSuccess))
+		for _, b := range da.OnSuccess {
+			nb := DeferBatch(ctx, b, withOptions(opts))
+			if nb == nil {
+				continue
+			}
+			n.OnSuccess = append(n.OnSuccess, nb)
+		}
+	}
+
+	if !opts.keepSecrets && opts.callNum == 1 {
+		Secure(n)
+	}
+
+	return n
+}
+
+// DeferBatch clones a DeferBatch. This includes all sub-objects.
+func DeferBatch(ctx context.Context, b *workflow.DeferBatch, options ...Option) *workflow.DeferBatch {
+	if b == nil {
+		return nil
+	}
+
+	opts := cloneOptions{}
+	for _, o := range options {
+		opts = o(opts)
+	}
+	opts.callNum++
+
+	n := &workflow.DeferBatch{
+		FailElement: b.FailElement,
+		Sequence: workflow.Sequence{
+			Name:  b.Name,
+			Descr: b.Descr,
+			Key:   b.Key,
+		},
+	}
+
+	if opts.keepState {
+		n.ID = b.ID
+		cloneStateAtomic(&n.State, &b.State)
+	}
+
+	n.Actions = make([]*workflow.Action, 0, len(b.Actions))
+	for _, a := range b.Actions {
+		na := Action(ctx, a, withOptions(opts))
+		if na == nil {
+			continue
+		}
+		n.Actions = append(n.Actions, na)
+	}
+
+	if !opts.keepSecrets && opts.callNum == 1 {
+		Secure(n)
+	}
+
+	return n
 }
 
 // Action clones an Action. This includes all sub-objects.

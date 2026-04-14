@@ -33,12 +33,23 @@ func (f finalStates) bypassChecks(req statemachine.Request[Data]) statemachine.R
 }
 
 // planChecks looks through all the checks in the Plan and fails the Plan if any of the checks failed
-// and records the failure reason. It does not do BypassChecks as those are handled in bypassChecks.
+// and records the failure reason. It also examines DeferredActions and fails the Plan
+// with FRDeferredAction if a FailElement=true batch failed. It does not do BypassChecks
+// as those are handled in bypassChecks.
 func (f finalStates) planChecks(req statemachine.Request[Data]) statemachine.Request[Data] {
 	plan := req.Data.Plan
 
 	r, err := f.examineChecks([4]*workflow.Checks{plan.PreChecks, plan.ContChecks, plan.PostChecks, plan.DeferredChecks})
 	if err == nil {
+		if r2, err2 := f.examineDeferredActions(plan.DeferredActions); err2 != nil {
+			state := plan.State.Get()
+			state.Status = workflow.Failed
+			plan.State.Set(state)
+			plan.Reason = r2
+			req.Err = err2
+			req.Next = f.end
+			return req
+		}
 		req.Next = f.blocks
 		return req
 	}
@@ -49,6 +60,19 @@ func (f finalStates) planChecks(req statemachine.Request[Data]) statemachine.Req
 	req.Err = err
 	req.Next = f.end
 	return req
+}
+
+// examineDeferredActions returns FRDeferredAction and an error if the DeferredActions
+// container is in a Failed state (set by PlanDeferredActions when a batch with
+// FailElement=true failed). Nil or non-Failed is a pass.
+func (f finalStates) examineDeferredActions(da *workflow.DeferredActions) (workflow.FailureReason, error) {
+	if da == nil {
+		return workflow.FRUnknown, nil
+	}
+	if da.State.Get().Status == workflow.Failed {
+		return workflow.FRDeferredAction, fmt.Errorf("DeferredActions failure")
+	}
+	return workflow.FRUnknown, nil
 }
 
 // blocks checks the state of the block and fails the Plan if any of the blocks failed. If a block is not in a

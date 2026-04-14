@@ -677,8 +677,8 @@ func (s *States) PlanPostChecks(req statemachine.Request[Data]) statemachine.Req
 
 // PlanDeferredChecks runs the DeferredChecks.
 func (s *States) PlanDeferredChecks(req statemachine.Request[Data]) statemachine.Request[Data] {
-	// No matter what the outcome here is, we go to the end state.
-	req.Next = s.End
+	// No matter what the outcome here is, we go to PlanDeferredActions.
+	req.Next = s.PlanDeferredActions
 	defer func() {
 		if err := s.store.UpdatePlan(req.Ctx, req.Data.Plan); err != nil {
 			log.Fatalf("failed to write Plan: %v", err)
@@ -693,6 +693,73 @@ func (s *States) PlanDeferredChecks(req statemachine.Request[Data]) statemachine
 		return req
 	}
 	return req
+}
+
+// PlanDeferredActions runs the DeferredActions batches chosen by OnFailure or OnSuccess
+// based on the Plan's accumulated state (which by this point includes DeferredChecks
+// outcome). It always transitions to End. If any batch with FailElement=true fails,
+// the DeferredActions container is marked Failed and finalStates will fail the Plan
+// with FRDeferredAction. Idempotent across recovery: if DeferredActions is already
+// in a terminal state, this is a no-op.
+func (s *States) PlanDeferredActions(req statemachine.Request[Data]) statemachine.Request[Data] {
+	req.Next = s.End
+
+	da := req.Data.Plan.DeferredActions
+	if da == nil {
+		return req
+	}
+
+	defer func() {
+		if err := s.store.UpdateDeferredActions(req.Ctx, da); err != nil {
+			log.Fatalf("failed to write DeferredActions: %v", err)
+		}
+	}()
+
+	if isCompleted(da) {
+		return req
+	}
+
+	state := da.State.Get()
+	state.Status = workflow.Running
+	state.Start = s.now()
+	da.State.Set(state)
+	if err := s.store.UpdateDeferredActions(req.Ctx, da); err != nil {
+		log.Fatalf("failed to write DeferredActions: %v", err)
+	}
+
+	batches := da.OnSuccess
+	if planHasFailed(req.Data.Plan, req.Data.err) {
+		batches = da.OnFailure
+	}
+
+	failElementTripped := s.runDeferredActions(req.Ctx, batches)
+
+	state = da.State.Get()
+	state.End = s.now()
+	if failElementTripped {
+		state.Status = workflow.Failed
+	} else {
+		state.Status = workflow.Completed
+	}
+	da.State.Set(state)
+	return req
+}
+
+// planHasFailed reports whether any phase that ran before DeferredActions
+// failed. Used by PlanDeferredActions to pick OnFailure vs OnSuccess.
+func planHasFailed(p *workflow.Plan, reqErr error) bool {
+	if reqErr != nil {
+		return true
+	}
+	if checksFailed(p.PreChecks) || checksFailed(p.ContChecks) || checksFailed(p.PostChecks) || checksFailed(p.DeferredChecks) {
+		return true
+	}
+	for _, b := range p.Blocks {
+		if b.State.Get().Status == workflow.Failed {
+			return true
+		}
+	}
+	return false
 }
 
 // End is the final state of the state machine. This is always the last state, regardless of errors.
@@ -755,6 +822,14 @@ func (s *States) writeEverything(ctx context.Context, plan *workflow.Plan) {
 		case workflow.OTSequence:
 			if err := s.store.UpdateSequence(ctx, item.Sequence()); err != nil {
 				log.Fatalf("failed to write Sequence: %v", err)
+			}
+		case workflow.OTDeferredActions:
+			if err := s.store.UpdateDeferredActions(ctx, item.DeferredActions()); err != nil {
+				log.Fatalf("failed to write DeferredActions: %v", err)
+			}
+		case workflow.OTBatch:
+			if err := s.store.UpdateDeferBatch(ctx, item.DeferBatch()); err != nil {
+				log.Fatalf("failed to write DeferBatch: %v", err)
 			}
 		default:
 			log.Fatalf("unknown type: %s", item.Value.Type())
@@ -962,6 +1037,81 @@ func (s *States) execSeq(ctx context.Context, seq *workflow.Sequence) error {
 	state.Status = workflow.Completed
 	seq.State.Set(state)
 	return nil
+}
+
+// runDeferredActions runs the selected DeferBatch list. Batches execute in
+// parallel; all batches are attempted regardless of individual failures.
+// Returns true if any batch with FailElement=true ended in Failed state.
+func (s *States) runDeferredActions(ctx context.Context, batches []*workflow.DeferBatch) bool {
+	if len(batches) == 0 {
+		return false
+	}
+
+	var tripped atomic.Bool
+	g := context.Pool(ctx).Group()
+	for _, batch := range batches {
+		b := batch
+		g.Go(ctx, func(ctx context.Context) error {
+			s.runDeferBatch(ctx, b)
+			if b.State.Get().Status == workflow.Failed && b.FailElement {
+				tripped.Store(true)
+			}
+			return nil
+		})
+	}
+	_ = g.Wait(ctx) // per-batch state is source of truth
+	return tripped.Load()
+}
+
+// runDeferBatch runs a single DeferBatch: marks it Running, runs its Actions
+// sequentially, stops at the first terminal (non-Completed) Action, and marks
+// the batch Completed, Failed, or Stopped accordingly. Entry short-circuits on
+// recovered terminal batch state, mirroring execSeq.
+func (s *States) runDeferBatch(ctx context.Context, batch *workflow.DeferBatch) {
+	defer func() {
+		if err := s.store.UpdateDeferBatch(ctx, batch); err != nil {
+			log.Fatalf("failed to write DeferBatch: %v", err)
+		}
+	}()
+
+	switch batch.State.Get().Status {
+	case workflow.Completed, workflow.Failed, workflow.Stopped:
+		return
+	}
+
+	state := batch.State.Get()
+	state.Status = workflow.Running
+	state.Start = s.now()
+	batch.State.Set(state)
+	if err := s.store.UpdateDeferBatch(ctx, batch); err != nil {
+		log.Fatalf("failed to write DeferBatch: %v", err)
+	}
+
+	terminal := workflow.Completed
+	for _, action := range batch.Actions {
+		if isCompleted(action) {
+			// Recovered terminal state: skip Completed; propagate Failed/Stopped
+			// into the batch's terminal status to match fixDeferBatch semantics.
+			switch action.State.Get().Status {
+			case workflow.Failed:
+				terminal = workflow.Failed
+			case workflow.Stopped:
+				terminal = workflow.Stopped
+			default:
+				continue
+			}
+			break
+		}
+		if err := s.runAction(ctx, action, s.store); err != nil {
+			terminal = workflow.Failed
+			break
+		}
+	}
+
+	state = batch.State.Get()
+	state.End = s.now()
+	state.Status = terminal
+	batch.State.Set(state)
 }
 
 // runAction runs an action and returns the response or an error. If the response is not the expected

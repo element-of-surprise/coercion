@@ -61,6 +61,9 @@ func (d deleter) deletePlan(ctx context.Context, conn *sqlite.Conn, plan *workfl
 	if err := d.deleteChecks(ctx, conn, plan.DeferredChecks); err != nil {
 		return fmt.Errorf("couldn't delete plan deferredchecks: %w", err)
 	}
+	if err := d.deleteDeferredActions(ctx, conn, plan.DeferredActions); err != nil {
+		return fmt.Errorf("couldn't delete plan deferredactions: %w", err)
+	}
 	if err := d.deleteBlocks(ctx, conn, plan.Blocks); err != nil {
 		return fmt.Errorf("couldn't delete blocks: %w", err)
 	}
@@ -160,6 +163,53 @@ func (d deleter) deletesSeqs(ctx context.Context, conn *sqlite.Conn, seqs []*wor
 		if err != nil {
 			return fmt.Errorf("problem deleting sequence: %w", err)
 		}
+	}
+	return nil
+}
+
+func (d deleter) deleteDeferredActions(ctx context.Context, conn *sqlite.Conn, da *workflow.DeferredActions) error {
+	if da == nil {
+		return nil
+	}
+
+	for _, b := range da.OnFailure {
+		if err := d.deleteDeferBatch(ctx, conn, b); err != nil {
+			return fmt.Errorf("couldn't delete onfailure defer batch: %w", err)
+		}
+	}
+	for _, b := range da.OnSuccess {
+		if err := d.deleteDeferBatch(ctx, conn, b); err != nil {
+			return fmt.Errorf("couldn't delete onsuccess defer batch: %w", err)
+		}
+	}
+
+	stmt, err := conn.Prepare(deleteDeferredActionsByID)
+	if err != nil {
+		return fmt.Errorf("couldn't prepare DeferredActions delete statement: %w", err)
+	}
+	stmt.SetText("$id", da.ID.String())
+	if _, err := stmt.Step(); err != nil {
+		return fmt.Errorf("problem deleting DeferredActions: %w", err)
+	}
+	return nil
+}
+
+func (d deleter) deleteDeferBatch(ctx context.Context, conn *sqlite.Conn, b *workflow.DeferBatch) error {
+	if b == nil {
+		return nil
+	}
+
+	if err := d.deleteActions(ctx, conn, b.Actions); err != nil {
+		return fmt.Errorf("couldn't delete defer batch actions: %w", err)
+	}
+
+	stmt, err := conn.Prepare(deleteDeferBatchesByID)
+	if err != nil {
+		return fmt.Errorf("couldn't prepare DeferBatch delete statement: %w", err)
+	}
+	stmt.SetText("$id", b.ID.String())
+	if _, err := stmt.Step(); err != nil {
+		return fmt.Errorf("problem deleting DeferBatch: %w", err)
 	}
 	return nil
 }

@@ -4,6 +4,8 @@ import (
 	"reflect"
 	"testing"
 
+	"github.com/element-of-surprise/coercion/workflow"
+
 	"github.com/kylelemons/godebug/pretty"
 )
 
@@ -136,6 +138,80 @@ func TestSecure(t *testing.T) {
 			},
 			want: &AnyHolderSecure{
 				Holding: nil,
+			},
+		},
+		{
+			name: "DeferBatch: secrets in embedded Sequence actions are wiped",
+			value: &workflow.DeferBatch{
+				FailElement: true,
+				Sequence: workflow.Sequence{
+					Name:  "cleanup",
+					Descr: "cleanup",
+					Actions: []*workflow.Action{
+						{Name: "action1", Req: Req{Data: "hello"}},
+					},
+				},
+			},
+			want: &workflow.DeferBatch{
+				FailElement: true,
+				Sequence: workflow.Sequence{
+					Name:  "cleanup",
+					Descr: "cleanup",
+					Actions: []*workflow.Action{
+						{Name: "action1", Req: Req{Data: SecureStr}},
+					},
+				},
+			},
+		},
+		{
+			name: "DeferredActions: secrets in nested batches are wiped",
+			value: &workflow.DeferredActions{
+				OnFailure: []*workflow.DeferBatch{
+					{
+						Sequence: workflow.Sequence{
+							Name:  "fail",
+							Descr: "fail",
+							Actions: []*workflow.Action{
+								{Name: "fa", Req: Req{Data: "fail_secret"}},
+							},
+						},
+					},
+				},
+				OnSuccess: []*workflow.DeferBatch{
+					{
+						Sequence: workflow.Sequence{
+							Name:  "success",
+							Descr: "success",
+							Actions: []*workflow.Action{
+								{Name: "sa", Req: Req{Data: "success_secret"}},
+							},
+						},
+					},
+				},
+			},
+			want: &workflow.DeferredActions{
+				OnFailure: []*workflow.DeferBatch{
+					{
+						Sequence: workflow.Sequence{
+							Name:  "fail",
+							Descr: "fail",
+							Actions: []*workflow.Action{
+								{Name: "fa", Req: Req{Data: SecureStr}},
+							},
+						},
+					},
+				},
+				OnSuccess: []*workflow.DeferBatch{
+					{
+						Sequence: workflow.Sequence{
+							Name:  "success",
+							Descr: "success",
+							Actions: []*workflow.Action{
+								{Name: "sa", Req: Req{Data: SecureStr}},
+							},
+						},
+					},
+				},
 			},
 		},
 	}

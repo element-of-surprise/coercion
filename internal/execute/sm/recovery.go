@@ -233,6 +233,154 @@ func fixSeq(s *workflow.Sequence) {
 	}
 }
 
+// fixDeferBatch is the DeferBatch analogue of fixSeq: it takes a batch that was
+// Running at the point of a crash and resolves it based on the state of its
+// Actions (which fixAction has already normalized).
+func fixDeferBatch(b *workflow.DeferBatch) {
+	if b.State.Get().Status != workflow.Running {
+		return
+	}
+
+	stopped := 0
+	for _, a := range b.Actions {
+		if a.State.Get().Status == workflow.Stopped {
+			stopped++
+		}
+	}
+	if stopped > 0 {
+		for _, a := range b.Actions {
+			if a.State.Get().Status == workflow.Running {
+				state := a.State.Get()
+				state.Status = workflow.Stopped
+				state.End = time.Now()
+				a.State.Set(state)
+			}
+		}
+		state := b.State.Get()
+		state.Status = workflow.Stopped
+		state.End = time.Now()
+		b.State.Set(state)
+		return
+	}
+
+	completed := 0
+	running := 0
+	failed := 0
+	for _, a := range b.Actions {
+		fixAction(a)
+		switch a.State.Get().Status {
+		case workflow.Completed:
+			completed++
+		case workflow.Running:
+			running++
+		case workflow.Failed:
+			failed++
+		case workflow.Stopped:
+			stopped++
+		}
+	}
+
+	switch {
+	case stopped > 0:
+		state := b.State.Get()
+		state.Status = workflow.Stopped
+		state.End = time.Now()
+		b.State.Set(state)
+	case failed > 0:
+		state := b.State.Get()
+		state.Status = workflow.Failed
+		state.End = time.Now()
+		b.State.Set(state)
+	case completed == 0 && running == 0:
+		b.State.Set(workflow.State{Status: workflow.NotStarted})
+	case completed == len(b.Actions):
+		state := b.State.Get()
+		state.Status = workflow.Completed
+		state.End = time.Now()
+		b.State.Set(state)
+	}
+}
+
+// fixDeferredActions resolves a DeferredActions container that was Running at
+// crash time by fixing each of its batches and aggregating their outcomes.
+func (s *States) fixDeferredActions(da *workflow.DeferredActions) {
+	if da == nil {
+		return
+	}
+	if da.State.Get().Status != workflow.Running {
+		return
+	}
+
+	all := append(append([]*workflow.DeferBatch{}, da.OnFailure...), da.OnSuccess...)
+
+	stopped := 0
+	for _, b := range all {
+		if b.State.Get().Status == workflow.Stopped {
+			stopped++
+		}
+	}
+	if stopped > 0 {
+		for _, b := range all {
+			if b.State.Get().Status == workflow.Running {
+				bs := b.State.Get()
+				bs.Status = workflow.Stopped
+				bs.End = time.Now()
+				b.State.Set(bs)
+			}
+		}
+		state := da.State.Get()
+		state.Status = workflow.Stopped
+		state.End = time.Now()
+		da.State.Set(state)
+		return
+	}
+
+	var completed, running, failed, failElementFailed int
+	for _, b := range all {
+		fixDeferBatch(b)
+		switch b.State.Get().Status {
+		case workflow.Completed:
+			completed++
+		case workflow.Running:
+			running++
+		case workflow.Failed:
+			failed++
+			if b.FailElement {
+				failElementFailed++
+			}
+		}
+	}
+
+	switch {
+	case failElementFailed > 0:
+		state := da.State.Get()
+		state.Status = workflow.Failed
+		state.End = time.Now()
+		da.State.Set(state)
+	case running == 0 && completed == 0 && failed == 0:
+		da.State.Set(workflow.State{Status: workflow.NotStarted})
+	case running == 0:
+		state := da.State.Get()
+		state.Status = workflow.Completed
+		state.End = time.Now()
+		da.State.Set(state)
+	}
+	// Else: some batches still Running; PlanDeferredActions will resume via runDeferBatch entry checks.
+}
+
+// deferredActionsTerminal reports whether the DeferredActions container (or nil)
+// is in a terminal state for fixPlan's purposes.
+func deferredActionsTerminal(da *workflow.DeferredActions) bool {
+	if da == nil {
+		return true
+	}
+	switch da.State.Get().Status {
+	case workflow.Completed, workflow.Failed, workflow.Stopped:
+		return true
+	}
+	return false
+}
+
 func (s *States) fixBlock(b *workflow.Block) {
 	if b.State.Get().Status != workflow.Running {
 		return
@@ -351,6 +499,9 @@ func (s *States) fixPlan(p *workflow.Plan) {
 	if p.DeferredChecks != nil {
 		fixChecks(p.DeferredChecks)
 	}
+	if p.DeferredActions != nil {
+		s.fixDeferredActions(p.DeferredActions)
+	}
 
 	running := 0
 	completed := 0
@@ -380,7 +531,7 @@ func (s *States) fixPlan(p *workflow.Plan) {
 		return
 	}
 	if completed == len(p.Blocks) {
-		if checksCompleted(p.PostChecks) && checksCompleted(p.DeferredChecks) {
+		if checksCompleted(p.PostChecks) && checksCompleted(p.DeferredChecks) && deferredActionsTerminal(p.DeferredActions) {
 			state := p.State.Get()
 			state.Status = workflow.Completed
 			state.End = time.Now()

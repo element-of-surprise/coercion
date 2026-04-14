@@ -178,6 +178,8 @@ func (b *BuildPlan) Up() *BuildPlan {
 	return b
 }
 
+//go:generate go tool github.com/johnsiilver/stringer -type=ChecksType -trimprefix=CT -valid -invalid=0
+
 // ChecksType is the check type you are adding to a Plan or Block.
 type ChecksType int
 
@@ -195,6 +197,21 @@ const (
 	BypassChecks ChecksType = 4
 	// DeferredChecks is a set of deferred checks.
 	DeferredChecks ChecksType = 5
+)
+
+//go:generate go tool github.com/johnsiilver/stringer -type=DeferCondition -trimprefix=DC -valid -invalid=0
+
+// DeferCondition is the condition under which a DeferBatch is executed.
+type DeferCondition int
+
+const (
+	// DCUnknown is an unknown defer condition. This should never be used
+	// and indicates a bug in the code.
+	DCUnknown DeferCondition = 0
+	// OnSuccess runs the DeferBatch if the parent element succeeded.
+	OnSuccess DeferCondition = 1
+	// OnFailure runs the DeferBatch if the parent element failed.
+	OnFailure DeferCondition = 2
 )
 
 // AddChecks adds a check to the current Plan or Block. This moves you into the check.
@@ -426,7 +443,91 @@ func (b *BuildPlan) AddAction(action *workflow.Action) *BuildPlan {
 	case *workflow.Checks:
 		t.Actions = append(t.Actions, action)
 		return b
+	case *workflow.DeferBatch:
+		t.Actions = append(t.Actions, action)
+		return b
 	}
 	b.setErr(fmt.Errorf("invalid type for AddAction(): %T", b.current))
+	return b
+}
+
+// AddDeferredActions adds a DeferredActions container to the current Plan and moves
+// into it. Only one DeferredActions may be attached to a Plan. Returns an error if the
+// current scope is not a Plan or if DeferredActions is already set.
+func (b *BuildPlan) AddDeferredActions() *BuildPlan {
+	if b.emitted {
+		b.setErr(errors.New("cannot call AddDeferredActions() after Plan() has been called"))
+		return b
+	}
+	if b.err != nil {
+		return b
+	}
+
+	switch t := b.current().(type) {
+	case *workflow.Plan:
+		if t.DeferredActions != nil {
+			b.setErr(errors.New("cannot add DeferredActions to Plan with existing DeferredActions"))
+			return b
+		}
+		da := &workflow.DeferredActions{}
+		t.DeferredActions = da
+		b.chain = append(b.chain, da)
+		return b
+	}
+	b.setErr(fmt.Errorf("invalid type for AddDeferredActions(): %T", b.current()))
+	return b
+}
+
+// AddDeferBatch adds a DeferBatch to the current DeferredActions, appending it to the
+// OnSuccess or OnFailure list based on cond, and moves into the batch so that Actions
+// can be added to it. The batch's embedded Sequence must have a Name and Descr set.
+// Returns an error if the current scope is not a DeferredActions, the batch is nil,
+// or any Action in the batch is nil.
+func (b *BuildPlan) AddDeferBatch(cond DeferCondition, batch *workflow.DeferBatch) *BuildPlan {
+	if b.emitted {
+		b.setErr(errors.New("cannot call AddDeferBatch() after Plan() has been called"))
+		return b
+	}
+	if b.err != nil {
+		return b
+	}
+
+	if !cond.Valid() {
+		b.setErr(fmt.Errorf("invalid DeferCondition: %d", cond))
+		return b
+	}
+	if batch == nil {
+		b.setErr(errors.New("batch must not be nil"))
+		return b
+	}
+	if strings.TrimSpace(batch.Name) == "" {
+		b.setErr(errors.New("DeferBatch name must be provided"))
+		return b
+	}
+	if strings.TrimSpace(batch.Descr) == "" {
+		b.setErr(errors.New("DeferBatch description must be provided"))
+		return b
+	}
+	for _, action := range batch.Actions {
+		if action == nil {
+			b.setErr(errors.New("action in a DeferBatch must not be nil"))
+			return b
+		}
+	}
+
+	switch t := b.current().(type) {
+	case *workflow.DeferredActions:
+		switch cond {
+		case OnSuccess:
+			t.OnSuccess = append(t.OnSuccess, batch)
+		case OnFailure:
+			t.OnFailure = append(t.OnFailure, batch)
+		default:
+			panic("AddDeferBatch should have already validated the DeferCondition, so this should never happen")
+		}
+		b.chain = append(b.chain, batch)
+		return b
+	}
+	b.setErr(fmt.Errorf("invalid type for AddDeferBatch(): %T", b.current()))
 	return b
 }

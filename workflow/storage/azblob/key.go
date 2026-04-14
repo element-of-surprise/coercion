@@ -12,11 +12,13 @@ import (
 
 const (
 	// Directory prefixes for different object types
-	plansDir     = "plans"
-	blocksDir    = "blocks"
-	sequencesDir = "sequences"
-	checksDir    = "checks"
-	actionsDir   = "actions"
+	plansDir           = "plans"
+	blocksDir          = "blocks"
+	sequencesDir       = "sequences"
+	checksDir          = "checks"
+	actionsDir         = "actions"
+	deferredActionsDir = "deferredactions"
+	deferBatchesDir    = "deferbatches"
 )
 
 // containerName returns the container name for a given date.
@@ -158,6 +160,18 @@ func actionBlobName(planID, actionID uuid.UUID) string {
 	return fmt.Sprintf("%s/%s/%s.json", actionsDir, planID.String(), actionID.String())
 }
 
+// deferredActionsBlobName returns the blob name for a DeferredActions object.
+// Format: deferredactions/<plan-id>/<deferredactions-id>.json
+func deferredActionsBlobName(planID, daID uuid.UUID) string {
+	return fmt.Sprintf("%s/%s/%s.json", deferredActionsDir, planID.String(), daID.String())
+}
+
+// deferBatchBlobName returns the blob name for a DeferBatch object.
+// Format: deferbatches/<plan-id>/<batch-id>.json
+func deferBatchBlobName(planID, batchID uuid.UUID) string {
+	return fmt.Sprintf("%s/%s/%s.json", deferBatchesDir, planID.String(), batchID.String())
+}
+
 // blobNameForObject returns the blob name for any workflow object.
 func blobNameForObject(obj workflow.Object) string {
 	switch o := obj.(type) {
@@ -171,6 +185,10 @@ func blobNameForObject(obj workflow.Object) string {
 		return checksBlobName(o.GetPlanID(), o.ID)
 	case *workflow.Action:
 		return actionBlobName(o.GetPlanID(), o.ID)
+	case *workflow.DeferredActions:
+		return deferredActionsBlobName(o.GetPlanID(), o.ID)
+	case *workflow.DeferBatch:
+		return deferBatchBlobName(o.GetPlanID(), o.ID)
 	default:
 		panic(fmt.Sprintf("bug: unknown object type %T", obj))
 	}

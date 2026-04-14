@@ -16,22 +16,23 @@ type plansEntry struct {
 	// PlanID is the unique identifier for the plan. This is a duplicate of ID. All other items have ID and PlanID.
 	// While a plan technically doesn't need both, this fits well into the model. While it can be worked around,
 	// it causes all kinds of subtle bugs. By having both it makes everything easier.
-	PlanID         uuid.UUID              `json:"planID,omitempty"`
-	GroupID        uuid.UUID              `json:"groupID,omitempty"`
-	Name           string                 `json:"name,omitempty"`
-	Descr          string                 `json:"descr,omitempty"`
-	Meta           []byte                 `json:"meta,omitempty"`
-	BypassChecks   uuid.UUID              `json:"bypassChecks,omitempty"`
-	PreChecks      uuid.UUID              `json:"preChecks,omitempty"`
-	PostChecks     uuid.UUID              `json:"postChecks,omitempty"`
-	ContChecks     uuid.UUID              `json:"contChecks,omitempty"`
-	DeferredChecks uuid.UUID              `json:"deferredChecks,omitempty"`
-	Blocks         []uuid.UUID            `json:"blocks,omitempty"`
-	StateStatus    workflow.Status        `json:"stateStatus,omitempty"`
-	StateStart     time.Time              `json:"stateStart,omitempty"`
-	StateEnd       time.Time              `json:"stateEnd,omitempty"`
-	SubmitTime     time.Time              `json:"submitTime,omitempty"`
-	Reason         workflow.FailureReason `json:"reason,omitempty"`
+	PlanID          uuid.UUID              `json:"planID,omitempty"`
+	GroupID         uuid.UUID              `json:"groupID,omitempty"`
+	Name            string                 `json:"name,omitempty"`
+	Descr           string                 `json:"descr,omitempty"`
+	Meta            []byte                 `json:"meta,omitempty"`
+	BypassChecks    uuid.UUID              `json:"bypassChecks,omitempty"`
+	PreChecks       uuid.UUID              `json:"preChecks,omitempty"`
+	PostChecks      uuid.UUID              `json:"postChecks,omitempty"`
+	ContChecks      uuid.UUID              `json:"contChecks,omitempty"`
+	DeferredChecks  uuid.UUID              `json:"deferredChecks,omitempty"`
+	DeferredActions uuid.UUID              `json:"deferredActions,omitempty"`
+	Blocks          []uuid.UUID            `json:"blocks,omitempty"`
+	StateStatus     workflow.Status        `json:"stateStatus,omitempty"`
+	StateStart      time.Time              `json:"stateStart,omitempty"`
+	StateEnd        time.Time              `json:"stateEnd,omitempty"`
+	SubmitTime      time.Time              `json:"submitTime,omitempty"`
+	Reason          workflow.FailureReason `json:"reason,omitempty"`
 
 	ETag azcore.ETag `json:"_etag,omitempty"`
 }
@@ -93,6 +94,42 @@ type sequencesEntry struct {
 	StateStatus  workflow.Status     `json:"stateStatus,omitempty"`
 	StateStart   time.Time           `json:"stateStart,omitempty"`
 	StateEnd     time.Time           `json:"stateEnd,omitempty"`
+
+	ETag azcore.ETag `json:"_etag,omitempty"`
+}
+
+type deferredActionsEntry struct {
+	PartitionKey string              `json:"partitionKey"`
+	Swarm        string              `json:"swarm"`
+	Type         workflow.ObjectType `json:"type,omitempty"`
+	ID           uuid.UUID           `json:"id,omitempty"`
+	PlanID       uuid.UUID           `json:"planID,omitempty"`
+	OnFailure    []uuid.UUID         `json:"onFailure,omitempty"`
+	OnSuccess    []uuid.UUID         `json:"onSuccess,omitempty"`
+	StateStatus  workflow.Status     `json:"stateStatus,omitempty"`
+	StateStart   time.Time           `json:"stateStart,omitempty"`
+	StateEnd     time.Time           `json:"stateEnd,omitempty"`
+
+	ETag azcore.ETag `json:"_etag,omitempty"`
+}
+
+type deferBatchesEntry struct {
+	PartitionKey      string              `json:"partitionKey"`
+	Swarm             string              `json:"swarm"`
+	Type              workflow.ObjectType `json:"type,omitempty"`
+	ID                uuid.UUID           `json:"id,omitempty"`
+	Key               uuid.UUID           `json:"key,omitempty"`
+	PlanID            uuid.UUID           `json:"planID,omitempty"`
+	DeferredActionsID uuid.UUID           `json:"deferredActionsID,omitempty"`
+	ListKind          string              `json:"listKind,omitempty"`
+	Pos               int                 `json:"pos,omitempty"`
+	FailElement       bool                `json:"failElement,omitempty"`
+	Name              string              `json:"name,omitempty"`
+	Descr             string              `json:"descr,omitempty"`
+	Actions           []uuid.UUID         `json:"actions,omitempty"`
+	StateStatus       workflow.Status     `json:"stateStatus,omitempty"`
+	StateStart        time.Time           `json:"stateStart,omitempty"`
+	StateEnd          time.Time           `json:"stateEnd,omitempty"`
 
 	ETag azcore.ETag `json:"_etag,omitempty"`
 }

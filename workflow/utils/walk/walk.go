@@ -57,6 +57,18 @@ func (i Item) Action() *workflow.Action {
 	return i.Value.(*workflow.Action)
 }
 
+// DeferredActions returns the Value as a *workflow.DeferredActions. If the
+// object is not a DeferredActions, this will panic.
+func (i Item) DeferredActions() *workflow.DeferredActions {
+	return i.Value.(*workflow.DeferredActions)
+}
+
+// DeferBatch returns the Value as a *workflow.DeferBatch. If the object is
+// not a DeferBatch, this will panic.
+func (i Item) DeferBatch() *workflow.DeferBatch {
+	return i.Value.(*workflow.DeferBatch)
+}
+
 // Plan walks a *workflow.Plan for all objects in call order.
 func Plan(p *workflow.Plan) iter.Seq[Item] {
 	return func(yield func(Item) bool) {
@@ -88,6 +100,11 @@ func Plan(p *workflow.Plan) iter.Seq[Item] {
 		}
 		if p.PostChecks != nil {
 			if ok := walkChecks(yield, chain, p.PostChecks); !ok {
+				return
+			}
+		}
+		if p.DeferredActions != nil {
+			if ok := walkDeferredActions(yield, chain, p.DeferredActions); !ok {
 				return
 			}
 		}
@@ -184,6 +201,39 @@ func walkBlock(yield func(Item) bool, chain []workflow.Object, block *workflow.B
 	}
 	if block.DeferredChecks != nil {
 		if !walkChecks(yield, chain, block.DeferredChecks) {
+			return false
+		}
+	}
+	return true
+}
+
+func walkDeferredActions(yield func(Item) bool, chain []workflow.Object, da *workflow.DeferredActions) bool {
+	if !yield(Item{Chain: chain, Value: da}) {
+		return false
+	}
+
+	chain = append(chain, da)
+	for _, batch := range da.OnFailure {
+		if !walkDeferBatch(yield, chain, batch) {
+			return false
+		}
+	}
+	for _, batch := range da.OnSuccess {
+		if !walkDeferBatch(yield, chain, batch) {
+			return false
+		}
+	}
+	return true
+}
+
+func walkDeferBatch(yield func(Item) bool, chain []workflow.Object, batch *workflow.DeferBatch) bool {
+	if !yield(Item{Chain: chain, Value: batch}) {
+		return false
+	}
+
+	chain = append(chain, batch)
+	for _, action := range batch.Actions {
+		if !yield(Item{Chain: chain, Value: action}) {
 			return false
 		}
 	}

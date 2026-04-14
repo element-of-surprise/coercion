@@ -155,6 +155,15 @@ func (u *uploader) uploadSubObjects(ctx context.Context, containerName string, p
 		}
 	}
 
+	if p.DeferredActions != nil && ctx.Err() == nil {
+		g.Go(
+			ctx,
+			func(ctx context.Context) error {
+				return u.uploadDeferredActionsBlob(ctx, containerName, p.ID, p.DeferredActions)
+			},
+		)
+	}
+
 	for i, block := range p.Blocks {
 		if ctx.Err() != nil {
 			break

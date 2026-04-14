@@ -35,9 +35,10 @@ func TestPlanValidate(t *testing.T) {
 	expectVals := []validator{
 		goodPlan().BypassChecks,
 		goodPlan().PreChecks,
-		goodPlan().PostChecks,
 		goodPlan().ContChecks,
+		goodPlan().PostChecks,
 		goodPlan().DeferredChecks,
+		goodPlan().DeferredActions,
 	}
 	for _, v := range goodPlan().Blocks {
 		expectVals = append(expectVals, v)

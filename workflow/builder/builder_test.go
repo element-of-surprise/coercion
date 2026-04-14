@@ -337,6 +337,145 @@ func TestAddDeferredChecks(t *testing.T) {
 	}
 }
 
+// TestAddDeferredActions tests that AddDeferredActions and AddDeferBatch attach
+// a DeferredActions to the Plan and populate the OnSuccess/OnFailure batches.
+func TestAddDeferredActions(t *testing.T) {
+	failAction := &workflow.Action{Name: "cleanup", Descr: "cleanup", Plugin: "p"}
+	successAction := &workflow.Action{Name: "log", Descr: "log", Plugin: "p"}
+
+	builder, err := New("test", "test")
+	if err != nil {
+		panic(err)
+	}
+
+	builder.AddDeferredActions()
+	builder.AddDeferBatch(OnFailure, &workflow.DeferBatch{
+		FailElement: true,
+		Sequence:    workflow.Sequence{Name: "cleanup", Descr: "rollback state"},
+	})
+	builder.AddAction(failAction)
+	builder.Up()
+	builder.AddDeferBatch(OnSuccess, &workflow.DeferBatch{
+		Sequence: workflow.Sequence{Name: "log", Descr: "log success"},
+	})
+	builder.AddAction(successAction)
+	builder.Up()
+	builder.Up()
+	builder.AddBlock(BlockArgs{Name: "b", Descr: "b", Concurrency: 1})
+	builder.AddSequence(&workflow.Sequence{Name: "s", Descr: "s"})
+	builder.AddAction(&workflow.Action{Name: "a", Descr: "a", Plugin: "p"})
+
+	got, err := builder.Plan()
+	if err != nil {
+		t.Fatalf("TestAddDeferredActions(builder.Plan()): unexpected error: %v", err)
+	}
+
+	if got.DeferredActions == nil {
+		t.Fatalf("TestAddDeferredActions: got.DeferredActions == nil, want non-nil")
+	}
+	if len(got.DeferredActions.OnFailure) != 1 {
+		t.Fatalf("TestAddDeferredActions(OnFailure): got len %d, want 1", len(got.DeferredActions.OnFailure))
+	}
+	if !got.DeferredActions.OnFailure[0].FailElement {
+		t.Errorf("TestAddDeferredActions(OnFailure[0].FailElement): got false, want true")
+	}
+	if got.DeferredActions.OnFailure[0].Name != "cleanup" {
+		t.Errorf("TestAddDeferredActions(OnFailure[0].Name): got %s, want cleanup", got.DeferredActions.OnFailure[0].Name)
+	}
+	if len(got.DeferredActions.OnFailure[0].Actions) != 1 || got.DeferredActions.OnFailure[0].Actions[0].Name != "cleanup" {
+		t.Errorf("TestAddDeferredActions(OnFailure[0].Actions): missing or wrong action")
+	}
+	if len(got.DeferredActions.OnSuccess) != 1 {
+		t.Fatalf("TestAddDeferredActions(OnSuccess): got len %d, want 1", len(got.DeferredActions.OnSuccess))
+	}
+	if got.DeferredActions.OnSuccess[0].Name != "log" {
+		t.Errorf("TestAddDeferredActions(OnSuccess[0].Name): got %s, want log", got.DeferredActions.OnSuccess[0].Name)
+	}
+	if len(got.DeferredActions.OnSuccess[0].Actions) != 1 || got.DeferredActions.OnSuccess[0].Actions[0].Name != "log" {
+		t.Errorf("TestAddDeferredActions(OnSuccess[0].Actions): missing or wrong action")
+	}
+}
+
+// TestAddDeferredActionsErrors covers the error branches of AddDeferredActions
+// and AddDeferBatch.
+func TestAddDeferredActionsErrors(t *testing.T) {
+	goodBatch := func() *workflow.DeferBatch {
+		return &workflow.DeferBatch{
+			Sequence: workflow.Sequence{Name: "s", Descr: "s"},
+		}
+	}
+
+	tests := []struct {
+		name string
+		run  func(*BuildPlan)
+	}{
+		{
+			name: "Error: AddDeferredActions outside Plan scope",
+			run: func(bp *BuildPlan) {
+				bp.AddBlock(BlockArgs{Name: "b", Descr: "b", Concurrency: 1})
+				bp.AddDeferredActions()
+			},
+		},
+		{
+			name: "Error: duplicate AddDeferredActions",
+			run: func(bp *BuildPlan) {
+				bp.AddDeferredActions()
+				bp.Up()
+				bp.AddDeferredActions()
+			},
+		},
+		{
+			name: "Error: AddDeferBatch outside DeferredActions scope",
+			run: func(bp *BuildPlan) {
+				bp.AddDeferBatch(OnFailure, goodBatch())
+			},
+		},
+		{
+			name: "Error: AddDeferBatch with nil batch",
+			run: func(bp *BuildPlan) {
+				bp.AddDeferredActions()
+				bp.AddDeferBatch(OnSuccess, nil)
+			},
+		},
+		{
+			name: "Error: AddDeferBatch with unknown condition",
+			run: func(bp *BuildPlan) {
+				bp.AddDeferredActions()
+				bp.AddDeferBatch(DCUnknown, goodBatch())
+			},
+		},
+		{
+			name: "Error: AddDeferBatch with empty Name",
+			run: func(bp *BuildPlan) {
+				bp.AddDeferredActions()
+				bp.AddDeferBatch(OnSuccess, &workflow.DeferBatch{
+					Sequence: workflow.Sequence{Descr: "s"},
+				})
+			},
+		},
+		{
+			name: "Error: AddDeferBatch with empty Descr",
+			run: func(bp *BuildPlan) {
+				bp.AddDeferredActions()
+				bp.AddDeferBatch(OnSuccess, &workflow.DeferBatch{
+					Sequence: workflow.Sequence{Name: "s"},
+				})
+			},
+		},
+	}
+
+	for _, test := range tests {
+		bp, err := New("test", "test")
+		if err != nil {
+			panic(err)
+		}
+		test.run(bp)
+		if bp.Err() == nil {
+			t.Errorf("TestAddDeferredActionsErrors(%s): got err == nil, want err != nil", test.name)
+		}
+	}
+}
+
 func TestAddBlock(t *testing.T) {
 	t.Parallel()
 

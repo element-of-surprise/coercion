@@ -84,6 +84,20 @@ func init() {
 	build.AddAction(clone.Action(ctx, checkAction3))
 	build.Up()
 
+	build.AddDeferredActions()
+	build.AddDeferBatch(builder.OnFailure, &workflow.DeferBatch{
+		FailElement: true,
+		Sequence:    workflow.Sequence{Name: "fail-batch", Descr: "fail-batch"},
+	})
+	build.AddAction(clone.Action(ctx, checkAction1))
+	build.Up()
+	build.AddDeferBatch(builder.OnSuccess, &workflow.DeferBatch{
+		Sequence: workflow.Sequence{Name: "success-batch", Descr: "success-batch"},
+	})
+	build.AddAction(clone.Action(ctx, checkAction2))
+	build.Up()
+	build.Up()
+
 	build.AddBlock(builder.BlockArgs{
 		Name:              "block",
 		Descr:             "block",
@@ -252,6 +266,8 @@ func TestDeletePlan(t *testing.T) {
 	mustGetcount(pool, "actions", t)
 	mustGetcount(pool, "checks", t)
 	mustGetcount(pool, "sequences", t)
+	mustGetcount(pool, "deferredactions", t)
+	mustGetcount(pool, "deferbatches", t)
 
 	if err := deleter.Delete(context.Background(), plan.ID); err != nil {
 		t.Fatal(err)
@@ -262,6 +278,8 @@ func TestDeletePlan(t *testing.T) {
 	countExpect(pool, "actions", 0, t)
 	countExpect(pool, "checks", 0, t)
 	countExpect(pool, "sequences", 0, t)
+	countExpect(pool, "deferredactions", 0, t)
+	countExpect(pool, "deferbatches", 0, t)
 }
 
 func mustGetcount(pool *sqlitex.Pool, table string, t *testing.T) int64 {

@@ -23,6 +23,8 @@ type updater struct {
 	blockUpdater
 	sequenceUpdater
 	actionUpdater
+	deferredActionsUpdater
+	deferBatchUpdater
 
 	uploader *uploader
 
@@ -58,6 +60,18 @@ func newUpdater(mu *planlocks.Group, prefix string, client blobops.Ops, endpoint
 		endpoint: endpoint,
 	}
 	u.actionUpdater = actionUpdater{
+		mu:       mu,
+		prefix:   prefix,
+		client:   client,
+		endpoint: endpoint,
+	}
+	u.deferredActionsUpdater = deferredActionsUpdater{
+		mu:       mu,
+		prefix:   prefix,
+		client:   client,
+		endpoint: endpoint,
+	}
+	u.deferBatchUpdater = deferBatchUpdater{
 		mu:       mu,
 		prefix:   prefix,
 		client:   client,

@@ -32,14 +32,16 @@ func fakeParallelActionRunner(ctx context.Context, actions []*workflow.Action) e
 }
 
 type fakeUpdater struct {
-	lock    sync.Mutex
-	create  []*workflow.Plan
-	plans   []*workflow.Plan
-	blocks  []*workflow.Block
-	seqs    []*workflow.Sequence
-	actions []*workflow.Action
-	checks  []*workflow.Checks
-	calls   atomic.Int32
+	lock            sync.Mutex
+	create          []*workflow.Plan
+	plans           []*workflow.Plan
+	blocks          []*workflow.Block
+	seqs            []*workflow.Sequence
+	actions         []*workflow.Action
+	checks          []*workflow.Checks
+	deferredActions []*workflow.DeferredActions
+	deferBatches    []*workflow.DeferBatch
+	calls           atomic.Int32
 
 	storage.Vault
 }
@@ -106,6 +108,26 @@ func (f *fakeUpdater) UpdateSequence(ctx context.Context, seq *workflow.Sequence
 	defer f.lock.Unlock()
 	n := clone.Sequence(ctx, seq, cloneOpts...)
 	f.seqs = append(f.seqs, n)
+	return nil
+}
+
+func (f *fakeUpdater) UpdateDeferredActions(ctx context.Context, da *workflow.DeferredActions) error {
+	f.calls.Add(1)
+
+	f.lock.Lock()
+	defer f.lock.Unlock()
+	n := clone.DeferredActions(ctx, da, cloneOpts...)
+	f.deferredActions = append(f.deferredActions, n)
+	return nil
+}
+
+func (f *fakeUpdater) UpdateDeferBatch(ctx context.Context, b *workflow.DeferBatch) error {
+	f.calls.Add(1)
+
+	f.lock.Lock()
+	defer f.lock.Unlock()
+	n := clone.DeferBatch(ctx, b, cloneOpts...)
+	f.deferBatches = append(f.deferBatches, n)
 	return nil
 }
 

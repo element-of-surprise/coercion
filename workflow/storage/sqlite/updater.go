@@ -23,17 +23,21 @@ type updater struct {
 	blockUpdater
 	sequenceUpdater
 	actionUpdater
+	deferredActionsUpdater
+	deferBatchUpdater
 
 	private.Storage
 }
 
 func newUpdater(mu *sync.Mutex, pool *sqlitex.Pool, capture *CaptureStmts) updater {
 	return updater{
-		planUpdater:     planUpdater{mu: mu, pool: pool, capture: capture},
-		checksUpdater:   checksUpdater{mu: mu, pool: pool, capture: capture},
-		blockUpdater:    blockUpdater{mu: mu, pool: pool, capture: capture},
-		sequenceUpdater: sequenceUpdater{mu: mu, pool: pool, capture: capture},
-		actionUpdater:   actionUpdater{mu: mu, pool: pool, capture: capture},
+		planUpdater:            planUpdater{mu: mu, pool: pool, capture: capture},
+		checksUpdater:          checksUpdater{mu: mu, pool: pool, capture: capture},
+		blockUpdater:           blockUpdater{mu: mu, pool: pool, capture: capture},
+		sequenceUpdater:        sequenceUpdater{mu: mu, pool: pool, capture: capture},
+		actionUpdater:          actionUpdater{mu: mu, pool: pool, capture: capture},
+		deferredActionsUpdater: deferredActionsUpdater{mu: mu, pool: pool, capture: capture},
+		deferBatchUpdater:      deferBatchUpdater{mu: mu, pool: pool, capture: capture},
 	}
 }
 

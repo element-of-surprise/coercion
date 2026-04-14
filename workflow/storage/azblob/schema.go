@@ -115,24 +115,25 @@ func planToMetadata(ctx context.Context, p *workflow.Plan) (map[string]*string, 
 // planEntry represents a lightweight Plan structure in blob storage with IDs only.
 // This is used for running plans and contains only references to sub-objects.
 type planEntry struct {
-	Type           workflow.ObjectType    `json:"type"`
-	ID             uuid.UUID              `json:"id"`
-	PlanID         uuid.UUID              `json:"planID"` // Duplicate of ID for consistency
-	GroupID        uuid.UUID              `json:"groupID,omitempty"`
-	Name           string                 `json:"name"`
-	Descr          string                 `json:"descr"`
-	Meta           []byte                 `json:"meta,omitempty"`
-	BypassChecks   uuid.UUID              `json:"bypassChecks,omitempty"`
-	PreChecks      uuid.UUID              `json:"preChecks,omitempty"`
-	PostChecks     uuid.UUID              `json:"postChecks,omitempty"`
-	ContChecks     uuid.UUID              `json:"contChecks,omitempty"`
-	DeferredChecks uuid.UUID              `json:"deferredChecks,omitempty"`
-	Blocks         []uuid.UUID            `json:"blocks,omitempty"`
-	StateStatus    workflow.Status        `json:"stateStatus"`
-	StateStart     time.Time              `json:"stateStart,omitempty"`
-	StateEnd       time.Time              `json:"stateEnd,omitempty"`
-	SubmitTime     time.Time              `json:"submitTime"`
-	Reason         workflow.FailureReason `json:"reason,omitempty"`
+	Type            workflow.ObjectType    `json:"type"`
+	ID              uuid.UUID              `json:"id"`
+	PlanID          uuid.UUID              `json:"planID"` // Duplicate of ID for consistency
+	GroupID         uuid.UUID              `json:"groupID,omitempty"`
+	Name            string                 `json:"name"`
+	Descr           string                 `json:"descr"`
+	Meta            []byte                 `json:"meta,omitempty"`
+	BypassChecks    uuid.UUID              `json:"bypassChecks,omitempty"`
+	PreChecks       uuid.UUID              `json:"preChecks,omitempty"`
+	PostChecks      uuid.UUID              `json:"postChecks,omitempty"`
+	ContChecks      uuid.UUID              `json:"contChecks,omitempty"`
+	DeferredChecks  uuid.UUID              `json:"deferredChecks,omitempty"`
+	DeferredActions uuid.UUID              `json:"deferredActions,omitempty"`
+	Blocks          []uuid.UUID            `json:"blocks,omitempty"`
+	StateStatus     workflow.Status        `json:"stateStatus"`
+	StateStart      time.Time              `json:"stateStart,omitempty"`
+	StateEnd        time.Time              `json:"stateEnd,omitempty"`
+	SubmitTime      time.Time              `json:"submitTime"`
+	Reason          workflow.FailureReason `json:"reason,omitempty"`
 }
 
 // blocksEntry represents a Block object in blob storage.
@@ -249,6 +250,9 @@ func planToPlanEntry(p *workflow.Plan) (planEntry, error) {
 	}
 	if p.DeferredChecks != nil {
 		entry.DeferredChecks = p.DeferredChecks.ID
+	}
+	if p.DeferredActions != nil {
+		entry.DeferredActions = p.DeferredActions.ID
 	}
 
 	entry.Blocks = make([]uuid.UUID, len(p.Blocks))
