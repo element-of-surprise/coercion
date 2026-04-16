@@ -85,13 +85,15 @@ func init() {
 	build.Up()
 
 	build.AddDeferredActions()
-	build.AddDeferBatch(builder.OnFailure, &workflow.DeferBatch{
+	build.AddDeferBatch(&workflow.DeferBatch{
+		When:        workflow.OnFailure,
 		FailElement: true,
 		Sequence:    workflow.Sequence{Name: "fail-batch", Descr: "fail-batch"},
 	})
 	build.AddAction(clone.Action(ctx, checkAction1))
 	build.Up()
-	build.AddDeferBatch(builder.OnSuccess, &workflow.DeferBatch{
+	build.AddDeferBatch(&workflow.DeferBatch{
+		When:     workflow.OnSuccess,
 		Sequence: workflow.Sequence{Name: "success-batch", Descr: "success-batch"},
 	})
 	build.AddAction(clone.Action(ctx, checkAction2))
@@ -246,20 +248,25 @@ func TestCommitPlan(t *testing.T) {
 	if storedPlan.DeferredActions == nil {
 		t.Fatalf("TestCommitPlan: storedPlan.DeferredActions is nil, want non-nil")
 	}
-	if got, want := len(storedPlan.DeferredActions.OnFailure), len(plan.DeferredActions.OnFailure); got != want {
-		t.Fatalf("TestCommitPlan: OnFailure batch count = %d, want %d", got, want)
+	if got, want := len(storedPlan.DeferredActions.DeferredBatches), len(plan.DeferredActions.DeferredBatches); got != want {
+		t.Fatalf("TestCommitPlan: DeferredBatches count = %d, want %d", got, want)
 	}
-	if got, want := len(storedPlan.DeferredActions.OnSuccess), len(plan.DeferredActions.OnSuccess); got != want {
-		t.Fatalf("TestCommitPlan: OnSuccess batch count = %d, want %d", got, want)
+	failBatch := storedPlan.DeferredActions.DeferredBatches[0]
+	successBatch := storedPlan.DeferredActions.DeferredBatches[1]
+	if failBatch.When != workflow.OnFailure {
+		t.Errorf("TestCommitPlan: DeferredBatches[0].When = %s, want OnFailure", failBatch.When)
 	}
-	if !storedPlan.DeferredActions.OnFailure[0].FailElement {
-		t.Errorf("TestCommitPlan: OnFailure[0].FailElement = false, want true")
+	if !failBatch.FailElement {
+		t.Errorf("TestCommitPlan: DeferredBatches[0].FailElement = false, want true")
 	}
-	if got, want := storedPlan.DeferredActions.OnFailure[0].Name, "fail-batch"; got != want {
-		t.Errorf("TestCommitPlan: OnFailure[0].Name = %q, want %q", got, want)
+	if got, want := failBatch.Name, "fail-batch"; got != want {
+		t.Errorf("TestCommitPlan: DeferredBatches[0].Name = %q, want %q", got, want)
 	}
-	if got, want := storedPlan.DeferredActions.OnSuccess[0].Name, "success-batch"; got != want {
-		t.Errorf("TestCommitPlan: OnSuccess[0].Name = %q, want %q", got, want)
+	if successBatch.When != workflow.OnSuccess {
+		t.Errorf("TestCommitPlan: DeferredBatches[1].When = %s, want OnSuccess", successBatch.When)
+	}
+	if got, want := successBatch.Name, "success-batch"; got != want {
+		t.Errorf("TestCommitPlan: DeferredBatches[1].Name = %q, want %q", got, want)
 	}
 }
 

@@ -532,8 +532,9 @@ func TestPlan(t *testing.T) {
 				Name:  "test-plan",
 				Descr: "test plan description",
 				DeferredActions: &workflow.DeferredActions{
-					OnFailure: []*workflow.DeferBatch{
+					DeferredBatches: []*workflow.DeferBatch{
 						{
+							When:        workflow.OnFailure,
 							FailElement: true,
 							Sequence: workflow.Sequence{
 								Name:  "fail-batch",
@@ -553,7 +554,7 @@ func TestPlan(t *testing.T) {
 				},
 			},
 			getReq: func(p *workflow.Plan) any {
-				return p.DeferredActions.OnFailure[0].Actions[0].Req
+				return p.DeferredActions.DeferredBatches[0].Actions[0].Req
 			},
 			wantReq: User{Username: "john", Password: ""},
 		},
@@ -563,8 +564,9 @@ func TestPlan(t *testing.T) {
 				Name:  "test-plan",
 				Descr: "test plan description",
 				DeferredActions: &workflow.DeferredActions{
-					OnSuccess: []*workflow.DeferBatch{
+					DeferredBatches: []*workflow.DeferBatch{
 						{
+							When: workflow.OnSuccess,
 							Sequence: workflow.Sequence{
 								Name:  "success-batch",
 								Descr: "success batch description",
@@ -583,7 +585,7 @@ func TestPlan(t *testing.T) {
 				},
 			},
 			getReq: func(p *workflow.Plan) any {
-				return p.DeferredActions.OnSuccess[0].Actions[0].Req
+				return p.DeferredActions.DeferredBatches[0].Actions[0].Req
 			},
 			wantReq: Config{APIKey: "", Endpoint: "https://api.example.com"},
 		},

@@ -627,12 +627,8 @@ func (s *Sequence) self() *Sequence {
 
 // DeferredActions represents a set of Actions that are executed after a workflow element has completed.
 type DeferredActions struct {
-	// OnFailure is a set of DeferBatches that are executed if the workflow element failed.
-	// Each DeferBatch is executed in parallel; the Actions within a DeferBatch run sequentially.
-	OnFailure []*DeferBatch
-	// OnSuccess is a set of DeferBatches that are executed if the workflow element succeeded.
-	// Each DeferBatch is executed in parallel; the Actions within a DeferBatch run sequentially.
-	OnSuccess []*DeferBatch
+	// DeferredBatches is a list of batches that are executed after the workflow element has completed.
+	DeferredBatches []*DeferBatch
 
 	// ID is a unique identifier for the object. Should not be set by the user.
 	ID uuid.UUID
@@ -707,15 +703,13 @@ func (d *DeferredActions) validate(ctx context.Context) ([]validator, error) {
 		return nil, fmt.Errorf("internal settings should not be set by the user")
 	}
 
-	if len(d.OnFailure) == 0 && len(d.OnSuccess) == 0 {
-		return nil, fmt.Errorf("at least one OnFailure or OnSuccess is required")
+	if len(d.DeferredBatches) == 0 {
+		return nil, fmt.Errorf("at least one DeferBatch is required")
 	}
 
-	vals := make([]validator, 0, len(d.OnFailure)+len(d.OnSuccess))
-	for _, list := range [][]*DeferBatch{d.OnFailure, d.OnSuccess} {
-		for _, a := range list {
-			vals = append(vals, a)
-		}
+	vals := make([]validator, 0, len(d.DeferredBatches))
+	for _, a := range d.DeferredBatches {
+		vals = append(vals, a)
 	}
 	return vals, nil
 }
@@ -725,9 +719,27 @@ func (d *DeferredActions) self() *DeferredActions {
 	return d
 }
 
+//go:generate go tool github.com/johnsiilver/stringer -type=WhenDeferred -linecomment -valid -invalid=0
+
+// WhenDeferred represents when the DeferBatch should be executed.
+type WhenDeferred uint8
+
+const (
+	// WhenUnknown represents an unknown value for when the DeferBatch should be executed. This is an indication of a bug.
+	WhenUnknown WhenDeferred = 0 // Unknown
+	// OnSuccess represents a DeferBatch that is executed if the workflow element succeeded.
+	OnSuccess WhenDeferred = 1
+	// OnFailure represents a DeferBatch that is executed if the workflow element failed.
+	OnFailure WhenDeferred = 2
+	// Always represents a DeferBatch that is executed regardless of the workflow element's success or failure.
+	Always WhenDeferred = 3
+)
+
 // DeferBatch represents a set of actions that are executed after a workflow element has completed.
 // If FailElement is true, the parent element will be marked as failed if any action fails.
 type DeferBatch struct {
+	// When represents the plan status that will trigger the execution of the batch. Required.
+	When WhenDeferred
 	// FailElement fails the parent element if the batch fails.
 	FailElement bool
 	Sequence
@@ -742,6 +754,10 @@ func (d *DeferBatch) validate(ctx context.Context) ([]validator, error) {
 	if d == nil {
 		return nil, fmt.Errorf("cannot have a nil DeferBatch")
 	}
+	if !d.When.Valid() {
+		return nil, fmt.Errorf("invalid When value: %d", d.When)
+	}
+
 	if d.ID != uuid.Nil {
 		return nil, fmt.Errorf("id should not be set by the user")
 	}

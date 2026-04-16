@@ -63,8 +63,9 @@ func TestPlan(t *testing.T) {
 			},
 		},
 		DeferredActions: &workflow.DeferredActions{
-			OnFailure: []*workflow.DeferBatch{
+			DeferredBatches: []*workflow.DeferBatch{
 				{
+					When:        workflow.OnFailure,
 					FailElement: true,
 					Sequence: workflow.Sequence{
 						Name:  "plan_defer_fail_batch",
@@ -74,9 +75,8 @@ func TestPlan(t *testing.T) {
 						},
 					},
 				},
-			},
-			OnSuccess: []*workflow.DeferBatch{
 				{
+					When: workflow.OnSuccess,
 					Sequence: workflow.Sequence{
 						Name:  "plan_defer_success_batch",
 						Descr: "plan_defer_success_batch",
@@ -162,10 +162,10 @@ func TestPlan(t *testing.T) {
 		{Chain: []workflow.Object{plan}, Value: plan.PostChecks},
 		{Chain: []workflow.Object{plan, plan.PostChecks}, Value: plan.PostChecks.Actions[0]},
 		{Chain: []workflow.Object{plan}, Value: plan.DeferredActions},
-		{Chain: []workflow.Object{plan, plan.DeferredActions}, Value: plan.DeferredActions.OnFailure[0]},
-		{Chain: []workflow.Object{plan, plan.DeferredActions, plan.DeferredActions.OnFailure[0]}, Value: plan.DeferredActions.OnFailure[0].Actions[0]},
-		{Chain: []workflow.Object{plan, plan.DeferredActions}, Value: plan.DeferredActions.OnSuccess[0]},
-		{Chain: []workflow.Object{plan, plan.DeferredActions, plan.DeferredActions.OnSuccess[0]}, Value: plan.DeferredActions.OnSuccess[0].Actions[0]},
+		{Chain: []workflow.Object{plan, plan.DeferredActions}, Value: plan.DeferredActions.DeferredBatches[0]},
+		{Chain: []workflow.Object{plan, plan.DeferredActions, plan.DeferredActions.DeferredBatches[0]}, Value: plan.DeferredActions.DeferredBatches[0].Actions[0]},
+		{Chain: []workflow.Object{plan, plan.DeferredActions}, Value: plan.DeferredActions.DeferredBatches[1]},
+		{Chain: []workflow.Object{plan, plan.DeferredActions, plan.DeferredActions.DeferredBatches[1]}, Value: plan.DeferredActions.DeferredBatches[1].Actions[0]},
 		{Chain: []workflow.Object{plan}, Value: plan.DeferredChecks},
 		{Chain: []workflow.Object{plan, plan.DeferredChecks}, Value: plan.DeferredChecks.Actions[0]},
 	}

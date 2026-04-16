@@ -102,8 +102,7 @@ var deferredActionsSchema = `
 CREATE Table If Not Exists deferredactions (
     id TEXT PRIMARY KEY,
     plan_id TEXT NOT NULL,
-    onfailure BLOB,
-    onsuccess BLOB,
+    batches BLOB,
     state_status INTEGER NOT NULL,
     state_start INTEGER NOT NULL,
     state_end INTEGER NOT NULL
@@ -114,8 +113,8 @@ CREATE Table If Not Exists deferbatches (
     id TEXT PRIMARY KEY,
     plan_id TEXT NOT NULL,
     deferredactions_id TEXT NOT NULL,
-    list_kind TEXT NOT NULL,
     pos INTEGER NOT NULL,
+    when_run INTEGER NOT NULL,
     fail_element INTEGER NOT NULL,
     name TEXT NOT NULL,
     descr TEXT NOT NULL,

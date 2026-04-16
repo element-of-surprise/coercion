@@ -94,14 +94,14 @@ func createAndUploadTestPlan(ctx context.Context, t *testing.T, fakeClient *blob
 	}
 	onSuccessAction.State.Set(workflow.State{Status: workflow.NotStarted})
 
-	onFailureBatch := &workflow.DeferBatch{FailElement: true}
+	onFailureBatch := &workflow.DeferBatch{When: workflow.OnFailure, FailElement: true}
 	onFailureBatch.ID = workflow.NewV7()
 	onFailureBatch.Name = "fail-batch"
 	onFailureBatch.Descr = "fail-batch"
 	onFailureBatch.Actions = []*workflow.Action{onFailureAction}
 	onFailureBatch.State.Set(workflow.State{Status: workflow.NotStarted})
 
-	onSuccessBatch := &workflow.DeferBatch{}
+	onSuccessBatch := &workflow.DeferBatch{When: workflow.OnSuccess}
 	onSuccessBatch.ID = workflow.NewV7()
 	onSuccessBatch.Name = "success-batch"
 	onSuccessBatch.Descr = "success-batch"
@@ -109,9 +109,8 @@ func createAndUploadTestPlan(ctx context.Context, t *testing.T, fakeClient *blob
 	onSuccessBatch.State.Set(workflow.State{Status: workflow.NotStarted})
 
 	deferredActions := &workflow.DeferredActions{
-		ID:        workflow.NewV7(),
-		OnFailure: []*workflow.DeferBatch{onFailureBatch},
-		OnSuccess: []*workflow.DeferBatch{onSuccessBatch},
+		ID:              workflow.NewV7(),
+		DeferredBatches: []*workflow.DeferBatch{onFailureBatch, onSuccessBatch},
 	}
 	deferredActions.State.Set(workflow.State{Status: workflow.NotStarted})
 
@@ -306,23 +305,13 @@ func TestDelete(t *testing.T) {
 				if fakeClient.BlobExists(containerName, deferredActionsBlobName(plan.ID, plan.DeferredActions.ID)) {
 					t.Errorf("TestDelete(%s): DeferredActions blob should be deleted", test.name)
 				}
-				for _, batch := range plan.DeferredActions.OnFailure {
+				for _, batch := range plan.DeferredActions.DeferredBatches {
 					if fakeClient.BlobExists(containerName, deferBatchBlobName(plan.ID, batch.ID)) {
-						t.Errorf("TestDelete(%s): OnFailure DeferBatch blob should be deleted", test.name)
+						t.Errorf("TestDelete(%s): DeferBatch blob should be deleted", test.name)
 					}
 					for _, action := range batch.Actions {
 						if fakeClient.BlobExists(containerName, actionBlobName(plan.ID, action.ID)) {
-							t.Errorf("TestDelete(%s): OnFailure DeferBatch action blob should be deleted", test.name)
-						}
-					}
-				}
-				for _, batch := range plan.DeferredActions.OnSuccess {
-					if fakeClient.BlobExists(containerName, deferBatchBlobName(plan.ID, batch.ID)) {
-						t.Errorf("TestDelete(%s): OnSuccess DeferBatch blob should be deleted", test.name)
-					}
-					for _, action := range batch.Actions {
-						if fakeClient.BlobExists(containerName, actionBlobName(plan.ID, action.ID)) {
-							t.Errorf("TestDelete(%s): OnSuccess DeferBatch action blob should be deleted", test.name)
+							t.Errorf("TestDelete(%s): DeferBatch action blob should be deleted", test.name)
 						}
 					}
 				}

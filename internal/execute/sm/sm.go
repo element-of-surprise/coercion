@@ -727,10 +727,8 @@ func (s *States) PlanDeferredActions(req statemachine.Request[Data]) statemachin
 		log.Fatalf("failed to write DeferredActions: %v", err)
 	}
 
-	batches := da.OnSuccess
-	if planHasFailed(req.Data.Plan, req.Data.err) {
-		batches = da.OnFailure
-	}
+	failed := planHasFailed(req.Data.Plan, req.Data.err)
+	batches := selectDeferredBatches(da.DeferredBatches, failed)
 
 	failElementTripped := s.runDeferredActions(req.Ctx, batches)
 
@@ -745,8 +743,33 @@ func (s *States) PlanDeferredActions(req statemachine.Request[Data]) statemachin
 	return req
 }
 
+// selectDeferredBatches filters batches whose When matches the plan outcome.
+// Always batches always run; OnSuccess runs only if !failed; OnFailure only if failed.
+// Order is preserved.
+func selectDeferredBatches(batches []*workflow.DeferBatch, failed bool) []*workflow.DeferBatch {
+	if len(batches) == 0 {
+		return nil
+	}
+	out := make([]*workflow.DeferBatch, 0, len(batches))
+	for _, b := range batches {
+		switch b.When {
+		case workflow.Always:
+			out = append(out, b)
+		case workflow.OnSuccess:
+			if !failed {
+				out = append(out, b)
+			}
+		case workflow.OnFailure:
+			if failed {
+				out = append(out, b)
+			}
+		}
+	}
+	return out
+}
+
 // planHasFailed reports whether any phase that ran before DeferredActions
-// failed. Used by PlanDeferredActions to pick OnFailure vs OnSuccess.
+// failed. Used by PlanDeferredActions to filter DeferredBatches by When.
 func planHasFailed(p *workflow.Plan, reqErr error) bool {
 	if reqErr != nil {
 		return true

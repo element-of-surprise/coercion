@@ -9,35 +9,35 @@ import (
 )
 
 // deferredActionsEntry represents a DeferredActions object in blob storage.
-// OnFailure and OnSuccess hold the batch IDs in order; the parent is the
-// authority for ordering so DeferBatch entries don't duplicate position info.
+// DeferredBatches holds the batch IDs in order; the parent is the authority for
+// ordering so DeferBatch entries don't duplicate position info.
 type deferredActionsEntry struct {
-	Type        workflow.ObjectType `json:"type"`
-	ID          uuid.UUID           `json:"id"`
-	PlanID      uuid.UUID           `json:"planID"`
-	OnFailure   []uuid.UUID         `json:"onFailure,omitempty"`
-	OnSuccess   []uuid.UUID         `json:"onSuccess,omitempty"`
-	StateStatus workflow.Status     `json:"stateStatus"`
-	StateStart  time.Time           `json:"stateStart,omitzero"`
-	StateEnd    time.Time           `json:"stateEnd,omitzero"`
+	Type            workflow.ObjectType `json:"type"`
+	ID              uuid.UUID           `json:"id"`
+	PlanID          uuid.UUID           `json:"planID"`
+	DeferredBatches []uuid.UUID         `json:"deferredBatches,omitempty"`
+	StateStatus     workflow.Status     `json:"stateStatus"`
+	StateStart      time.Time           `json:"stateStart,omitzero"`
+	StateEnd        time.Time           `json:"stateEnd,omitzero"`
 }
 
 // deferBatchesEntry represents a DeferBatch object in blob storage. It carries
 // only fields that live on the workflow.DeferBatch itself, so updates can
-// re-marshal the entry without needing to remember which list the batch came
-// from (the parent deferredActionsEntry owns that ordering).
+// re-marshal the entry without needing to remember position info (the parent
+// deferredActionsEntry owns that ordering).
 type deferBatchesEntry struct {
-	Type        workflow.ObjectType `json:"type"`
-	ID          uuid.UUID           `json:"id"`
-	Key         uuid.UUID           `json:"key,omitempty"`
-	PlanID      uuid.UUID           `json:"planID"`
-	FailElement bool                `json:"failElement,omitempty"`
-	Name        string              `json:"name"`
-	Descr       string              `json:"descr"`
-	Actions     []uuid.UUID         `json:"actions,omitempty"`
-	StateStatus workflow.Status     `json:"stateStatus"`
-	StateStart  time.Time           `json:"stateStart,omitzero"`
-	StateEnd    time.Time           `json:"stateEnd,omitzero"`
+	Type        workflow.ObjectType   `json:"type"`
+	ID          uuid.UUID             `json:"id"`
+	Key         uuid.UUID             `json:"key,omitempty"`
+	PlanID      uuid.UUID             `json:"planID"`
+	When        workflow.WhenDeferred `json:"when"`
+	FailElement bool                  `json:"failElement,omitempty"`
+	Name        string                `json:"name"`
+	Descr       string                `json:"descr"`
+	Actions     []uuid.UUID           `json:"actions,omitempty"`
+	StateStatus workflow.Status       `json:"stateStatus"`
+	StateStart  time.Time             `json:"stateStart,omitzero"`
+	StateEnd    time.Time             `json:"stateEnd,omitzero"`
 }
 
 // deferredActionsToEntry converts a workflow.DeferredActions to a deferredActionsEntry.
@@ -62,13 +62,9 @@ func deferredActionsToEntry(da *workflow.DeferredActions) (deferredActionsEntry,
 		entry.StateEnd = state.End
 	}
 
-	entry.OnFailure = make([]uuid.UUID, len(da.OnFailure))
-	for i, b := range da.OnFailure {
-		entry.OnFailure[i] = b.ID
-	}
-	entry.OnSuccess = make([]uuid.UUID, len(da.OnSuccess))
-	for i, b := range da.OnSuccess {
-		entry.OnSuccess[i] = b.ID
+	entry.DeferredBatches = make([]uuid.UUID, len(da.DeferredBatches))
+	for i, b := range da.DeferredBatches {
+		entry.DeferredBatches[i] = b.ID
 	}
 	return entry, nil
 }
@@ -99,6 +95,7 @@ func deferBatchToEntry(b *workflow.DeferBatch) (deferBatchesEntry, error) {
 		ID:          b.ID,
 		Key:         b.Key,
 		PlanID:      b.GetPlanID(),
+		When:        b.When,
 		FailElement: b.FailElement,
 		Name:        b.Name,
 		Descr:       b.Descr,
@@ -120,7 +117,7 @@ func deferBatchToEntry(b *workflow.DeferBatch) (deferBatchesEntry, error) {
 
 // entryToDeferBatch converts a deferBatchesEntry back to a workflow.DeferBatch.
 func entryToDeferBatch(entry deferBatchesEntry) *workflow.DeferBatch {
-	b := &workflow.DeferBatch{FailElement: entry.FailElement}
+	b := &workflow.DeferBatch{When: entry.When, FailElement: entry.FailElement}
 	b.ID = entry.ID
 	b.Key = entry.Key
 	b.Name = entry.Name

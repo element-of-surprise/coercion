@@ -51,8 +51,8 @@ func TestUpdateDeferredActions(t *testing.T) {
 	if stored.DeferredActions == nil {
 		t.Fatalf("TestUpdateDeferredActions: stored plan has no DeferredActions")
 	}
-	if len(stored.DeferredActions.OnFailure) == 0 {
-		t.Fatalf("TestUpdateDeferredActions: stored DeferredActions.OnFailure is empty")
+	if len(stored.DeferredActions.DeferredBatches) == 0 {
+		t.Fatalf("TestUpdateDeferredActions: stored DeferredActions.DeferredBatches is empty")
 	}
 
 	mu := &sync.Mutex{}
@@ -74,8 +74,8 @@ func TestUpdateDeferredActions(t *testing.T) {
 		Start:  time.Unix(300, 0).UTC(),
 		End:    time.Unix(400, 0).UTC(),
 	}
-	stored.DeferredActions.OnFailure[0].State.Set(newBatchState)
-	if err := bU.UpdateDeferBatch(context.Background(), stored.DeferredActions.OnFailure[0]); err != nil {
+	stored.DeferredActions.DeferredBatches[0].State.Set(newBatchState)
+	if err := bU.UpdateDeferBatch(context.Background(), stored.DeferredActions.DeferredBatches[0]); err != nil {
 		t.Fatalf("TestUpdateDeferredActions: UpdateDeferBatch: %s", err)
 	}
 
@@ -90,7 +90,7 @@ func TestUpdateDeferredActions(t *testing.T) {
 	if !gotDA.Start.Equal(newDAState.Start) || !gotDA.End.Equal(newDAState.End) {
 		t.Errorf("TestUpdateDeferredActions: DA times got (%v, %v), want (%v, %v)", gotDA.Start, gotDA.End, newDAState.Start, newDAState.End)
 	}
-	gotBatch := reloaded.DeferredActions.OnFailure[0].State.Get()
+	gotBatch := reloaded.DeferredActions.DeferredBatches[0].State.Get()
 	if gotBatch.Status != newBatchState.Status {
 		t.Errorf("TestUpdateDeferredActions: batch status got %v, want %v", gotBatch.Status, newBatchState.Status)
 	}

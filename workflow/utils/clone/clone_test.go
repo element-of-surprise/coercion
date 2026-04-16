@@ -49,8 +49,9 @@ func TestPlan(t *testing.T) {
 
 	deferredActions := &workflow.DeferredActions{
 		ID: id,
-		OnFailure: []*workflow.DeferBatch{
+		DeferredBatches: []*workflow.DeferBatch{
 			DeferBatch(ctx, &workflow.DeferBatch{
+				When:        workflow.OnFailure,
 				FailElement: true,
 				Sequence: workflow.Sequence{
 					Name:  "fail",
@@ -676,6 +677,7 @@ func TestDeferredActions(t *testing.T) {
 	}
 
 	failBatch := &workflow.DeferBatch{
+		When:        workflow.OnFailure,
 		FailElement: true,
 		Sequence: workflow.Sequence{
 			Name:  "fail",
@@ -686,6 +688,7 @@ func TestDeferredActions(t *testing.T) {
 		},
 	}
 	successBatch := &workflow.DeferBatch{
+		When: workflow.OnSuccess,
 		Sequence: workflow.Sequence{
 			Name:  "success",
 			Descr: "success",
@@ -696,9 +699,8 @@ func TestDeferredActions(t *testing.T) {
 	}
 
 	da := &workflow.DeferredActions{
-		ID:        id,
-		OnFailure: []*workflow.DeferBatch{failBatch},
-		OnSuccess: []*workflow.DeferBatch{successBatch},
+		ID:              id,
+		DeferredBatches: []*workflow.DeferBatch{failBatch, successBatch},
 	}
 	da.State.Set(workflow.State{Status: workflow.Completed})
 
@@ -715,8 +717,9 @@ func TestDeferredActions(t *testing.T) {
 			name: "Success: no options",
 			da:   da,
 			want: &workflow.DeferredActions{
-				OnFailure: []*workflow.DeferBatch{
+				DeferredBatches: []*workflow.DeferBatch{
 					{
+						When:        workflow.OnFailure,
 						FailElement: true,
 						Sequence: workflow.Sequence{
 							Name:  "fail",
@@ -726,9 +729,8 @@ func TestDeferredActions(t *testing.T) {
 							},
 						},
 					},
-				},
-				OnSuccess: []*workflow.DeferBatch{
 					{
+						When: workflow.OnSuccess,
 						Sequence: workflow.Sequence{
 							Name:  "success",
 							Descr: "success",
@@ -751,8 +753,9 @@ func TestDeferredActions(t *testing.T) {
 			da:      da,
 			options: cloneOptions{callNum: 1},
 			want: &workflow.DeferredActions{
-				OnFailure: []*workflow.DeferBatch{
+				DeferredBatches: []*workflow.DeferBatch{
 					{
+						When:        workflow.OnFailure,
 						FailElement: true,
 						Sequence: workflow.Sequence{
 							Name:  "fail",
@@ -762,9 +765,8 @@ func TestDeferredActions(t *testing.T) {
 							},
 						},
 					},
-				},
-				OnSuccess: []*workflow.DeferBatch{
 					{
+						When: workflow.OnSuccess,
 						Sequence: workflow.Sequence{
 							Name:  "success",
 							Descr: "success",

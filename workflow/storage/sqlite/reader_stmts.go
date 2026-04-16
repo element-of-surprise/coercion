@@ -85,8 +85,7 @@ const fetchDeferredActionsByID = `
 SELECT
 	id,
 	plan_id,
-	onfailure,
-	onsuccess,
+	batches,
 	state_status,
 	state_start,
 	state_end
@@ -98,8 +97,8 @@ SELECT
 	id,
 	plan_id,
 	deferredactions_id,
-	list_kind,
 	pos,
+	when_run,
 	fail_element,
 	name,
 	descr,

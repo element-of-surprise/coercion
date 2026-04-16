@@ -172,14 +172,9 @@ func (d deleter) deleteDeferredActions(ctx context.Context, conn *sqlite.Conn, d
 		return nil
 	}
 
-	for _, b := range da.OnFailure {
+	for _, b := range da.DeferredBatches {
 		if err := d.deleteDeferBatch(ctx, conn, b); err != nil {
-			return fmt.Errorf("couldn't delete onfailure defer batch: %w", err)
-		}
-	}
-	for _, b := range da.OnSuccess {
-		if err := d.deleteDeferBatch(ctx, conn, b); err != nil {
-			return fmt.Errorf("couldn't delete onsuccess defer batch: %w", err)
+			return fmt.Errorf("couldn't delete defer batch: %w", err)
 		}
 	}
 

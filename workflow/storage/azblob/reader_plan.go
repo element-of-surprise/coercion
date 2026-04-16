@@ -381,12 +381,7 @@ func (r reader) setRegistry(plan *workflow.Plan) error {
 
 	// Set registry on all DeferredActions batch actions
 	if plan.DeferredActions != nil {
-		for _, batch := range plan.DeferredActions.OnFailure {
-			for _, action := range batch.Actions {
-				action.SetRegister(r.reg)
-			}
-		}
-		for _, batch := range plan.DeferredActions.OnSuccess {
+		for _, batch := range plan.DeferredActions.DeferredBatches {
 			for _, action := range batch.Actions {
 				action.SetRegister(r.reg)
 			}
@@ -487,14 +482,7 @@ func (r reader) fixActions(ctx context.Context, plan *workflow.Plan) error {
 
 	// Fix all actions in DeferredActions batches
 	if plan.DeferredActions != nil {
-		for _, batch := range plan.DeferredActions.OnFailure {
-			for _, action := range batch.Actions {
-				if err := fixAction(action); err != nil {
-					return err
-				}
-			}
-		}
-		for _, batch := range plan.DeferredActions.OnSuccess {
+		for _, batch := range plan.DeferredActions.DeferredBatches {
 			for _, action := range batch.Actions {
 				if err := fixAction(action); err != nil {
 					return err

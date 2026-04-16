@@ -311,7 +311,7 @@ func (s *States) fixDeferredActions(da *workflow.DeferredActions) {
 		return
 	}
 
-	all := append(append([]*workflow.DeferBatch{}, da.OnFailure...), da.OnSuccess...)
+	all := da.DeferredBatches
 
 	stopped := 0
 	for _, b := range all {

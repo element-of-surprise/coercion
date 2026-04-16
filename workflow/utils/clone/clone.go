@@ -346,24 +346,14 @@ func DeferredActions(ctx context.Context, da *workflow.DeferredActions, options 
 		cloneStateAtomic(&n.State, &da.State)
 	}
 
-	if len(da.OnFailure) > 0 {
-		n.OnFailure = make([]*workflow.DeferBatch, 0, len(da.OnFailure))
-		for _, b := range da.OnFailure {
+	if len(da.DeferredBatches) > 0 {
+		n.DeferredBatches = make([]*workflow.DeferBatch, 0, len(da.DeferredBatches))
+		for _, b := range da.DeferredBatches {
 			nb := DeferBatch(ctx, b, withOptions(opts))
 			if nb == nil {
 				continue
 			}
-			n.OnFailure = append(n.OnFailure, nb)
-		}
-	}
-	if len(da.OnSuccess) > 0 {
-		n.OnSuccess = make([]*workflow.DeferBatch, 0, len(da.OnSuccess))
-		for _, b := range da.OnSuccess {
-			nb := DeferBatch(ctx, b, withOptions(opts))
-			if nb == nil {
-				continue
-			}
-			n.OnSuccess = append(n.OnSuccess, nb)
+			n.DeferredBatches = append(n.DeferredBatches, nb)
 		}
 	}
 
@@ -387,6 +377,7 @@ func DeferBatch(ctx context.Context, b *workflow.DeferBatch, options ...Option) 
 	opts.callNum++
 
 	n := &workflow.DeferBatch{
+		When:        b.When,
 		FailElement: b.FailElement,
 		Sequence: workflow.Sequence{
 			Name:  b.Name,

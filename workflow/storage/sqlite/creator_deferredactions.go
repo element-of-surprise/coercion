@@ -11,21 +11,15 @@ import (
 	"zombiezen.com/go/sqlite"
 )
 
-const (
-	listKindOnFailure = "onfailure"
-	listKindOnSuccess = "onsuccess"
-)
-
 const insertDeferredActions = `
 	INSERT INTO deferredactions (
 		id,
 		plan_id,
-		onfailure,
-		onsuccess,
+		batches,
 		state_status,
 		state_start,
 		state_end
-	) VALUES ($id, $plan_id, $onfailure, $onsuccess, $state_status, $state_start, $state_end)`
+	) VALUES ($id, $plan_id, $batches, $state_status, $state_start, $state_end)`
 
 func commitDeferredActions(ctx context.Context, conn *sqlite.Conn, planID uuid.UUID, da *workflow.DeferredActions, capture *CaptureStmts) error {
 	if da == nil {
@@ -35,32 +29,21 @@ func commitDeferredActions(ctx context.Context, conn *sqlite.Conn, planID uuid.U
 	stmt := Stmt{}
 	stmt.Query(insertDeferredActions)
 
-	var onFailure, onSuccess []byte
+	var batches []byte
 	var err error
-	if len(da.OnFailure) > 0 {
-		onFailure, err = idsToJSON(da.OnFailure)
+	if len(da.DeferredBatches) > 0 {
+		batches, err = idsToJSON(da.DeferredBatches)
 		if err != nil {
-			return fmt.Errorf("commitDeferredActions(idsToJSON(onfailure)): %w", err)
-		}
-	}
-	if len(da.OnSuccess) > 0 {
-		onSuccess, err = idsToJSON(da.OnSuccess)
-		if err != nil {
-			return fmt.Errorf("commitDeferredActions(idsToJSON(onsuccess)): %w", err)
+			return fmt.Errorf("commitDeferredActions(idsToJSON(batches)): %w", err)
 		}
 	}
 
 	stmt.SetText("$id", da.ID.String())
 	stmt.SetText("$plan_id", planID.String())
-	if onFailure != nil {
-		stmt.SetBytes("$onfailure", onFailure)
+	if batches != nil {
+		stmt.SetBytes("$batches", batches)
 	} else {
-		stmt.SetNull("$onfailure")
-	}
-	if onSuccess != nil {
-		stmt.SetBytes("$onsuccess", onSuccess)
-	} else {
-		stmt.SetNull("$onsuccess")
+		stmt.SetNull("$batches")
 	}
 	stmt.SetInt64("$state_status", int64(da.State.Get().Status))
 	stmt.SetInt64("$state_start", da.State.Get().Start.UnixNano())
@@ -75,14 +58,9 @@ func commitDeferredActions(ctx context.Context, conn *sqlite.Conn, planID uuid.U
 	}
 	capture.Capture(stmt)
 
-	for i, b := range da.OnFailure {
-		if err := commitDeferBatch(ctx, conn, planID, da.ID, listKindOnFailure, i, b, capture); err != nil {
-			return fmt.Errorf("commitDeferredActions(onfailure): %w", err)
-		}
-	}
-	for i, b := range da.OnSuccess {
-		if err := commitDeferBatch(ctx, conn, planID, da.ID, listKindOnSuccess, i, b, capture); err != nil {
-			return fmt.Errorf("commitDeferredActions(onsuccess): %w", err)
+	for i, b := range da.DeferredBatches {
+		if err := commitDeferBatch(ctx, conn, planID, da.ID, i, b, capture); err != nil {
+			return fmt.Errorf("commitDeferredActions(batch %d): %w", i, err)
 		}
 	}
 	return nil
@@ -93,8 +71,8 @@ const insertDeferBatch = `
 		id,
 		plan_id,
 		deferredactions_id,
-		list_kind,
 		pos,
+		when_run,
 		fail_element,
 		name,
 		descr,
@@ -102,10 +80,10 @@ const insertDeferBatch = `
 		state_status,
 		state_start,
 		state_end
-	) VALUES ($id, $plan_id, $deferredactions_id, $list_kind, $pos, $fail_element, $name, $descr,
+	) VALUES ($id, $plan_id, $deferredactions_id, $pos, $when_run, $fail_element, $name, $descr,
 	$actions, $state_status, $state_start, $state_end)`
 
-func commitDeferBatch(ctx context.Context, conn *sqlite.Conn, planID, daID uuid.UUID, listKind string, pos int, batch *workflow.DeferBatch, capture *CaptureStmts) error {
+func commitDeferBatch(ctx context.Context, conn *sqlite.Conn, planID, daID uuid.UUID, pos int, batch *workflow.DeferBatch, capture *CaptureStmts) error {
 	stmt := Stmt{}
 	stmt.Query(insertDeferBatch)
 
@@ -121,8 +99,8 @@ func commitDeferBatch(ctx context.Context, conn *sqlite.Conn, planID, daID uuid.
 	stmt.SetText("$id", batch.ID.String())
 	stmt.SetText("$plan_id", planID.String())
 	stmt.SetText("$deferredactions_id", daID.String())
-	stmt.SetText("$list_kind", listKind)
 	stmt.SetInt64("$pos", int64(pos))
+	stmt.SetInt64("$when_run", int64(batch.When))
 	stmt.SetBool("$fail_element", batch.FailElement)
 	stmt.SetText("$name", batch.Name)
 	stmt.SetText("$descr", batch.Descr)

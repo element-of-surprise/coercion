@@ -209,10 +209,10 @@
             </div>
         </div>
 
-        {{if .OnFailure}}
+        {{if .DeferredBatches}}
         <div class="m-5 mb-0 p-5 pb-0">
             <div class="section-row flex sitems-center">
-                <div>On Failure</div>
+                <div>Deferred Batches</div>
             </div>
         </div>
         <div class="summary m-5 mt-0 p-5 pt-0">
@@ -220,46 +220,22 @@
                 <tr>
                     <th class="header text-left">Name</th>
                     <th class="header text-left">Description</th>
+                    <th class="header text-left">When</th>
                     <th class="header text-left">Fails Parent</th>
                     <th class="header text-left">Status</th>
                 </tr>
-                {{range .OnFailure}}
+                {{range .DeferredBatches}}
                     <tr class="group">
                         <td class="group-hover:bg-yellow-400"><a href="./batches/{{.ID}}.html">{{.Name}}</a></td>
                         <td class="group-hover:bg-yellow-400">{{.Descr}}</td>
+                        <td class="group-hover:bg-yellow-400">{{.When}}</td>
                         <td class="group-hover:bg-yellow-400">{{.FailElement}}</td>
                         <td class="group-hover:bg-yellow-400"><span style="color:{{statusColor .State.Get.Status}}">{{.State.Get.Status}}</span></td>
                     </tr>
                 {{end}}
             </table>
         </div>
-        {{end}} {{/*if .OnFailure*/}}
-
-        {{if .OnSuccess}}
-        <div class="m-5 mb-0 p-5 pb-0">
-            <div class="section-row flex sitems-center">
-                <div>On Success</div>
-            </div>
-        </div>
-        <div class="summary m-5 mt-0 p-5 pt-0">
-            <table class="w-full">
-                <tr>
-                    <th class="header text-left">Name</th>
-                    <th class="header text-left">Description</th>
-                    <th class="header text-left">Fails Parent</th>
-                    <th class="header text-left">Status</th>
-                </tr>
-                {{range .OnSuccess}}
-                    <tr class="group">
-                        <td class="group-hover:bg-yellow-400"><a href="./batches/{{.ID}}.html">{{.Name}}</a></td>
-                        <td class="group-hover:bg-yellow-400">{{.Descr}}</td>
-                        <td class="group-hover:bg-yellow-400">{{.FailElement}}</td>
-                        <td class="group-hover:bg-yellow-400"><span style="color:{{statusColor .State.Get.Status}}">{{.State.Get.Status}}</span></td>
-                    </tr>
-                {{end}}
-            </table>
-        </div>
-        {{end}} {{/*if .OnSuccess*/}}
+        {{end}} {{/*if .DeferredBatches*/}}
         {{end}} {{/*with .DeferredActions*/}}
     </div>
 

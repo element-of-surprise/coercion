@@ -199,21 +199,6 @@ const (
 	DeferredChecks ChecksType = 5
 )
 
-//go:generate go tool github.com/johnsiilver/stringer -type=DeferCondition -trimprefix=DC -valid -invalid=0
-
-// DeferCondition is the condition under which a DeferBatch is executed.
-type DeferCondition int
-
-const (
-	// DCUnknown is an unknown defer condition. This should never be used
-	// and indicates a bug in the code.
-	DCUnknown DeferCondition = 0
-	// OnSuccess runs the DeferBatch if the parent element succeeded.
-	OnSuccess DeferCondition = 1
-	// OnFailure runs the DeferBatch if the parent element failed.
-	OnFailure DeferCondition = 2
-)
-
 // AddChecks adds a check to the current Plan or Block. This moves you into the check.
 // If at any other level of the plan hierarchy, AddChecks will return an error.
 func (b *BuildPlan) AddChecks(cType ChecksType, check *workflow.Checks) *BuildPlan {
@@ -479,11 +464,12 @@ func (b *BuildPlan) AddDeferredActions() *BuildPlan {
 }
 
 // AddDeferBatch adds a DeferBatch to the current DeferredActions, appending it to the
-// OnSuccess or OnFailure list based on cond, and moves into the batch so that Actions
-// can be added to it. The batch's embedded Sequence must have a Name and Descr set.
-// Returns an error if the current scope is not a DeferredActions, the batch is nil,
-// or any Action in the batch is nil.
-func (b *BuildPlan) AddDeferBatch(cond DeferCondition, batch *workflow.DeferBatch) *BuildPlan {
+// DeferredBatches list, and moves into the batch so that Actions can be added to it.
+// The batch's When field controls when it runs (OnSuccess, OnFailure, or Always).
+// The batch's embedded Sequence must have a Name and Descr set. Returns an error if
+// the current scope is not a DeferredActions, the batch is nil, or any Action in the
+// batch is nil.
+func (b *BuildPlan) AddDeferBatch(batch *workflow.DeferBatch) *BuildPlan {
 	if b.emitted {
 		b.setErr(errors.New("cannot call AddDeferBatch() after Plan() has been called"))
 		return b
@@ -492,12 +478,12 @@ func (b *BuildPlan) AddDeferBatch(cond DeferCondition, batch *workflow.DeferBatc
 		return b
 	}
 
-	if !cond.Valid() {
-		b.setErr(fmt.Errorf("invalid DeferCondition: %d", cond))
-		return b
-	}
 	if batch == nil {
 		b.setErr(errors.New("batch must not be nil"))
+		return b
+	}
+	if !batch.When.Valid() {
+		b.setErr(fmt.Errorf("invalid DeferBatch.When: %d", batch.When))
 		return b
 	}
 	if strings.TrimSpace(batch.Name) == "" {
@@ -517,14 +503,7 @@ func (b *BuildPlan) AddDeferBatch(cond DeferCondition, batch *workflow.DeferBatc
 
 	switch t := b.current().(type) {
 	case *workflow.DeferredActions:
-		switch cond {
-		case OnSuccess:
-			t.OnSuccess = append(t.OnSuccess, batch)
-		case OnFailure:
-			t.OnFailure = append(t.OnFailure, batch)
-		default:
-			panic("AddDeferBatch should have already validated the DeferCondition, so this should never happen")
-		}
+		t.DeferredBatches = append(t.DeferredBatches, batch)
 		b.chain = append(b.chain, batch)
 		return b
 	}

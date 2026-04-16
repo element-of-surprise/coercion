@@ -75,27 +75,16 @@ func (r reader) deferredActionsRowToDeferredActions(ctx context.Context, conn *s
 	}
 	da.State.Set(*state)
 
-	if b := fieldToBytes("onfailure", stmt); b != nil {
-		ids, err := fieldToIDs("onfailure", stmt)
+	if b := fieldToBytes("batches", stmt); b != nil {
+		ids, err := fieldToIDs("batches", stmt)
 		if err != nil {
-			return nil, fmt.Errorf("deferredActionsRowToDeferredActions(onfailure): %w", err)
+			return nil, fmt.Errorf("deferredActionsRowToDeferredActions(batches): %w", err)
 		}
 		batches, err := r.fetchDeferBatchesByIDs(ctx, conn, ids)
 		if err != nil {
-			return nil, fmt.Errorf("deferredActionsRowToDeferredActions(onfailure fetch): %w", err)
+			return nil, fmt.Errorf("deferredActionsRowToDeferredActions(batches fetch): %w", err)
 		}
-		da.OnFailure = batches
-	}
-	if b := fieldToBytes("onsuccess", stmt); b != nil {
-		ids, err := fieldToIDs("onsuccess", stmt)
-		if err != nil {
-			return nil, fmt.Errorf("deferredActionsRowToDeferredActions(onsuccess): %w", err)
-		}
-		batches, err := r.fetchDeferBatchesByIDs(ctx, conn, ids)
-		if err != nil {
-			return nil, fmt.Errorf("deferredActionsRowToDeferredActions(onsuccess fetch): %w", err)
-		}
-		da.OnSuccess = batches
+		da.DeferredBatches = batches
 	}
 	return da, nil
 }
@@ -155,6 +144,7 @@ func (r reader) deferBatchRowToDeferBatch(ctx context.Context, conn *sqlite.Conn
 	}
 	b.SetPlanID(planID)
 
+	b.When = workflow.WhenDeferred(stmt.GetInt64("when_run"))
 	b.FailElement = stmt.GetInt64("fail_element") != 0
 	b.Name = stmt.GetText("name")
 	b.Descr = stmt.GetText("descr")

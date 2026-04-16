@@ -166,14 +166,9 @@ func (d deleter) deleteSequenceBlobs(ctx context.Context, containerName string, 
 }
 
 // deleteDeferredActionsBlobs deletes the DeferredActions blob, all its DeferBatch
-// blobs (across OnFailure and OnSuccess), and all actions owned by those batches.
+// blobs, and all actions owned by those batches.
 func (d deleter) deleteDeferredActionsBlobs(ctx context.Context, containerName string, planID uuid.UUID, da *workflow.DeferredActions) error {
-	for _, batch := range da.OnFailure {
-		if err := d.deleteDeferBatchBlobs(ctx, containerName, planID, batch); err != nil {
-			return err
-		}
-	}
-	for _, batch := range da.OnSuccess {
+	for _, batch := range da.DeferredBatches {
 		if err := d.deleteDeferBatchBlobs(ctx, containerName, planID, batch); err != nil {
 			return err
 		}

@@ -123,24 +123,14 @@ func writeRunningBlock(buff *strings.Builder, block *workflow.Block) {
 func writeDeferredActions(buff *strings.Builder, title *color.Color, da *workflow.DeferredActions) {
 	title.Fprintln(buff, fmt.Sprintf("\nDeferredActions: %s", da.State.Get().Status))
 
-	if len(da.OnFailure) > 0 {
-		title.Fprintln(buff, "\nOn Failure")
-		writeBatchTable(buff, da.OnFailure)
-	}
-	if len(da.OnSuccess) > 0 {
-		title.Fprintln(buff, "\nOn Success")
-		writeBatchTable(buff, da.OnSuccess)
+	if len(da.DeferredBatches) > 0 {
+		title.Fprintln(buff, "\nDeferred Batches")
+		writeBatchTable(buff, da.DeferredBatches)
 	}
 
-	for _, batch := range da.OnFailure {
+	for _, batch := range da.DeferredBatches {
 		if batch.State.Get().Status == workflow.Running {
-			title.Fprintln(buff, fmt.Sprintf("\nRunning DeferBatch Actions (OnFailure): %s", batch.Name))
-			writeRunningActions(buff, &batch.Sequence)
-		}
-	}
-	for _, batch := range da.OnSuccess {
-		if batch.State.Get().Status == workflow.Running {
-			title.Fprintln(buff, fmt.Sprintf("\nRunning DeferBatch Actions (OnSuccess): %s", batch.Name))
+			title.Fprintln(buff, fmt.Sprintf("\nRunning DeferBatch Actions (%s): %s", batch.When, batch.Name))
 			writeRunningActions(buff, &batch.Sequence)
 		}
 	}
@@ -150,11 +140,11 @@ func writeBatchTable(buff *strings.Builder, batches []*workflow.DeferBatch) {
 	headerFmt := color.New(color.FgGreen, color.Underline).SprintfFunc()
 	columnFmt := color.New(color.FgYellow).SprintfFunc()
 
-	tbl := table.New("Batch Number", "Name", "Descr", "Fails Parent", "Status").WithWriter(buff)
+	tbl := table.New("Batch Number", "Name", "Descr", "When", "Fails Parent", "Status").WithWriter(buff)
 	tbl.WithHeaderFormatter(headerFmt).WithFirstColumnFormatter(columnFmt)
 
 	for i, batch := range batches {
-		tbl.AddRow(i, batch.Name, batch.Descr, batch.FailElement, batch.State.Get().Status)
+		tbl.AddRow(i, batch.Name, batch.Descr, batch.When, batch.FailElement, batch.State.Get().Status)
 	}
 	tbl.Print()
 }

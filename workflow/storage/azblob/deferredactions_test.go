@@ -67,31 +67,34 @@ func TestDeferredActionsRoundTrip(t *testing.T) {
 	if got.GetPlanID() != plan.ID {
 		t.Errorf("TestDeferredActionsRoundTrip: DA planID = %v, want %v", got.GetPlanID(), plan.ID)
 	}
-	if n := len(got.OnFailure); n != 1 {
-		t.Fatalf("TestDeferredActionsRoundTrip: OnFailure count = %d, want 1", n)
+	if n := len(got.DeferredBatches); n != 2 {
+		t.Fatalf("TestDeferredActionsRoundTrip: DeferredBatches count = %d, want 2", n)
 	}
-	if n := len(got.OnSuccess); n != 1 {
-		t.Fatalf("TestDeferredActionsRoundTrip: OnSuccess count = %d, want 1", n)
+	failBatch := got.DeferredBatches[0]
+	successBatch := got.DeferredBatches[1]
+	if failBatch.When != workflow.OnFailure {
+		t.Errorf("TestDeferredActionsRoundTrip: DeferredBatches[0].When = %s, want OnFailure", failBatch.When)
 	}
-	failBatch := got.OnFailure[0]
-	successBatch := got.OnSuccess[0]
+	if successBatch.When != workflow.OnSuccess {
+		t.Errorf("TestDeferredActionsRoundTrip: DeferredBatches[1].When = %s, want OnSuccess", successBatch.When)
+	}
 	if !failBatch.FailElement {
-		t.Errorf("TestDeferredActionsRoundTrip: OnFailure[0].FailElement = false, want true")
+		t.Errorf("TestDeferredActionsRoundTrip: DeferredBatches[0].FailElement = false, want true")
 	}
 	if successBatch.FailElement {
-		t.Errorf("TestDeferredActionsRoundTrip: OnSuccess[0].FailElement = true, want false")
+		t.Errorf("TestDeferredActionsRoundTrip: DeferredBatches[1].FailElement = true, want false")
 	}
 	if failBatch.Name != "fail-batch" {
-		t.Errorf("TestDeferredActionsRoundTrip: OnFailure[0].Name = %q, want %q", failBatch.Name, "fail-batch")
+		t.Errorf("TestDeferredActionsRoundTrip: DeferredBatches[0].Name = %q, want %q", failBatch.Name, "fail-batch")
 	}
 	if successBatch.Name != "success-batch" {
-		t.Errorf("TestDeferredActionsRoundTrip: OnSuccess[0].Name = %q, want %q", successBatch.Name, "success-batch")
+		t.Errorf("TestDeferredActionsRoundTrip: DeferredBatches[1].Name = %q, want %q", successBatch.Name, "success-batch")
 	}
 	if len(failBatch.Actions) != 1 {
-		t.Errorf("TestDeferredActionsRoundTrip: OnFailure[0].Actions count = %d, want 1", len(failBatch.Actions))
+		t.Errorf("TestDeferredActionsRoundTrip: DeferredBatches[0].Actions count = %d, want 1", len(failBatch.Actions))
 	}
 	if len(successBatch.Actions) != 1 {
-		t.Errorf("TestDeferredActionsRoundTrip: OnSuccess[0].Actions count = %d, want 1", len(successBatch.Actions))
+		t.Errorf("TestDeferredActionsRoundTrip: DeferredBatches[1].Actions count = %d, want 1", len(successBatch.Actions))
 	}
 
 	// 2. Mutate DeferredActions state and one DeferBatch state via the updaters.
@@ -132,18 +135,18 @@ func TestDeferredActionsRoundTrip(t *testing.T) {
 		t.Errorf("TestDeferredActionsRoundTrip: reloaded DA times = (%v, %v), want (%v, %v)",
 			gotDA.Start, gotDA.End, newDAState.Start, newDAState.End)
 	}
-	gotBatch := reloaded.OnFailure[0].State.Get()
+	gotBatch := reloaded.DeferredBatches[0].State.Get()
 	if gotBatch.Status != newBatchState.Status {
-		t.Errorf("TestDeferredActionsRoundTrip: reloaded OnFailure[0] status = %v, want %v", gotBatch.Status, newBatchState.Status)
+		t.Errorf("TestDeferredActionsRoundTrip: reloaded DeferredBatches[0] status = %v, want %v", gotBatch.Status, newBatchState.Status)
 	}
 	if !gotBatch.Start.Equal(newBatchState.Start) || !gotBatch.End.Equal(newBatchState.End) {
-		t.Errorf("TestDeferredActionsRoundTrip: reloaded OnFailure[0] times = (%v, %v), want (%v, %v)",
+		t.Errorf("TestDeferredActionsRoundTrip: reloaded DeferredBatches[0] times = (%v, %v), want (%v, %v)",
 			gotBatch.Start, gotBatch.End, newBatchState.Start, newBatchState.End)
 	}
-	// The untouched OnSuccess batch must still be NotStarted — proves the
+	// The untouched success batch must still be NotStarted — proves the
 	// DeferredActions-level update did not clobber sibling batches.
-	if gotSuccess := reloaded.OnSuccess[0].State.Get(); gotSuccess.Status != workflow.NotStarted {
-		t.Errorf("TestDeferredActionsRoundTrip: reloaded OnSuccess[0] status = %v, want NotStarted", gotSuccess.Status)
+	if gotSuccess := reloaded.DeferredBatches[1].State.Get(); gotSuccess.Status != workflow.NotStarted {
+		t.Errorf("TestDeferredActionsRoundTrip: reloaded DeferredBatches[1] status = %v, want NotStarted", gotSuccess.Status)
 	}
 }
 

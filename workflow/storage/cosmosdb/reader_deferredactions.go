@@ -36,13 +36,9 @@ func (p reader) idToDeferredActions(ctx context.Context, planID azcosmos.Partiti
 	})
 	da.SetPlanID(resp.PlanID)
 
-	da.OnFailure, err = p.idsToDeferBatches(ctx, planID, resp.OnFailure)
+	da.DeferredBatches, err = p.idsToDeferBatches(ctx, planID, resp.DeferredBatches)
 	if err != nil {
-		return nil, fmt.Errorf("idToDeferredActions(onFailure): %w", err)
-	}
-	da.OnSuccess, err = p.idsToDeferBatches(ctx, planID, resp.OnSuccess)
-	if err != nil {
-		return nil, fmt.Errorf("idToDeferredActions(onSuccess): %w", err)
+		return nil, fmt.Errorf("idToDeferredActions(deferredBatches): %w", err)
 	}
 	return da, nil
 }
@@ -74,6 +70,7 @@ func (p reader) fetchDeferBatchByID(ctx context.Context, planID azcosmos.Partiti
 	}
 
 	b := &workflow.DeferBatch{
+		When:        resp.When,
 		FailElement: resp.FailElement,
 	}
 	b.ID = resp.ID

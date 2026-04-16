@@ -166,8 +166,9 @@ func TestSecure(t *testing.T) {
 		{
 			name: "DeferredActions: secrets in nested batches are wiped",
 			value: &workflow.DeferredActions{
-				OnFailure: []*workflow.DeferBatch{
+				DeferredBatches: []*workflow.DeferBatch{
 					{
+						When: workflow.OnFailure,
 						Sequence: workflow.Sequence{
 							Name:  "fail",
 							Descr: "fail",
@@ -176,9 +177,8 @@ func TestSecure(t *testing.T) {
 							},
 						},
 					},
-				},
-				OnSuccess: []*workflow.DeferBatch{
 					{
+						When: workflow.OnSuccess,
 						Sequence: workflow.Sequence{
 							Name:  "success",
 							Descr: "success",
@@ -190,8 +190,9 @@ func TestSecure(t *testing.T) {
 				},
 			},
 			want: &workflow.DeferredActions{
-				OnFailure: []*workflow.DeferBatch{
+				DeferredBatches: []*workflow.DeferBatch{
 					{
+						When: workflow.OnFailure,
 						Sequence: workflow.Sequence{
 							Name:  "fail",
 							Descr: "fail",
@@ -200,9 +201,8 @@ func TestSecure(t *testing.T) {
 							},
 						},
 					},
-				},
-				OnSuccess: []*workflow.DeferBatch{
 					{
+						When: workflow.OnSuccess,
 						Sequence: workflow.Sequence{
 							Name:  "success",
 							Descr: "success",

@@ -213,12 +213,7 @@ func walkDeferredActions(yield func(Item) bool, chain []workflow.Object, da *wor
 	}
 
 	chain = append(chain, da)
-	for _, batch := range da.OnFailure {
-		if !walkDeferBatch(yield, chain, batch) {
-			return false
-		}
-	}
-	for _, batch := range da.OnSuccess {
+	for _, batch := range da.DeferredBatches {
 		if !walkDeferBatch(yield, chain, batch) {
 			return false
 		}

@@ -99,37 +99,36 @@ type sequencesEntry struct {
 }
 
 type deferredActionsEntry struct {
-	PartitionKey string              `json:"partitionKey"`
-	Swarm        string              `json:"swarm"`
-	Type         workflow.ObjectType `json:"type,omitempty"`
-	ID           uuid.UUID           `json:"id,omitempty"`
-	PlanID       uuid.UUID           `json:"planID,omitempty"`
-	OnFailure    []uuid.UUID         `json:"onFailure,omitempty"`
-	OnSuccess    []uuid.UUID         `json:"onSuccess,omitempty"`
-	StateStatus  workflow.Status     `json:"stateStatus,omitempty"`
-	StateStart   time.Time           `json:"stateStart,omitempty"`
-	StateEnd     time.Time           `json:"stateEnd,omitempty"`
+	PartitionKey    string              `json:"partitionKey"`
+	Swarm           string              `json:"swarm"`
+	Type            workflow.ObjectType `json:"type,omitempty"`
+	ID              uuid.UUID           `json:"id,omitempty"`
+	PlanID          uuid.UUID           `json:"planID,omitempty"`
+	DeferredBatches []uuid.UUID         `json:"deferredBatches,omitempty"`
+	StateStatus     workflow.Status     `json:"stateStatus,omitempty"`
+	StateStart      time.Time           `json:"stateStart,omitempty"`
+	StateEnd        time.Time           `json:"stateEnd,omitempty"`
 
 	ETag azcore.ETag `json:"_etag,omitempty"`
 }
 
 type deferBatchesEntry struct {
-	PartitionKey      string              `json:"partitionKey"`
-	Swarm             string              `json:"swarm"`
-	Type              workflow.ObjectType `json:"type,omitempty"`
-	ID                uuid.UUID           `json:"id,omitempty"`
-	Key               uuid.UUID           `json:"key,omitempty"`
-	PlanID            uuid.UUID           `json:"planID,omitempty"`
-	DeferredActionsID uuid.UUID           `json:"deferredActionsID,omitempty"`
-	ListKind          string              `json:"listKind,omitempty"`
-	Pos               int                 `json:"pos,omitempty"`
-	FailElement       bool                `json:"failElement,omitempty"`
-	Name              string              `json:"name,omitempty"`
-	Descr             string              `json:"descr,omitempty"`
-	Actions           []uuid.UUID         `json:"actions,omitempty"`
-	StateStatus       workflow.Status     `json:"stateStatus,omitempty"`
-	StateStart        time.Time           `json:"stateStart,omitempty"`
-	StateEnd          time.Time           `json:"stateEnd,omitempty"`
+	PartitionKey      string                `json:"partitionKey"`
+	Swarm             string                `json:"swarm"`
+	Type              workflow.ObjectType   `json:"type,omitempty"`
+	ID                uuid.UUID             `json:"id,omitempty"`
+	Key               uuid.UUID             `json:"key,omitempty"`
+	PlanID            uuid.UUID             `json:"planID,omitempty"`
+	DeferredActionsID uuid.UUID             `json:"deferredActionsID,omitempty"`
+	When              workflow.WhenDeferred `json:"when,omitempty"`
+	Pos               int                   `json:"pos,omitempty"`
+	FailElement       bool                  `json:"failElement,omitempty"`
+	Name              string                `json:"name,omitempty"`
+	Descr             string                `json:"descr,omitempty"`
+	Actions           []uuid.UUID           `json:"actions,omitempty"`
+	StateStatus       workflow.Status       `json:"stateStatus,omitempty"`
+	StateStart        time.Time             `json:"stateStart,omitempty"`
+	StateEnd          time.Time             `json:"stateEnd,omitempty"`
 
 	ETag azcore.ETag `json:"_etag,omitempty"`
 }

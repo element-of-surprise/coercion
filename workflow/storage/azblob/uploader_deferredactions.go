@@ -35,19 +35,7 @@ func (u *uploader) uploadDeferredActionsBlob(ctx context.Context, containerName 
 		},
 	)
 
-	for _, batch := range da.OnFailure {
-		if ctx.Err() != nil {
-			break
-		}
-		b := batch
-		g.Go(
-			ctx,
-			func(ctx context.Context) error {
-				return u.uploadDeferBatchBlob(ctx, containerName, planID, b)
-			},
-		)
-	}
-	for _, batch := range da.OnSuccess {
+	for _, batch := range da.DeferredBatches {
 		if ctx.Err() != nil {
 			break
 		}

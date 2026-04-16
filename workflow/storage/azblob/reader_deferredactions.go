@@ -31,16 +31,9 @@ func (r reader) fetchDeferredActions(ctx context.Context, containerName string, 
 	da := entryToDeferredActions(entry)
 	da.SetPlanID(planID)
 
-	da.OnFailure = make([]*workflow.DeferBatch, len(entry.OnFailure))
-	for i, id := range entry.OnFailure {
-		da.OnFailure[i], err = r.fetchDeferBatch(ctx, containerName, planID, id)
-		if err != nil {
-			return nil, err
-		}
-	}
-	da.OnSuccess = make([]*workflow.DeferBatch, len(entry.OnSuccess))
-	for i, id := range entry.OnSuccess {
-		da.OnSuccess[i], err = r.fetchDeferBatch(ctx, containerName, planID, id)
+	da.DeferredBatches = make([]*workflow.DeferBatch, len(entry.DeferredBatches))
+	for i, id := range entry.DeferredBatches {
+		da.DeferredBatches[i], err = r.fetchDeferBatch(ctx, containerName, planID, id)
 		if err != nil {
 			return nil, err
 		}
