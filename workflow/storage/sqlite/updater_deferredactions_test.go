@@ -1,7 +1,6 @@
 package sqlite
 
 import (
-	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -22,11 +21,11 @@ import (
 // the DeferredActions container and one of its batches, writes the update, and
 // reads the plan back to confirm the state round-tripped.
 func TestUpdateDeferredActions(t *testing.T) {
-	pool, cleanup, err := freshInMemoryPool()
+	pool, err := freshInMemoryPool(t)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer cleanup()
+	defer pool.Close()
 
 	conn, err := pool.Take(context.Background())
 	if err != nil {
@@ -102,12 +101,9 @@ func TestUpdateDeferredActions(t *testing.T) {
 // freshInMemoryPool returns an isolated sqlite pool with schema applied, for
 // tests that don't want to share dbPool (which TestDeletePlan closes). It uses
 // a file under t.TempDir to sidestep in-memory cache-sharing quirks.
-func freshInMemoryPool() (*sqlitex.Pool, func(), error) {
-	dir, err := os.MkdirTemp("", "coercion-sqlite-*")
-	if err != nil {
-		return nil, nil, err
-	}
-	path := filepath.Join(dir, uuid.New().String()+".db")
+func freshInMemoryPool(t *testing.T) (*sqlitex.Pool, error) {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), uuid.New().String()+".db")
 	pool, err := sqlitex.NewPool(
 		path,
 		sqlitex.PoolOptions{
@@ -116,21 +112,18 @@ func freshInMemoryPool() (*sqlitex.Pool, func(), error) {
 		},
 	)
 	if err != nil {
-		os.RemoveAll(dir)
-		return nil, nil, err
+		return nil, err
 	}
 	conn, err := pool.Take(context.Background())
 	if err != nil {
 		pool.Close()
-		os.RemoveAll(dir)
-		return nil, nil, err
+		return nil, err
 	}
 	if err := createTables(context.Background(), conn); err != nil {
 		pool.Put(conn)
 		pool.Close()
-		os.RemoveAll(dir)
-		return nil, nil, err
+		return nil, err
 	}
 	pool.Put(conn)
-	return pool, func() { pool.Close(); os.RemoveAll(dir) }, nil
+	return pool, nil
 }

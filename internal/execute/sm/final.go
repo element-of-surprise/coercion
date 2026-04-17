@@ -36,29 +36,35 @@ func (f finalStates) bypassChecks(req statemachine.Request[Data]) statemachine.R
 // and records the failure reason. It also examines DeferredActions and fails the Plan
 // with FRDeferredAction if a FailElement=true batch failed. It does not do BypassChecks
 // as those are handled in bypassChecks.
+//
+// DeferredActions failure takes precedence over a checks failure: DA runs after all
+// checks and FailElement=true is an explicit opt-in, so its failure must not be masked
+// by an earlier checks failure.
 func (f finalStates) planChecks(req statemachine.Request[Data]) statemachine.Request[Data] {
 	plan := req.Data.Plan
 
-	checksResults, err := f.examineChecks([4]*workflow.Checks{plan.PreChecks, plan.ContChecks, plan.PostChecks, plan.DeferredChecks})
-	if err == nil {
-		if deferredActionsResults, err := f.examineDeferredActions(plan.DeferredActions); err != nil {
-			state := plan.State.Get()
-			state.Status = workflow.Failed
-			plan.State.Set(state)
-			plan.Reason = deferredActionsResults
-			req.Err = err
-			req.Next = f.end
-			return req
-		}
-		req.Next = f.blocks
+	checksReason, checksErr := f.examineChecks([4]*workflow.Checks{plan.PreChecks, plan.ContChecks, plan.PostChecks, plan.DeferredChecks})
+	daReason, daErr := f.examineDeferredActions(plan.DeferredActions)
+
+	if daErr != nil {
+		state := plan.State.Get()
+		state.Status = workflow.Failed
+		plan.State.Set(state)
+		plan.Reason = daReason
+		req.Err = daErr
+		req.Next = f.end
 		return req
 	}
-	state := plan.State.Get()
-	state.Status = workflow.Failed
-	plan.State.Set(state)
-	plan.Reason = checksResults
-	req.Err = err
-	req.Next = f.end
+	if checksErr != nil {
+		state := plan.State.Get()
+		state.Status = workflow.Failed
+		plan.State.Set(state)
+		plan.Reason = checksReason
+		req.Err = checksErr
+		req.Next = f.end
+		return req
+	}
+	req.Next = f.blocks
 	return req
 }
 
