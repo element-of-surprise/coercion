@@ -710,6 +710,13 @@ func createSimpleOrphanedPlan() (*workflow.Plan, error) {
 		return nil, fmt.Errorf("failed to build plan: %w", err)
 	}
 
+	type setIDer interface {
+		SetID(uuid.UUID)
+	}
+	for item := range walk.Plan(plan) {
+		item.Value.(setIDer).SetID(workflow.NewV7())
+	}
+
 	// Set state to NotStarted (non-running)
 	plan.State.Set(workflow.State{
 		Status: workflow.NotStarted,
