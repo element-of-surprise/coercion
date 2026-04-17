@@ -335,19 +335,21 @@ func (s *States) fixDeferredActions(da *workflow.DeferredActions) {
 		return
 	}
 
-	var completed, running, failed, failElementFailed int
+	stopped = 0
+	var running, notStarted, failElementFailed int
 	for _, b := range all {
 		fixDeferBatch(b)
 		switch b.State.Get().Status {
-		case workflow.Completed:
-			completed++
 		case workflow.Running:
 			running++
 		case workflow.Failed:
-			failed++
 			if b.FailElement {
 				failElementFailed++
 			}
+		case workflow.Stopped:
+			stopped++
+		case workflow.NotStarted:
+			notStarted++
 		}
 	}
 
@@ -357,15 +359,23 @@ func (s *States) fixDeferredActions(da *workflow.DeferredActions) {
 		state.Status = workflow.Failed
 		state.End = time.Now()
 		da.State.Set(state)
-	case running == 0 && completed == 0 && failed == 0:
+	case stopped > 0:
+		state := da.State.Get()
+		state.Status = workflow.Stopped
+		state.End = time.Now()
+		da.State.Set(state)
+	case running > 0 || notStarted > 0:
+		// Work remains: batches were scheduled but never finished (or never
+		// started). Reset to NotStarted so PlanDeferredActions re-enters and
+		// finishes. runDeferBatch short-circuits on already-terminal batches.
 		da.State.Set(workflow.State{Status: workflow.NotStarted})
-	case running == 0:
+	default:
+		// All batches terminal: Completed or non-FailElement Failed.
 		state := da.State.Get()
 		state.Status = workflow.Completed
 		state.End = time.Now()
 		da.State.Set(state)
 	}
-	// Else: some batches still Running; PlanDeferredActions will resume via runDeferBatch entry checks.
 }
 
 // deferredActionsTerminal reports whether the DeferredActions container (or nil)

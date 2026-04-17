@@ -209,6 +209,26 @@ func recoveryTestStage(ctx context.Context, stage int, reg *registry.Register, c
 		return
 	}
 
+	if result.DeferredActions == nil {
+		tr.Err = fmt.Errorf("DeferredActions is nil")
+		return
+	}
+	if got := result.DeferredActions.State.Get().Status; got != workflow.Completed {
+		tr.Err = fmt.Errorf("DeferredActions did not complete successfully(%s)", got)
+		return
+	}
+	wantDABatches := []workflow.Status{workflow.Completed, workflow.NotStarted, workflow.Completed}
+	if len(result.DeferredActions.DeferredBatches) != len(wantDABatches) {
+		tr.Err = fmt.Errorf("DeferredBatches count = %d, want %d", len(result.DeferredActions.DeferredBatches), len(wantDABatches))
+		return
+	}
+	for i, b := range result.DeferredActions.DeferredBatches {
+		if got := b.State.Get().Status; got != wantDABatches[i] {
+			tr.Err = fmt.Errorf("DeferredBatches[%d] %s status = %s, want %s", i, b.Name, got, wantDABatches[i])
+			return
+		}
+	}
+
 	for _, block := range result.Blocks {
 		if block.State.Get().Status != workflow.Completed {
 			tr.Err = fmt.Errorf("block did not complete successfully(%s)", block.State.Get().Status)
