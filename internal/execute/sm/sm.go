@@ -224,7 +224,7 @@ func (s *States) PlanPreChecks(req statemachine.Request[Data]) statemachine.Requ
 	err := s.runPreChecks(req.Ctx, req.Data.Plan.PreChecks, req.Data.Plan.ContChecks)
 	if err != nil {
 		req.Data.err = err
-		req.Next = s.PlanDeferredChecks
+		req.Next = s.PlanDeferredActions
 		return req
 	}
 
@@ -290,7 +290,7 @@ func (s *States) ExecuteBlock(req statemachine.Request[Data]) statemachine.Reque
 			state.Status = workflow.Stopped
 			h.block.State.Set(state)
 			req.Data.err = err
-			req.Next = s.PlanDeferredChecks
+			req.Next = s.PlanDeferredActions
 			return req
 		}
 		state := h.block.State.Get()
@@ -606,7 +606,7 @@ func (s *States) BlockEnd(req statemachine.Request[Data]) statemachine.Request[D
 				state.Status = workflow.Failed
 				h.block.State.Set(state)
 				req.Data.err = err
-				req.Next = s.PlanDeferredChecks
+				req.Next = s.PlanDeferredActions
 				return req
 			}
 		}
@@ -619,7 +619,7 @@ func (s *States) BlockEnd(req statemachine.Request[Data]) statemachine.Request[D
 			state := h.block.State.Get()
 			state.Status = workflow.Failed
 			h.block.State.Set(state)
-			req.Next = s.PlanDeferredChecks
+			req.Next = s.PlanDeferredActions
 			return req
 		}
 
@@ -628,7 +628,7 @@ func (s *States) BlockEnd(req statemachine.Request[Data]) statemachine.Request[D
 			state.Status = workflow.Stopped
 			h.block.State.Set(state)
 			req.Data.err = err
-			req.Next = s.PlanDeferredChecks
+			req.Next = s.PlanDeferredActions
 			return req
 		}
 	}
@@ -645,7 +645,7 @@ func (s *States) BlockEnd(req statemachine.Request[Data]) statemachine.Request[D
 // PlanPostChecks stops the ContChecks and runs the PostChecks of the current plan.
 func (s *States) PlanPostChecks(req statemachine.Request[Data]) statemachine.Request[Data] {
 	// No matter what the outcome here is, we go to the end state.
-	req.Next = s.PlanDeferredChecks
+	req.Next = s.PlanDeferredActions
 	defer func() {
 		if err := s.store.UpdatePlan(req.Ctx, req.Data.Plan); err != nil {
 			log.Fatalf("failed to write Plan: %v", err)
@@ -677,8 +677,8 @@ func (s *States) PlanPostChecks(req statemachine.Request[Data]) statemachine.Req
 
 // PlanDeferredChecks runs the DeferredChecks.
 func (s *States) PlanDeferredChecks(req statemachine.Request[Data]) statemachine.Request[Data] {
-	// No matter what the outcome here is, we go to PlanDeferredActions.
-	req.Next = s.PlanDeferredActions
+	// No matter what the outcome here is, we go to End.
+	req.Next = s.End
 	defer func() {
 		if err := s.store.UpdatePlan(req.Ctx, req.Data.Plan); err != nil {
 			log.Fatalf("failed to write Plan: %v", err)
@@ -696,13 +696,13 @@ func (s *States) PlanDeferredChecks(req statemachine.Request[Data]) statemachine
 }
 
 // PlanDeferredActions runs the DeferredActions batches chosen by OnFailure or OnSuccess
-// based on the Plan's accumulated state (which by this point includes DeferredChecks
-// outcome). It always transitions to End. If any batch with FailElement=true fails,
-// the DeferredActions container is marked Failed and finalStates will fail the Plan
+// based on the Plan's accumulated state prior to DeferredChecks (which run after this
+// state). It always transitions to PlanDeferredChecks. If any batch with FailElement=true
+// fails, the DeferredActions container is marked Failed and finalStates will fail the Plan
 // with FRDeferredAction. Idempotent across recovery: if DeferredActions is already
 // in a terminal state, this is a no-op.
 func (s *States) PlanDeferredActions(req statemachine.Request[Data]) statemachine.Request[Data] {
-	req.Next = s.End
+	req.Next = s.PlanDeferredChecks
 
 	da := req.Data.Plan.DeferredActions
 	if da == nil {
@@ -770,11 +770,12 @@ func selectDeferredBatches(batches []*workflow.DeferBatch, failed bool) []*workf
 
 // planHasFailed reports whether any phase that ran before DeferredActions
 // failed. Used by PlanDeferredActions to filter DeferredBatches by When.
+// DeferredChecks are not consulted here because they run after DeferredActions.
 func planHasFailed(p *workflow.Plan, reqErr error) bool {
 	if reqErr != nil {
 		return true
 	}
-	if checksFailed(p.PreChecks) || checksFailed(p.ContChecks) || checksFailed(p.PostChecks) || checksFailed(p.DeferredChecks) {
+	if checksFailed(p.PreChecks) || checksFailed(p.ContChecks) || checksFailed(p.PostChecks) {
 		return true
 	}
 	for _, b := range p.Blocks {

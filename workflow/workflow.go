@@ -159,14 +159,14 @@ type Plan struct {
 	// Checks are actions that are executed after the workflow has completed.
 	// Any error will cause the workflow to fail. Optional.
 	PostChecks *Checks
+	// DeferredActions are actions that are executed after the workflow has completed.
+	// These run before DeferredChecks. This is useful for things like cleanup.
+	DeferredActions *DeferredActions
 	// DeferredChecks are actions that are executed after the workflow has completed.
 	// This is executed regardless of Plan success or failure. However, if the
 	// Plan is bypassed via BypassChecks, this will not run.
 	// Useful for logging and similar operations. Optional.
 	DeferredChecks *Checks
-	// DeferredActions are actions that are executed after the workflow has completed.
-	// These run after DeferredChecks. This is useful for things like cleanup.
-	DeferredActions *DeferredActions
 	// Blocks is a list of blocks that are executed in sequence.
 	// If a block fails, the workflow will fail.
 	// Only one block can be executed at a time. Required.

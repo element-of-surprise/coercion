@@ -39,14 +39,14 @@ func (f finalStates) bypassChecks(req statemachine.Request[Data]) statemachine.R
 func (f finalStates) planChecks(req statemachine.Request[Data]) statemachine.Request[Data] {
 	plan := req.Data.Plan
 
-	r, err := f.examineChecks([4]*workflow.Checks{plan.PreChecks, plan.ContChecks, plan.PostChecks, plan.DeferredChecks})
+	checksResults, err := f.examineChecks([4]*workflow.Checks{plan.PreChecks, plan.ContChecks, plan.PostChecks, plan.DeferredChecks})
 	if err == nil {
-		if r2, err2 := f.examineDeferredActions(plan.DeferredActions); err2 != nil {
+		if deferredActionsResults, err := f.examineDeferredActions(plan.DeferredActions); err != nil {
 			state := plan.State.Get()
 			state.Status = workflow.Failed
 			plan.State.Set(state)
-			plan.Reason = r2
-			req.Err = err2
+			plan.Reason = deferredActionsResults
+			req.Err = err
 			req.Next = f.end
 			return req
 		}
@@ -56,7 +56,7 @@ func (f finalStates) planChecks(req statemachine.Request[Data]) statemachine.Req
 	state := plan.State.Get()
 	state.Status = workflow.Failed
 	plan.State.Set(state)
-	plan.Reason = r
+	plan.Reason = checksResults
 	req.Err = err
 	req.Next = f.end
 	return req

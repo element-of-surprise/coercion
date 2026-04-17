@@ -41,16 +41,16 @@ func TestPlanDeferredChecksRouting(t *testing.T) {
 		wantNextState statemachine.State[Data]
 	}{
 		{
-			name: "Success: DeferredChecks nil still routes to PlanDeferredActions",
+			name: "Success: DeferredChecks nil still routes to End",
 			plan: func() *workflow.Plan {
 				p := &workflow.Plan{}
 				p.State.Set(workflow.State{})
 				return p
 			}(),
-			wantNextState: states.PlanDeferredActions,
+			wantNextState: states.End,
 		},
 		{
-			name: "Success: DeferredChecks set routes to PlanDeferredActions",
+			name: "Success: DeferredChecks set routes to End",
 			plan: func() *workflow.Plan {
 				p := &workflow.Plan{}
 				p.State.Set(workflow.State{})
@@ -59,7 +59,7 @@ func TestPlanDeferredChecksRouting(t *testing.T) {
 				p.DeferredChecks = dc
 				return p
 			}(),
-			wantNextState: states.PlanDeferredActions,
+			wantNextState: states.End,
 		},
 	}
 
@@ -109,7 +109,7 @@ func TestPlanDeferredActions(t *testing.T) {
 				p.State.Set(workflow.State{})
 				return p
 			}(),
-			wantNextState: states.End,
+			wantNextState: states.PlanDeferredChecks,
 			wantDAStatus:  workflow.NotStarted,
 		},
 		{
@@ -123,7 +123,7 @@ func TestPlanDeferredActions(t *testing.T) {
 				)
 				return p
 			}(),
-			wantNextState: states.End,
+			wantNextState: states.PlanDeferredChecks,
 			wantDAStatus:  workflow.Completed,
 			wantBatches: []wantBatch{
 				{status: workflow.NotStarted, actions: []workflow.Status{workflow.NotStarted}},
@@ -144,7 +144,7 @@ func TestPlanDeferredActions(t *testing.T) {
 				)
 				return p
 			}(),
-			wantNextState: states.End,
+			wantNextState: states.PlanDeferredChecks,
 			wantDAStatus:  workflow.Completed,
 			wantBatches: []wantBatch{
 				{status: workflow.Completed, actions: []workflow.Status{workflow.Completed}},
@@ -163,7 +163,7 @@ func TestPlanDeferredActions(t *testing.T) {
 				return p
 			}(),
 			reqErr:        fmt.Errorf("boom"),
-			wantNextState: states.End,
+			wantNextState: states.PlanDeferredChecks,
 			wantDAStatus:  workflow.Completed,
 			wantBatches: []wantBatch{
 				{status: workflow.Completed, actions: []workflow.Status{workflow.Completed}},
@@ -180,7 +180,7 @@ func TestPlanDeferredActions(t *testing.T) {
 				)
 				return p
 			}(),
-			wantNextState: states.End,
+			wantNextState: states.PlanDeferredChecks,
 			wantDAStatus:  workflow.Completed,
 			wantBatches: []wantBatch{
 				{status: workflow.Completed, actions: []workflow.Status{workflow.Completed}},
@@ -197,7 +197,7 @@ func TestPlanDeferredActions(t *testing.T) {
 				return p
 			}(),
 			reqErr:        fmt.Errorf("boom"),
-			wantNextState: states.End,
+			wantNextState: states.PlanDeferredChecks,
 			wantDAStatus:  workflow.Completed,
 			wantBatches: []wantBatch{
 				{status: workflow.Completed, actions: []workflow.Status{workflow.Completed}},
@@ -213,7 +213,7 @@ func TestPlanDeferredActions(t *testing.T) {
 				)
 				return p
 			}(),
-			wantNextState: states.End,
+			wantNextState: states.PlanDeferredChecks,
 			wantDAStatus:  workflow.Failed,
 			wantBatches: []wantBatch{
 				{status: workflow.Failed, actions: []workflow.Status{workflow.Failed}},
@@ -229,7 +229,7 @@ func TestPlanDeferredActions(t *testing.T) {
 				)
 				return p
 			}(),
-			wantNextState: states.End,
+			wantNextState: states.PlanDeferredChecks,
 			wantDAStatus:  workflow.Completed,
 			wantBatches: []wantBatch{
 				{status: workflow.Failed, actions: []workflow.Status{workflow.Failed}},
@@ -245,7 +245,7 @@ func TestPlanDeferredActions(t *testing.T) {
 				p.DeferredActions = da
 				return p
 			}(),
-			wantNextState: states.End,
+			wantNextState: states.PlanDeferredChecks,
 			wantDAStatus:  workflow.Completed,
 			wantBatches: []wantBatch{
 				{status: workflow.NotStarted, actions: []workflow.Status{workflow.NotStarted}},

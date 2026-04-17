@@ -397,8 +397,8 @@ func (b *BuildPlan) AddSequence(seq *workflow.Sequence) *BuildPlan {
 	return b
 }
 
-// AddAction adds an Action to the current workflow Sequence or Checks object. If at any other level of the plan hierarchy,
-// AddAction will return an error.
+// AddAction adds an Action to the current workflow Sequence, Checks or DeferredBatch object.
+// If at any other level of the plan hierarchy, AddAction will return an error.
 func (b *BuildPlan) AddAction(action *workflow.Action) *BuildPlan {
 	if b.emitted {
 		b.setErr(errors.New("cannot call AddAction() after Plan() has been called"))

@@ -207,6 +207,12 @@ func TestEtoE(t *testing.T) {
 	build.AddChecks(builder.ContChecks, clone.Checks(ctx, checks, cloneOpts...)).Up()
 	build.AddChecks(builder.DeferredChecks, clone.Checks(ctx, checks, cloneOpts...)).Up()
 
+	build.AddDeferredActions()
+	build.AddDeferBatch(newDeferBatch("onSuccess", workflow.OnSuccess, false, "")).Up()
+	build.AddDeferBatch(newDeferBatch("onFailure", workflow.OnFailure, false, "")).Up()
+	build.AddDeferBatch(newDeferBatch("always", workflow.Always, false, "")).Up()
+	build.Up()
+
 	build.AddBlock(
 		builder.BlockArgs{
 			Key:           workflow.NewV7(),
@@ -285,6 +291,22 @@ func TestEtoE(t *testing.T) {
 	_, err = uuid.Parse(plugResp.Arg)
 	if err != nil {
 		t.Fatalf("TestEtoE: planID not a valid UUID")
+	}
+
+	if result.DeferredActions == nil {
+		t.Fatalf("TestEtoE: DeferredActions is nil")
+	}
+	if got := result.DeferredActions.State.Get().Status; got != workflow.Completed {
+		t.Fatalf("TestEtoE: DeferredActions status = %v, want %v", got, workflow.Completed)
+	}
+	wantDABatches := []workflow.Status{workflow.Completed, workflow.NotStarted, workflow.Completed}
+	if len(result.DeferredActions.DeferredBatches) != len(wantDABatches) {
+		t.Fatalf("TestEtoE: DeferredBatches count = %d, want %d", len(result.DeferredActions.DeferredBatches), len(wantDABatches))
+	}
+	for i, b := range result.DeferredActions.DeferredBatches {
+		if got := b.State.Get().Status; got != wantDABatches[i] {
+			t.Errorf("TestEtoE: DeferredBatches[%d] %s status = %v, want %v", i, b.Name, got, wantDABatches[i])
+		}
 	}
 
 	for _, block := range result.Blocks {
@@ -735,4 +757,138 @@ func msiCred(msi string) (azcore.TokenCredential, error) {
 
 	log.Println("Authentication is using az cli token.")
 	return azCred, nil
+}
+
+// newDeferBatch builds a DeferBatch with one action whose behavior is driven
+// by arg ("" for success, "error" to force a plugin error).
+func newDeferBatch(name string, when workflow.WhenDeferred, failElement bool, arg string) *workflow.DeferBatch {
+	b := &workflow.DeferBatch{When: when, FailElement: failElement}
+	b.Name = name
+	b.Descr = name
+	b.Actions = []*workflow.Action{
+		{Name: name + "-action", Descr: name + "-action", Plugin: testplugin.Name, Req: testplugin.Req{Arg: arg}},
+	}
+	return b
+}
+
+// deferredActionsPlan builds a minimal Plan (one block, one sequence) with
+// DeferredActions attached. arg drives the sequence action's outcome ("" for
+// success, "error" to force a plugin error that fails the block and plan).
+func deferredActionsPlan(t *testing.T, arg string, batches ...*workflow.DeferBatch) *workflow.Plan {
+	t.Helper()
+
+	build, err := builder.New("deferred actions etoe", "test DeferredActions execution")
+	if err != nil {
+		t.Fatalf("%s: builder.New: %v", t.Name(), err)
+	}
+
+	build.AddBlock(builder.BlockArgs{Name: "block0", Descr: "block0", Concurrency: 1})
+	seq := &workflow.Sequence{
+		Name:  "seq0",
+		Descr: "seq0",
+		Actions: []*workflow.Action{
+			{Name: "action0", Descr: "action0", Plugin: testplugin.Name, Req: testplugin.Req{Arg: arg}},
+		},
+	}
+	build.AddSequence(seq).Up().Up()
+
+	build.AddDeferredActions()
+	for _, b := range batches {
+		build.AddDeferBatch(b).Up()
+	}
+	build.Up()
+
+	plan, err := build.Plan()
+	if err != nil {
+		t.Fatalf("%s: build.Plan: %v", t.Name(), err)
+	}
+	return plan
+}
+
+// runPlan submits, starts, and waits for plan, returning the stored result.
+func runPlan(t *testing.T, ctx context.Context, plan *workflow.Plan) *workflow.Plan {
+	t.Helper()
+
+	ws, err := workstream.New(ctx, reg, vault)
+	if err != nil {
+		t.Fatalf("%s: workstream.New: %v", t.Name(), err)
+	}
+	id, err := ws.Submit(ctx, plan)
+	if err != nil {
+		t.Fatalf("%s: Submit: %v", t.Name(), err)
+	}
+	if err := ws.Start(ctx, id); err != nil {
+		t.Fatalf("%s: Start: %v", t.Name(), err)
+	}
+	result, err := ws.Wait(ctx, id)
+	if err != nil {
+		t.Fatalf("%s: Wait: %v", t.Name(), err)
+	}
+	return result
+}
+
+func TestEtoEDeferredActionsFailure(t *testing.T) {
+	flag.Parse()
+	if err := validateFlags(); err != nil {
+		t.Fatalf("TestEtoEDeferredActionsFailure: failed to validate flags: %v", err)
+	}
+	initGlobals()
+
+	ctx := context.Background()
+	plan := deferredActionsPlan(t, "error",
+		newDeferBatch("onSuccess", workflow.OnSuccess, false, ""),
+		newDeferBatch("onFailure", workflow.OnFailure, false, ""),
+		newDeferBatch("always", workflow.Always, false, ""),
+	)
+
+	result := runPlan(t, ctx, plan)
+
+	if got := result.State.Get().Status; got != workflow.Failed {
+		t.Fatalf("TestEtoEDeferredActionsFailure: plan status = %v, want %v", got, workflow.Failed)
+	}
+	if result.DeferredActions == nil {
+		t.Fatalf("TestEtoEDeferredActionsFailure: DeferredActions is nil")
+	}
+	if got := result.DeferredActions.State.Get().Status; got != workflow.Completed {
+		t.Fatalf("TestEtoEDeferredActionsFailure: DA status = %v, want %v", got, workflow.Completed)
+	}
+
+	want := []workflow.Status{workflow.NotStarted, workflow.Completed, workflow.Completed}
+	batches := result.DeferredActions.DeferredBatches
+	if len(batches) != len(want) {
+		t.Fatalf("TestEtoEDeferredActionsFailure: batch count = %d, want %d", len(batches), len(want))
+	}
+	for i, b := range batches {
+		if got := b.State.Get().Status; got != want[i] {
+			t.Errorf("TestEtoEDeferredActionsFailure: batch[%d] %s status = %v, want %v", i, b.Name, got, want[i])
+		}
+	}
+}
+
+func TestEtoEDeferredActionsFailElement(t *testing.T) {
+	flag.Parse()
+	if err := validateFlags(); err != nil {
+		t.Fatalf("TestEtoEDeferredActionsFailElement: failed to validate flags: %v", err)
+	}
+	initGlobals()
+
+	ctx := context.Background()
+	plan := deferredActionsPlan(t, "",
+		newDeferBatch("onSuccess", workflow.OnSuccess, true, "error"),
+	)
+
+	result := runPlan(t, ctx, plan)
+
+	if result.DeferredActions == nil {
+		t.Fatalf("TestEtoEDeferredActionsFailElement: DeferredActions is nil")
+	}
+	if got := result.DeferredActions.State.Get().Status; got != workflow.Failed {
+		t.Fatalf("TestEtoEDeferredActionsFailElement: DA status = %v, want %v", got, workflow.Failed)
+	}
+	if got := result.State.Get().Status; got != workflow.Failed {
+		t.Fatalf("TestEtoEDeferredActionsFailElement: plan status = %v, want %v", got, workflow.Failed)
+	}
+	if result.Reason != workflow.FRDeferredAction {
+		t.Errorf("TestEtoEDeferredActionsFailElement: plan reason = %v, want %v", result.Reason, workflow.FRDeferredAction)
+	}
 }
