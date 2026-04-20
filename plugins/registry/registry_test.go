@@ -117,22 +117,22 @@ type insecureResp struct {
 
 // fakePlugin implements plugins.Plugin for testing.
 type fakePlugin struct {
-	name     string
-	req      any
-	resp     any
-	isCheck  bool
-	policy   exponential.Policy
-	initErr  error
+	name    string
+	req     any
+	resp    any
+	isCheck bool
+	policy  exponential.Policy
+	initErr error
 }
 
-func (f *fakePlugin) Name() string                                         { return f.name }
+func (f *fakePlugin) Name() string                                               { return f.name }
 func (f *fakePlugin) Execute(ctx context.Context, req any) (any, *plugins.Error) { return nil, nil }
-func (f *fakePlugin) ValidateReq(req any) error                            { return nil }
-func (f *fakePlugin) Request() any                                         { return f.req }
-func (f *fakePlugin) Response() any                                        { return f.resp }
-func (f *fakePlugin) IsCheck() bool                                        { return f.isCheck }
-func (f *fakePlugin) RetryPolicy() exponential.Policy                      { return f.policy }
-func (f *fakePlugin) Init() error                                          { return f.initErr }
+func (f *fakePlugin) ValidateReq(req any) error                                  { return nil }
+func (f *fakePlugin) Request() any                                               { return f.req }
+func (f *fakePlugin) Response() any                                              { return f.resp }
+func (f *fakePlugin) IsCheck() bool                                              { return f.isCheck }
+func (f *fakePlugin) RetryPolicy() exponential.Policy                            { return f.policy }
+func (f *fakePlugin) Init() error                                                { return f.initErr }
 
 func validPolicy() exponential.Policy {
 	return exponential.Policy{

@@ -144,6 +144,7 @@ The workflow is defined in a hierarchy of objects:
 
 - Plan - The top level object.
   - Can have BypassChecks, PreChecks, PostChecks, ContChecks and DeferredChecks that are executed before, after and during the main actions.
+  - Can have DeferredActions, a set of action batches run after Blocks complete (before DeferredChecks) that can perform cleanup or rollback based on success or failure.
 - Block - A block of `Sequence` objects. You can have mulitple `Block`s.
   - Can have BypassChecks, PreChecks, PostChecks, ContChecks and DeferredChecks that are executed before, after the main actions.
   - Represents a set of work to be done, usually related.
@@ -375,6 +376,44 @@ Plugin authors can also take direct control of retries in special circumstances.
 In the future, I will add more intelligent cloing methods to do things like remove only failiures and collapse blocks that have no failures.
 
 You can tie `Plan`s together by using the same `GroupID` on a `Plan`.
+
+### Deferred Actions
+
+A `Plan` can include `DeferredActions`, which are mutating actions (not checks) that run after all `Block`s complete but before `DeferredChecks`. They are useful for cleanup, rollback, or finalization steps where the decision of what to run depends on whether the Plan succeeded or failed.
+
+`DeferredActions` contains a list of `DeferBatch` objects. Each `DeferBatch` embeds a `Sequence` (actions execute in order) and adds two fields:
+
+- `When` - controls when the batch runs: `OnSuccess`, `OnFailure`, or `Always`.
+- `FailElement` - if true, a failure in this batch marks the Plan as failed (with `FailureReason` = `FRDeferredAction`). If false, batch failures are recorded but do not affect the Plan's final status.
+
+Unlike `DeferredChecks`, batches contain regular (non-check) actions and may have side effects. Batches are selected based on the Plan's outcome and then run in the order they appear in `DeferredBatches`.
+
+Example using the builder:
+
+```go
+bp, _ := builder.New("deploy", "deploy service")
+
+bp.AddDeferredActions()
+bp.AddDeferBatch(&workflow.DeferBatch{
+    When:        workflow.OnFailure,
+    FailElement: true,
+    Sequence:    workflow.Sequence{Name: "rollback", Descr: "undo partial deploy"},
+})
+bp.AddAction(rollbackAction)
+bp.Up()
+bp.AddDeferBatch(&workflow.DeferBatch{
+    When:     workflow.Always,
+    Sequence: workflow.Sequence{Name: "notify", Descr: "notify oncall of outcome"},
+})
+bp.AddAction(notifyAction)
+bp.Up()
+bp.Up() // exit DeferredActions
+
+bp.AddBlock(builder.BlockArgs{Name: "deploy", Descr: "..."})
+// ... add sequences and actions ...
+
+plan, err := bp.Plan()
+```
 
 ### Walking a Plan object
 

@@ -93,6 +93,15 @@ func Render(ctx context.Context, plan *workflow.Plan, options ...RenderOption) (
 				if err := afero.WriteFile(fs, fmt.Sprintf("actions/%s.html", act.ID), b.Bytes(), 0644); err != nil {
 					return err
 				}
+			case workflow.OTBatch:
+				batch := item.DeferBatch()
+				if err := embedded.Tmpls.ExecuteTemplate(b, "batch.tmpl", batch); err != nil {
+					return err
+				}
+				fs.Mkdir("batches", 0755)
+				if err := afero.WriteFile(fs, fmt.Sprintf("batches/%s.html", batch.ID), b.Bytes(), 0644); err != nil {
+					return err
+				}
 			}
 			// Skip all other types.
 			return nil

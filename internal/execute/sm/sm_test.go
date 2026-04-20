@@ -180,7 +180,7 @@ func TestPlanPreChecks(t *testing.T) {
 			checksRunner: func(ctx context.Context, checks *workflow.Checks) error {
 				return fmt.Errorf("error")
 			},
-			wantNextState: states.PlanDeferredChecks,
+			wantNextState: states.PlanDeferredActions,
 		},
 	}
 
@@ -841,7 +841,7 @@ func TestBlockEnd(t *testing.T) {
 			contCheckResult: fmt.Errorf("error"),
 			wantErr:         true,
 			wantBlockStatus: workflow.Failed,
-			wantNextState:   states.PlanDeferredChecks,
+			wantNextState:   states.PlanDeferredActions,
 			wantBlocksLen:   1,
 		},
 		{

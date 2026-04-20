@@ -87,6 +87,15 @@ func (d deleter) deletePlanInContainer(ctx context.Context, containerName string
 		}
 	}
 
+	// Delete DeferredActions and all its batch blobs.
+	if plan.DeferredActions != nil {
+		if err := d.deleteDeferredActionsBlobs(ctx, containerName, plan.ID, plan.DeferredActions); err != nil {
+			if !blobops.IsNotFound(err) {
+				return err
+			}
+		}
+	}
+
 	// Delete all block-related blobs
 	for _, block := range plan.Blocks {
 		if err := d.deleteBlockBlobs(ctx, containerName, plan.ID, block); err != nil {
@@ -153,6 +162,41 @@ func (d deleter) deleteSequenceBlobs(ctx context.Context, containerName string, 
 		}
 	}
 
+	return nil
+}
+
+// deleteDeferredActionsBlobs deletes the DeferredActions blob, all its DeferBatch
+// blobs, and all actions owned by those batches.
+func (d deleter) deleteDeferredActionsBlobs(ctx context.Context, containerName string, planID uuid.UUID, da *workflow.DeferredActions) error {
+	for _, batch := range da.DeferredBatches {
+		if err := d.deleteDeferBatchBlobs(ctx, containerName, planID, batch); err != nil {
+			return err
+		}
+	}
+
+	daBlob := deferredActionsBlobName(planID, da.ID)
+	if err := d.deleteBlob(ctx, containerName, daBlob); err != nil {
+		if !blobops.IsNotFound(err) {
+			return fmt.Errorf("failed to delete DeferredActions blob: %w", err)
+		}
+	}
+	return nil
+}
+
+// deleteDeferBatchBlobs deletes a DeferBatch blob and all its actions.
+func (d deleter) deleteDeferBatchBlobs(ctx context.Context, containerName string, planID uuid.UUID, batch *workflow.DeferBatch) error {
+	batchBlob := deferBatchBlobName(planID, batch.ID)
+	if err := d.deleteBlob(ctx, containerName, batchBlob); err != nil {
+		if !blobops.IsNotFound(err) {
+			return fmt.Errorf("failed to delete DeferBatch blob: %w", err)
+		}
+	}
+
+	for _, action := range batch.Actions {
+		if err := d.deleteActionBlob(ctx, containerName, planID, action.ID); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 

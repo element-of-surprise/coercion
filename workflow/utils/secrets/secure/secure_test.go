@@ -527,6 +527,69 @@ func TestPlan(t *testing.T) {
 			wantReq: &User{Username: "john", Password: ""},
 		},
 		{
+			name: "Success: action in deferred action on-failure batch has secure field zeroed",
+			plan: &workflow.Plan{
+				Name:  "test-plan",
+				Descr: "test plan description",
+				DeferredActions: &workflow.DeferredActions{
+					DeferredBatches: []*workflow.DeferBatch{
+						{
+							When:        workflow.OnFailure,
+							FailElement: true,
+							Sequence: workflow.Sequence{
+								Name:  "fail-batch",
+								Descr: "fail batch description",
+								Actions: []*workflow.Action{
+									{
+										Name:    "fail-action",
+										Descr:   "fail action description",
+										Plugin:  "test-plugin",
+										Timeout: 30 * time.Second,
+										Req:     User{Username: "john", Password: "fail-secret"},
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+			getReq: func(p *workflow.Plan) any {
+				return p.DeferredActions.DeferredBatches[0].Actions[0].Req
+			},
+			wantReq: User{Username: "john", Password: ""},
+		},
+		{
+			name: "Success: action in deferred action on-success batch has secure field zeroed",
+			plan: &workflow.Plan{
+				Name:  "test-plan",
+				Descr: "test plan description",
+				DeferredActions: &workflow.DeferredActions{
+					DeferredBatches: []*workflow.DeferBatch{
+						{
+							When: workflow.OnSuccess,
+							Sequence: workflow.Sequence{
+								Name:  "success-batch",
+								Descr: "success batch description",
+								Actions: []*workflow.Action{
+									{
+										Name:    "success-action",
+										Descr:   "success action description",
+										Plugin:  "test-plugin",
+										Timeout: 30 * time.Second,
+										Req:     Config{APIKey: "success-secret", Endpoint: "https://api.example.com"},
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+			getReq: func(p *workflow.Plan) any {
+				return p.DeferredActions.DeferredBatches[0].Actions[0].Req
+			},
+			wantReq: Config{APIKey: "", Endpoint: "https://api.example.com"},
+		},
+		{
 			name: "Success: pointer req in precheck has secure field zeroed",
 			plan: &workflow.Plan{
 				Name:  "test-plan",

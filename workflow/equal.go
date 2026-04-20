@@ -60,6 +60,9 @@ func (p *Plan) Equal(other *Plan) bool {
 	if !checksEqual(p.PostChecks, other.PostChecks) {
 		return false
 	}
+	if !deferredActionsEqual(p.DeferredActions, other.DeferredActions) {
+		return false
+	}
 	if !checksEqual(p.DeferredChecks, other.DeferredChecks) {
 		return false
 	}
@@ -199,6 +202,50 @@ func (s *Sequence) Equal(other *Sequence) bool {
 	return true
 }
 
+// Equal returns true if the DeferredActions objects are equal.
+// Only compares public fields.
+func (d *DeferredActions) Equal(other *DeferredActions) bool {
+	if d == other {
+		return true
+	}
+	if d == nil || other == nil {
+		return false
+	}
+
+	if !stateEqual(d.State.Get(), other.State.Get()) {
+		return false
+	}
+	if d.ID != other.ID {
+		return false
+	}
+	if !sliceOfObjectsEqual(d.DeferredBatches, other.DeferredBatches) {
+		return false
+	}
+	return true
+}
+
+// Equal returns true if the DeferBatch objects are equal.
+// Only compares public fields.
+func (d *DeferBatch) Equal(other *DeferBatch) bool {
+	if d == other {
+		return true
+	}
+	if d == nil || other == nil {
+		return false
+	}
+
+	if d.When != other.When {
+		return false
+	}
+	if d.FailElement != other.FailElement {
+		return false
+	}
+	if !d.Sequence.Equal(&other.Sequence) {
+		return false
+	}
+	return true
+}
+
 // Equal returns true if the Action objects are equal.
 // Only compares public fields.
 func (a *Action) Equal(other *Action) bool {
@@ -267,6 +314,16 @@ func (a Attempt) Equal(other Attempt) bool {
 }
 
 func checksEqual(a, b *Checks) bool {
+	if a == b {
+		return true
+	}
+	if a == nil || b == nil {
+		return false
+	}
+	return a.Equal(b)
+}
+
+func deferredActionsEqual(a, b *DeferredActions) bool {
 	if a == b {
 		return true
 	}

@@ -803,6 +803,250 @@ func TestBlockEqual(t *testing.T) {
 	}
 }
 
+func TestDeferBatchEqual(t *testing.T) {
+	t.Parallel()
+
+	id1 := NewV7()
+	id2 := NewV7()
+	key1 := NewV7()
+
+	tests := []struct {
+		name string
+		d1   *DeferBatch
+		d2   *DeferBatch
+		want bool
+	}{
+		{
+			name: "Success: both nil",
+			d1:   nil,
+			d2:   nil,
+			want: true,
+		},
+		{
+			name: "Success: equal values",
+			d1: &DeferBatch{
+				When:        OnSuccess,
+				FailElement: true,
+				Sequence: Sequence{
+					ID:    id1,
+					Key:   key1,
+					Name:  "seq1",
+					Descr: "description",
+					Actions: []*Action{
+						{ID: id1, Name: "action1"},
+					},
+				},
+			},
+			d2: &DeferBatch{
+				When:        OnSuccess,
+				FailElement: true,
+				Sequence: Sequence{
+					ID:    id1,
+					Key:   key1,
+					Name:  "seq1",
+					Descr: "description",
+					Actions: []*Action{
+						{ID: id1, Name: "action1"},
+					},
+				},
+			},
+			want: true,
+		},
+		{
+			name: "Success: different When",
+			d1: &DeferBatch{
+				When:     OnSuccess,
+				Sequence: Sequence{ID: id1},
+			},
+			d2: &DeferBatch{
+				When:     OnFailure,
+				Sequence: Sequence{ID: id1},
+			},
+			want: false,
+		},
+		{
+			name: "Success: different FailElement",
+			d1: &DeferBatch{
+				When:        OnSuccess,
+				FailElement: true,
+				Sequence:    Sequence{ID: id1},
+			},
+			d2: &DeferBatch{
+				When:        OnSuccess,
+				FailElement: false,
+				Sequence:    Sequence{ID: id1},
+			},
+			want: false,
+		},
+		{
+			name: "Success: different Sequence",
+			d1: &DeferBatch{
+				When:     OnSuccess,
+				Sequence: Sequence{ID: id1, Name: "seq1"},
+			},
+			d2: &DeferBatch{
+				When:     OnSuccess,
+				Sequence: Sequence{ID: id2, Name: "seq1"},
+			},
+			want: false,
+		},
+		{
+			name: "Success: first nil",
+			d1:   nil,
+			d2:   &DeferBatch{When: OnSuccess},
+			want: false,
+		},
+		{
+			name: "Success: second nil",
+			d1:   &DeferBatch{When: OnSuccess},
+			d2:   nil,
+			want: false,
+		},
+	}
+
+	for _, test := range tests {
+		got := test.d1.Equal(test.d2)
+		if got != test.want {
+			t.Errorf("TestDeferBatchEqual(%s): got %v, want %v", test.name, got, test.want)
+		}
+	}
+}
+
+func TestDeferredActionsEqual(t *testing.T) {
+	t.Parallel()
+
+	id1 := NewV7()
+	id2 := NewV7()
+	key1 := NewV7()
+
+	// Create DeferredActions with State for "equal values" test
+	d1EqualValues := &DeferredActions{
+		ID: id1,
+		DeferredBatches: []*DeferBatch{
+			{
+				When: OnSuccess,
+				Sequence: Sequence{
+					ID:    id1,
+					Key:   key1,
+					Name:  "seq1",
+					Descr: "description",
+					Actions: []*Action{
+						{ID: id1, Name: "action1"},
+					},
+				},
+			},
+		},
+	}
+	d1EqualValues.State.Set(State{Status: Running})
+
+	d2EqualValues := &DeferredActions{
+		ID: id1,
+		DeferredBatches: []*DeferBatch{
+			{
+				When: OnSuccess,
+				Sequence: Sequence{
+					ID:    id1,
+					Key:   key1,
+					Name:  "seq1",
+					Descr: "description",
+					Actions: []*Action{
+						{ID: id1, Name: "action1"},
+					},
+				},
+			},
+		},
+	}
+	d2EqualValues.State.Set(State{Status: Running})
+
+	// Create DeferredActions with differing State
+	dWithState := &DeferredActions{ID: id1}
+	dWithState.State.Set(State{Status: Running})
+
+	tests := []struct {
+		name string
+		d1   *DeferredActions
+		d2   *DeferredActions
+		want bool
+	}{
+		{
+			name: "Success: both nil",
+			d1:   nil,
+			d2:   nil,
+			want: true,
+		},
+		{
+			name: "Success: equal values",
+			d1:   d1EqualValues,
+			d2:   d2EqualValues,
+			want: true,
+		},
+		{
+			name: "Success: different ID",
+			d1:   &DeferredActions{ID: id1},
+			d2:   &DeferredActions{ID: id2},
+			want: false,
+		},
+		{
+			name: "Success: different State",
+			d1:   &DeferredActions{ID: id1},
+			d2:   dWithState,
+			want: false,
+		},
+		{
+			name: "Success: different DeferredBatches length",
+			d1: &DeferredActions{
+				ID: id1,
+				DeferredBatches: []*DeferBatch{
+					{When: OnSuccess, Sequence: Sequence{ID: id1}},
+				},
+			},
+			d2: &DeferredActions{
+				ID: id1,
+				DeferredBatches: []*DeferBatch{
+					{When: OnSuccess, Sequence: Sequence{ID: id1}},
+					{When: OnFailure, Sequence: Sequence{ID: id2}},
+				},
+			},
+			want: false,
+		},
+		{
+			name: "Success: different DeferredBatches content",
+			d1: &DeferredActions{
+				ID: id1,
+				DeferredBatches: []*DeferBatch{
+					{When: OnSuccess, Sequence: Sequence{ID: id1}},
+				},
+			},
+			d2: &DeferredActions{
+				ID: id1,
+				DeferredBatches: []*DeferBatch{
+					{When: OnFailure, Sequence: Sequence{ID: id1}},
+				},
+			},
+			want: false,
+		},
+		{
+			name: "Success: first nil",
+			d1:   nil,
+			d2:   &DeferredActions{ID: id1},
+			want: false,
+		},
+		{
+			name: "Success: second nil",
+			d1:   &DeferredActions{ID: id1},
+			d2:   nil,
+			want: false,
+		},
+	}
+
+	for _, test := range tests {
+		got := test.d1.Equal(test.d2)
+		if got != test.want {
+			t.Errorf("TestDeferredActionsEqual(%s): got %v, want %v", test.name, got, test.want)
+		}
+	}
+}
+
 func TestPlanEqual(t *testing.T) {
 	t.Parallel()
 

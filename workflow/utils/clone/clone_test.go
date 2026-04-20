@@ -47,15 +47,33 @@ func TestPlan(t *testing.T) {
 		},
 	}
 
+	deferredActions := &workflow.DeferredActions{
+		ID: id,
+		DeferredBatches: []*workflow.DeferBatch{
+			DeferBatch(ctx, &workflow.DeferBatch{
+				When:        workflow.OnFailure,
+				FailElement: true,
+				Sequence: workflow.Sequence{
+					Name:  "fail",
+					Descr: "fail",
+					Actions: []*workflow.Action{
+						{Name: "fail_action", Req: Req{Data: "Hello"}},
+					},
+				},
+			}, WithKeepState(), WithKeepSecrets()),
+		},
+	}
+
 	plan := &workflow.Plan{
-		ID:         id,
-		Name:       "plan1",
-		Descr:      "descr",
-		GroupID:    id,
-		Meta:       []byte("hello"),
-		PreChecks:  Checks(ctx, checks, WithKeepSecrets(), WithKeepState()),
-		PostChecks: Checks(ctx, checks, WithKeepSecrets(), WithKeepState()),
-		ContChecks: Checks(ctx, checks, WithKeepSecrets(), WithKeepState()),
+		ID:              id,
+		Name:            "plan1",
+		Descr:           "descr",
+		GroupID:         id,
+		Meta:            []byte("hello"),
+		PreChecks:       Checks(ctx, checks, WithKeepSecrets(), WithKeepState()),
+		PostChecks:      Checks(ctx, checks, WithKeepSecrets(), WithKeepState()),
+		ContChecks:      Checks(ctx, checks, WithKeepSecrets(), WithKeepState()),
+		DeferredActions: DeferredActions(ctx, deferredActions, WithKeepSecrets(), WithKeepState()),
 		Blocks: []*workflow.Block{
 			Block(ctx, block, WithKeepSecrets(), WithKeepState()),
 		},
@@ -80,14 +98,15 @@ func TestPlan(t *testing.T) {
 			name: "no options",
 			plan: plan,
 			want: &workflow.Plan{
-				Name:       "plan1",
-				Descr:      "descr",
-				GroupID:    id,
-				Meta:       []byte("hello"),
-				PreChecks:  Checks(ctx, checks),
-				PostChecks: Checks(ctx, checks),
-				ContChecks: Checks(ctx, checks),
-				Blocks:     []*workflow.Block{Block(ctx, plan.Blocks[0])},
+				Name:            "plan1",
+				Descr:           "descr",
+				GroupID:         id,
+				Meta:            []byte("hello"),
+				PreChecks:       Checks(ctx, checks),
+				PostChecks:      Checks(ctx, checks),
+				ContChecks:      Checks(ctx, checks),
+				DeferredActions: DeferredActions(ctx, deferredActions),
+				Blocks:          []*workflow.Block{Block(ctx, plan.Blocks[0])},
 			},
 		},
 		{
@@ -102,17 +121,18 @@ func TestPlan(t *testing.T) {
 			options: cloneOptions{keepState: true},
 			want: func() *workflow.Plan {
 				p := &workflow.Plan{
-					ID:         id,
-					Name:       "plan1",
-					Descr:      "descr",
-					GroupID:    id,
-					Meta:       []byte("hello"),
-					PreChecks:  Checks(ctx, checks, WithKeepState()),
-					PostChecks: Checks(ctx, checks, WithKeepState()),
-					ContChecks: Checks(ctx, checks, WithKeepState()),
-					Blocks:     []*workflow.Block{Block(ctx, plan.Blocks[0], WithKeepState())},
-					Reason:     workflow.FRBlock,
-					SubmitTime: start,
+					ID:              id,
+					Name:            "plan1",
+					Descr:           "descr",
+					GroupID:         id,
+					Meta:            []byte("hello"),
+					PreChecks:       Checks(ctx, checks, WithKeepState()),
+					PostChecks:      Checks(ctx, checks, WithKeepState()),
+					ContChecks:      Checks(ctx, checks, WithKeepState()),
+					DeferredActions: DeferredActions(ctx, deferredActions, WithKeepState()),
+					Blocks:          []*workflow.Block{Block(ctx, plan.Blocks[0], WithKeepState())},
+					Reason:          workflow.FRBlock,
+					SubmitTime:      start,
 				}
 				p.State.Set(workflow.State{
 					Status: workflow.Completed,
@@ -126,14 +146,15 @@ func TestPlan(t *testing.T) {
 			plan:    plan,
 			options: cloneOptions{keepSecrets: true, callNum: 1},
 			want: &workflow.Plan{
-				Name:       "plan1",
-				Descr:      "descr",
-				GroupID:    id,
-				Meta:       []byte("hello"),
-				PreChecks:  Checks(ctx, checks, WithKeepSecrets()),
-				PostChecks: Checks(ctx, checks, WithKeepSecrets()),
-				ContChecks: Checks(ctx, checks, WithKeepSecrets()),
-				Blocks:     []*workflow.Block{Block(ctx, plan.Blocks[0], WithKeepSecrets())},
+				Name:            "plan1",
+				Descr:           "descr",
+				GroupID:         id,
+				Meta:            []byte("hello"),
+				PreChecks:       Checks(ctx, checks, WithKeepSecrets()),
+				PostChecks:      Checks(ctx, checks, WithKeepSecrets()),
+				ContChecks:      Checks(ctx, checks, WithKeepSecrets()),
+				DeferredActions: DeferredActions(ctx, deferredActions, WithKeepSecrets()),
+				Blocks:          []*workflow.Block{Block(ctx, plan.Blocks[0], WithKeepSecrets())},
 			},
 		},
 	}
@@ -538,6 +559,231 @@ func TestSequence(t *testing.T) {
 
 		if test.want != nil {
 			test.want.Actions[0].Req = oldReq
+		}
+	}
+}
+
+func TestDeferBatch(t *testing.T) {
+	t.Parallel()
+
+	id, err := uuid.NewV7()
+	if err != nil {
+		panic(err)
+	}
+
+	batch := &workflow.DeferBatch{
+		FailElement: true,
+		Sequence: workflow.Sequence{
+			ID:    id,
+			Name:  "name",
+			Descr: "descr",
+			Actions: []*workflow.Action{
+				{
+					Name: "action1",
+					Req:  Req{Data: "Hello"},
+				},
+			},
+		},
+	}
+	batch.State.Set(workflow.State{Status: workflow.Completed})
+
+	tests := []struct {
+		name       string
+		options    cloneOptions
+		replaceReq Req
+		batch      *workflow.DeferBatch
+		want       *workflow.DeferBatch
+	}{
+		{
+			name: "nil",
+		},
+		{
+			name:  "Success: no options",
+			batch: batch,
+			want: &workflow.DeferBatch{
+				FailElement: true,
+				Sequence: workflow.Sequence{
+					Name:  "name",
+					Descr: "descr",
+					Actions: []*workflow.Action{
+						{
+							Name: "action1",
+							Req:  Req{Data: SecureStr},
+						},
+					},
+				},
+			},
+		},
+		{
+			name:    "Success: WithKeepState(), WithKeepSecrets()",
+			batch:   batch,
+			options: cloneOptions{keepState: true, keepSecrets: true},
+			want:    batch,
+		},
+		{
+			name:       "Success: WithKeepState()",
+			batch:      batch,
+			options:    cloneOptions{keepState: true},
+			replaceReq: Req{Data: SecureStr},
+			want:       batch,
+		},
+		{
+			name:    "Success: Without WithKeepSecrets(), but callNum > 0",
+			batch:   batch,
+			options: cloneOptions{callNum: 1},
+			want: &workflow.DeferBatch{
+				FailElement: true,
+				Sequence: workflow.Sequence{
+					Name:  "name",
+					Descr: "descr",
+					Actions: []*workflow.Action{
+						{
+							Name: "action1",
+							Req:  Req{Data: "Hello"},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	for _, test := range tests {
+		got := DeferBatch(context.Background(), test.batch, withOptions(test.options))
+
+		var oldReq Req
+		if test.want != nil {
+			oldReq = test.want.Actions[0].Req.(Req)
+			if test.replaceReq.Data != "" {
+				test.want.Actions[0].Req = test.replaceReq
+			}
+		}
+
+		if diff := pretty.Compare(test.want, got); diff != "" {
+			t.Errorf("TestDeferBatch(%s): -want/+got:\n%s", test.name, diff)
+		}
+
+		if test.want != nil {
+			test.want.Actions[0].Req = oldReq
+		}
+	}
+}
+
+func TestDeferredActions(t *testing.T) {
+	t.Parallel()
+
+	id, err := uuid.NewV7()
+	if err != nil {
+		panic(err)
+	}
+
+	failBatch := &workflow.DeferBatch{
+		When:        workflow.OnFailure,
+		FailElement: true,
+		Sequence: workflow.Sequence{
+			Name:  "fail",
+			Descr: "fail",
+			Actions: []*workflow.Action{
+				{Name: "fail_action", Req: Req{Data: "fail_secret"}},
+			},
+		},
+	}
+	successBatch := &workflow.DeferBatch{
+		When: workflow.OnSuccess,
+		Sequence: workflow.Sequence{
+			Name:  "success",
+			Descr: "success",
+			Actions: []*workflow.Action{
+				{Name: "success_action", Req: Req{Data: "success_secret"}},
+			},
+		},
+	}
+
+	da := &workflow.DeferredActions{
+		ID:              id,
+		DeferredBatches: []*workflow.DeferBatch{failBatch, successBatch},
+	}
+	da.State.Set(workflow.State{Status: workflow.Completed})
+
+	tests := []struct {
+		name    string
+		options cloneOptions
+		da      *workflow.DeferredActions
+		want    *workflow.DeferredActions
+	}{
+		{
+			name: "nil",
+		},
+		{
+			name: "Success: no options",
+			da:   da,
+			want: &workflow.DeferredActions{
+				DeferredBatches: []*workflow.DeferBatch{
+					{
+						When:        workflow.OnFailure,
+						FailElement: true,
+						Sequence: workflow.Sequence{
+							Name:  "fail",
+							Descr: "fail",
+							Actions: []*workflow.Action{
+								{Name: "fail_action", Req: Req{Data: SecureStr}},
+							},
+						},
+					},
+					{
+						When: workflow.OnSuccess,
+						Sequence: workflow.Sequence{
+							Name:  "success",
+							Descr: "success",
+							Actions: []*workflow.Action{
+								{Name: "success_action", Req: Req{Data: SecureStr}},
+							},
+						},
+					},
+				},
+			},
+		},
+		{
+			name:    "Success: WithKeepState(), WithKeepSecrets()",
+			da:      da,
+			options: cloneOptions{keepState: true, keepSecrets: true},
+			want:    da,
+		},
+		{
+			name:    "Success: Without WithKeepSecrets(), but callNum > 0",
+			da:      da,
+			options: cloneOptions{callNum: 1},
+			want: &workflow.DeferredActions{
+				DeferredBatches: []*workflow.DeferBatch{
+					{
+						When:        workflow.OnFailure,
+						FailElement: true,
+						Sequence: workflow.Sequence{
+							Name:  "fail",
+							Descr: "fail",
+							Actions: []*workflow.Action{
+								{Name: "fail_action", Req: Req{Data: "fail_secret"}},
+							},
+						},
+					},
+					{
+						When: workflow.OnSuccess,
+						Sequence: workflow.Sequence{
+							Name:  "success",
+							Descr: "success",
+							Actions: []*workflow.Action{
+								{Name: "success_action", Req: Req{Data: "success_secret"}},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	for _, test := range tests {
+		got := DeferredActions(context.Background(), test.da, withOptions(test.options))
+		if diff := pretty.Compare(test.want, got); diff != "" {
+			t.Errorf("TestDeferredActions(%s): -want/+got:\n%s", test.name, diff)
 		}
 	}
 }

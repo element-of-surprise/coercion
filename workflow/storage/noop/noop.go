@@ -79,3 +79,13 @@ func (v *Vault) UpdateSequence(context.Context, *workflow.Sequence) error {
 func (v *Vault) UpdateAction(context.Context, *workflow.Action) error {
 	return nil
 }
+
+// UpdateDeferredActions implements the storage.Vault interface. It does nothing.
+func (v *Vault) UpdateDeferredActions(context.Context, *workflow.DeferredActions) error {
+	return nil
+}
+
+// UpdateDeferBatch implements the storage.Vault interface. It does nothing.
+func (v *Vault) UpdateDeferBatch(context.Context, *workflow.DeferBatch) error {
+	return nil
+}

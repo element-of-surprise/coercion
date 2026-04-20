@@ -7,7 +7,7 @@ import (
 	"github.com/gostdlib/base/errors"
 )
 
-//go:generate stringer -type=Category -linecomment
+//go:generate go tool github.com/johnsiilver/stringer -type=Category -linecomment
 
 // Category represents the category of the error.
 type Category uint32
@@ -25,7 +25,7 @@ const (
 	CatInternal Category = Category(2) // Internal
 )
 
-//go:generate stringer -type=Type -linecomment
+//go:generate go tool github.com/johnsiilver/stringer -type=Type -linecomment
 
 // Type represents the type of the error.
 type Type uint16

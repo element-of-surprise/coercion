@@ -51,21 +51,22 @@ func runningSummary(p *workflow.Plan) string {
 	name.Fprintln(&buff, "Name: "+p.Name)
 	desc.Fprintln(&buff, "Description: "+p.Descr)
 
-	blockIndex, block := findRunningBlock(p.Blocks)
-	if block == nil {
-		return ""
-	}
-	seqs := findRunningSeq(block.Sequences)
-
 	blockTitle.Fprintln(&buff, "\nBlock Summaries")
 	writeOtherBlocks(&buff, p.Blocks)
 
-	blockTitle.Fprintln(&buff, fmt.Sprintf("\nRunning Block(%d): %s", blockIndex, block.Name))
-	writeRunningBlock(&buff, block)
+	blockIndex, block := findRunningBlock(p.Blocks)
+	if block != nil {
+		blockTitle.Fprintln(&buff, fmt.Sprintf("\nRunning Block(%d): %s", blockIndex, block.Name))
+		writeRunningBlock(&buff, block)
 
-	for _, seq := range seqs {
-		blockTitle.Fprintln(&buff, fmt.Sprintf("\nRunning Sequence Actions: %s", seq.Name))
-		writeRunningActions(&buff, seq)
+		for _, seq := range findRunningSeq(block.Sequences) {
+			blockTitle.Fprintln(&buff, fmt.Sprintf("\nRunning Sequence Actions: %s", seq.Name))
+			writeRunningActions(&buff, seq)
+		}
+	}
+
+	if p.DeferredActions != nil {
+		writeDeferredActions(&buff, blockTitle, p.DeferredActions)
 	}
 
 	return buff.String()
@@ -115,6 +116,35 @@ func writeRunningBlock(buff *strings.Builder, block *workflow.Block) {
 
 	for i, seq := range block.Sequences {
 		tbl.AddRow(i, seq.Name, seq.State.Get().Status)
+	}
+	tbl.Print()
+}
+
+func writeDeferredActions(buff *strings.Builder, title *color.Color, da *workflow.DeferredActions) {
+	title.Fprintln(buff, fmt.Sprintf("\nDeferredActions: %s", da.State.Get().Status))
+
+	if len(da.DeferredBatches) > 0 {
+		title.Fprintln(buff, "\nDeferred Batches")
+		writeBatchTable(buff, da.DeferredBatches)
+	}
+
+	for _, batch := range da.DeferredBatches {
+		if batch.State.Get().Status == workflow.Running {
+			title.Fprintln(buff, fmt.Sprintf("\nRunning DeferBatch Actions (%s): %s", batch.When, batch.Name))
+			writeRunningActions(buff, &batch.Sequence)
+		}
+	}
+}
+
+func writeBatchTable(buff *strings.Builder, batches []*workflow.DeferBatch) {
+	headerFmt := color.New(color.FgGreen, color.Underline).SprintfFunc()
+	columnFmt := color.New(color.FgYellow).SprintfFunc()
+
+	tbl := table.New("Batch Number", "Name", "Descr", "When", "Fails Parent", "Status").WithWriter(buff)
+	tbl.WithHeaderFormatter(headerFmt).WithFirstColumnFormatter(columnFmt)
+
+	for i, batch := range batches {
+		tbl.AddRow(i, batch.Name, batch.Descr, batch.When, batch.FailElement, batch.State.Get().Status)
 	}
 	tbl.Print()
 }

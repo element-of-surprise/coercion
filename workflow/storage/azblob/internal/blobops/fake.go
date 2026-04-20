@@ -19,13 +19,13 @@ type Fake struct {
 	containers map[string]map[string]*blobData
 
 	// Error injection functions - if set, these will be called and their error returned
-	CreateContainerErr   func(containerName string) error
-	EnsureContainerErr   func(containerName string) error
-	ContainerExistsErr   func(containerName string) error
-	UploadBlobErr        func(containerName, blobName string) error
-	DeleteBlobErr        func(containerName, blobName string) error
-	GetMetadataErr       func(containerName, blobName string) error
-	GetBlobErr           func(containerName, blobName string) error
+	CreateContainerErr       func(containerName string) error
+	EnsureContainerErr       func(containerName string) error
+	ContainerExistsErr       func(containerName string) error
+	UploadBlobErr            func(containerName, blobName string) error
+	DeleteBlobErr            func(containerName, blobName string) error
+	GetMetadataErr           func(containerName, blobName string) error
+	GetBlobErr               func(containerName, blobName string) error
 	NewListBlobsFlatPagerErr func(containerName string) error
 }
 

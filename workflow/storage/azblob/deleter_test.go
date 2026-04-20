@@ -72,12 +72,55 @@ func createAndUploadTestPlan(ctx context.Context, t *testing.T, fakeClient *blob
 	}
 	preChecks.State.Set(workflow.State{Status: workflow.NotStarted})
 
+	// DeferredActions with one OnFailure (FailElement=true) and one OnSuccess batch,
+	// so TestDelete can verify deleteDeferredActionsBlobs cleans them up.
+	onFailureAction := &workflow.Action{
+		ID:      workflow.NewV7(),
+		Name:    "on-failure action",
+		Descr:   "on-failure action desc",
+		Plugin:  testPlugins.HelloPluginName,
+		Timeout: 30 * time.Second,
+		Req:     testPlugins.HelloReq{Say: "fail"},
+	}
+	onFailureAction.State.Set(workflow.State{Status: workflow.NotStarted})
+
+	onSuccessAction := &workflow.Action{
+		ID:      workflow.NewV7(),
+		Name:    "on-success action",
+		Descr:   "on-success action desc",
+		Plugin:  testPlugins.HelloPluginName,
+		Timeout: 30 * time.Second,
+		Req:     testPlugins.HelloReq{Say: "success"},
+	}
+	onSuccessAction.State.Set(workflow.State{Status: workflow.NotStarted})
+
+	onFailureBatch := &workflow.DeferBatch{When: workflow.OnFailure, FailElement: true}
+	onFailureBatch.ID = workflow.NewV7()
+	onFailureBatch.Name = "fail-batch"
+	onFailureBatch.Descr = "fail-batch"
+	onFailureBatch.Actions = []*workflow.Action{onFailureAction}
+	onFailureBatch.State.Set(workflow.State{Status: workflow.NotStarted})
+
+	onSuccessBatch := &workflow.DeferBatch{When: workflow.OnSuccess}
+	onSuccessBatch.ID = workflow.NewV7()
+	onSuccessBatch.Name = "success-batch"
+	onSuccessBatch.Descr = "success-batch"
+	onSuccessBatch.Actions = []*workflow.Action{onSuccessAction}
+	onSuccessBatch.State.Set(workflow.State{Status: workflow.NotStarted})
+
+	deferredActions := &workflow.DeferredActions{
+		ID:              workflow.NewV7(),
+		DeferredBatches: []*workflow.DeferBatch{onFailureBatch, onSuccessBatch},
+	}
+	deferredActions.State.Set(workflow.State{Status: workflow.NotStarted})
+
 	plan := &workflow.Plan{
-		ID:         planID,
-		Name:       "Test Plan for Deletion",
-		Descr:      "Test Plan Description",
-		SubmitTime: time.Now().UTC(),
-		PreChecks:  preChecks,
+		ID:              planID,
+		Name:            "Test Plan for Deletion",
+		Descr:           "Test Plan Description",
+		SubmitTime:      time.Now().UTC(),
+		PreChecks:       preChecks,
+		DeferredActions: deferredActions,
 	}
 	plan.State.Set(workflow.State{Status: workflow.NotStarted})
 
@@ -253,6 +296,23 @@ func TestDelete(t *testing.T) {
 				for _, action := range plan.PreChecks.Actions {
 					if fakeClient.BlobExists(containerName, actionBlobName(plan.ID, action.ID)) {
 						t.Errorf("TestDelete(%s): PreChecks action blob should be deleted", test.name)
+					}
+				}
+			}
+
+			// Verify DeferredActions blobs are deleted.
+			if plan.DeferredActions != nil {
+				if fakeClient.BlobExists(containerName, deferredActionsBlobName(plan.ID, plan.DeferredActions.ID)) {
+					t.Errorf("TestDelete(%s): DeferredActions blob should be deleted", test.name)
+				}
+				for _, batch := range plan.DeferredActions.DeferredBatches {
+					if fakeClient.BlobExists(containerName, deferBatchBlobName(plan.ID, batch.ID)) {
+						t.Errorf("TestDelete(%s): DeferBatch blob should be deleted", test.name)
+					}
+					for _, action := range batch.Actions {
+						if fakeClient.BlobExists(containerName, actionBlobName(plan.ID, action.ID)) {
+							t.Errorf("TestDelete(%s): DeferBatch action blob should be deleted", test.name)
+						}
 					}
 				}
 			}

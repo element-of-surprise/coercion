@@ -241,6 +241,92 @@ func TestPlanChecksFailurePreservesStatus(t *testing.T) {
 	}
 }
 
+func TestPlanChecksDeferredActionsFailurePrecedence(t *testing.T) {
+	t.Parallel()
+
+	failedDA := func() *workflow.DeferredActions {
+		d := &workflow.DeferredActions{}
+		d.State.Set(workflow.State{Status: workflow.Failed})
+		return d
+	}
+
+	tests := []struct {
+		name       string
+		plan       *workflow.Plan
+		wantReason workflow.FailureReason
+	}{
+		{
+			name: "Success: PreChecks failed and DA failed - DA wins",
+			plan: &workflow.Plan{
+				PreChecks:       newChecksWithState(&workflow.State{Status: workflow.Failed}),
+				DeferredActions: failedDA(),
+			},
+			wantReason: workflow.FRDeferredAction,
+		},
+		{
+			name: "Success: ContChecks failed and DA failed - DA wins",
+			plan: &workflow.Plan{
+				PreChecks:       newChecksWithState(&workflow.State{Status: workflow.Completed}),
+				ContChecks:      newChecksWithState(&workflow.State{Status: workflow.Failed}),
+				DeferredActions: failedDA(),
+			},
+			wantReason: workflow.FRDeferredAction,
+		},
+		{
+			name: "Success: PostChecks failed and DA failed - DA wins",
+			plan: &workflow.Plan{
+				PreChecks:       newChecksWithState(&workflow.State{Status: workflow.Completed}),
+				PostChecks:      newChecksWithState(&workflow.State{Status: workflow.Failed}),
+				DeferredActions: failedDA(),
+			},
+			wantReason: workflow.FRDeferredAction,
+		},
+		{
+			name: "Success: DeferredChecks failed and DA failed - DA wins",
+			plan: &workflow.Plan{
+				DeferredChecks:  newChecksWithState(&workflow.State{Status: workflow.Failed}),
+				DeferredActions: failedDA(),
+			},
+			wantReason: workflow.FRDeferredAction,
+		},
+		{
+			name: "Success: checks pass and DA failed still surfaces FRDeferredAction",
+			plan: &workflow.Plan{
+				PreChecks:       newChecksWithState(&workflow.State{Status: workflow.Completed}),
+				DeferredActions: failedDA(),
+			},
+			wantReason: workflow.FRDeferredAction,
+		},
+		{
+			name: "Success: only PreChecks failed and no DA - FRPreCheck still wins",
+			plan: &workflow.Plan{
+				PreChecks: newChecksWithState(&workflow.State{Status: workflow.Failed}),
+			},
+			wantReason: workflow.FRPreCheck,
+		},
+	}
+
+	finals := finalStates{}
+	for _, test := range tests {
+		test.plan.State.Set(workflow.State{Status: workflow.Running})
+		req := finals.planChecks(statemachine.Request[Data]{Data: Data{Plan: test.plan}})
+
+		if req.Err == nil {
+			t.Errorf("TestPlanChecksDeferredActionsFailurePrecedence(%s): got req.Err == nil, want non-nil", test.name)
+			continue
+		}
+		if methodName(req.Next) != methodName(finals.end) {
+			t.Errorf("TestPlanChecksDeferredActionsFailurePrecedence(%s): got next = %v, want finalStates.end", test.name, methodName(req.Next))
+		}
+		if test.plan.State.Get().Status != workflow.Failed {
+			t.Errorf("TestPlanChecksDeferredActionsFailurePrecedence(%s): got status = %v, want %v", test.name, test.plan.State.Get().Status, workflow.Failed)
+		}
+		if test.plan.Reason != test.wantReason {
+			t.Errorf("TestPlanChecksDeferredActionsFailurePrecedence(%s): got reason = %v, want %v", test.name, test.plan.Reason, test.wantReason)
+		}
+	}
+}
+
 func TestExamineChecks(t *testing.T) {
 	t.Parallel()
 

@@ -14,6 +14,7 @@ func _() {
 	_ = x[FRPostCheck-300]
 	_ = x[FRContCheck-400]
 	_ = x[FRDeferredCheck-450]
+	_ = x[FRDeferredAction-475]
 	_ = x[FRStopped-500]
 	_ = x[FRExceedRecovery-600]
 }
@@ -25,8 +26,9 @@ const (
 	_FailureReason_name_3 = "FRPostCheck"
 	_FailureReason_name_4 = "FRContCheck"
 	_FailureReason_name_5 = "FRDeferredCheck"
-	_FailureReason_name_6 = "FRStopped"
-	_FailureReason_name_7 = "FRExceedRecovery"
+	_FailureReason_name_6 = "FRDeferredAction"
+	_FailureReason_name_7 = "FRStopped"
+	_FailureReason_name_8 = "FRExceedRecovery"
 )
 
 func (i FailureReason) String() string {
@@ -43,10 +45,12 @@ func (i FailureReason) String() string {
 		return _FailureReason_name_4
 	case i == 450:
 		return _FailureReason_name_5
-	case i == 500:
+	case i == 475:
 		return _FailureReason_name_6
-	case i == 600:
+	case i == 500:
 		return _FailureReason_name_7
+	case i == 600:
+		return _FailureReason_name_8
 	default:
 		return "FailureReason(" + strconv.FormatInt(int64(i), 10) + ")"
 	}

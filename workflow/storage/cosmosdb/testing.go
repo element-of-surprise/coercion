@@ -104,6 +104,22 @@ func NewTestPlan() *workflow.Plan {
 	build.AddAction(clone.Action(ctx, checkAction5))
 	build.Up()
 
+	build.AddDeferredActions()
+	build.AddDeferBatch(&workflow.DeferBatch{
+		When:        workflow.OnFailure,
+		FailElement: true,
+		Sequence:    workflow.Sequence{Name: "fail-batch", Descr: "cleanup on failure"},
+	})
+	build.AddAction(clone.Action(ctx, checkAction1))
+	build.Up()
+	build.AddDeferBatch(&workflow.DeferBatch{
+		When:     workflow.OnSuccess,
+		Sequence: workflow.Sequence{Name: "success-batch", Descr: "log on success"},
+	})
+	build.AddAction(clone.Action(ctx, checkAction2))
+	build.Up()
+	build.Up()
+
 	build.AddBlock(builder.BlockArgs{
 		Name:              "block",
 		Descr:             "block",

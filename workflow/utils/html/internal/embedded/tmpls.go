@@ -48,6 +48,7 @@ func init() {
 					"mod":                mod,
 					"isZeroTime":         isZeroTime,
 					"jsonMarshal":        jsonMarshal,
+					"asSequence":         asSequence,
 				},
 			).Parse(string(tmplText))
 			if err != nil {
@@ -166,6 +167,10 @@ func calcCompleted[T supportedCalcs](v T) completed {
 		c.Percent = (c.Completed * 100) / c.Total
 	}
 	return c
+}
+
+func asSequence(b *workflow.DeferBatch) *workflow.Sequence {
+	return &b.Sequence
 }
 
 func attemptStatus(a *workflow.Attempt) string {

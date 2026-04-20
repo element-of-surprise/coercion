@@ -5,3 +5,5 @@ const delteBlocksByID = `DELETE FROM blocks WHERE id = $id`
 const deleteChecksByID = `DELETE FROM checks WHERE id = $id`
 const deleteSequencesByID = `DELETE FROM sequences WHERE id = $id`
 const deleteActionsByID = `DELETE FROM actions WHERE id = $id`
+const deleteDeferredActionsByID = `DELETE FROM deferredactions WHERE id = $id`
+const deleteDeferBatchesByID = `DELETE FROM deferbatches WHERE id = $id`

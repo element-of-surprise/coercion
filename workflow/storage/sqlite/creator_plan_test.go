@@ -84,6 +84,22 @@ func init() {
 	build.AddAction(clone.Action(ctx, checkAction3))
 	build.Up()
 
+	build.AddDeferredActions()
+	build.AddDeferBatch(&workflow.DeferBatch{
+		When:        workflow.OnFailure,
+		FailElement: true,
+		Sequence:    workflow.Sequence{Name: "fail-batch", Descr: "fail-batch"},
+	})
+	build.AddAction(clone.Action(ctx, checkAction1))
+	build.Up()
+	build.AddDeferBatch(&workflow.DeferBatch{
+		When:     workflow.OnSuccess,
+		Sequence: workflow.Sequence{Name: "success-batch", Descr: "success-batch"},
+	})
+	build.AddAction(clone.Action(ctx, checkAction2))
+	build.Up()
+	build.Up()
+
 	build.AddBlock(builder.BlockArgs{
 		Name:              "block",
 		Descr:             "block",
@@ -201,7 +217,6 @@ func TestCommitPlan(t *testing.T) {
 	reg.Register(&plugins.CheckPlugin{})
 	reg.Register(&plugins.HelloPlugin{})
 
-	// TODO(element-of-surprise): Add checks to verify the data in the database
 	reader := reader{
 		pool: pool,
 		reg:  reg,
@@ -212,8 +227,46 @@ func TestCommitPlan(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if diff := cmp.Diff(plan, storedPlan, cmp.AllowUnexported(workflow.Action{}, workflow.Block{}, workflow.Checks{}, workflow.Sequence{})); diff != "" {
+	if diff := cmp.Diff(
+		plan,
+		storedPlan,
+		cmp.AllowUnexported(
+			workflow.Action{},
+			workflow.Block{},
+			workflow.Checks{},
+			workflow.Sequence{},
+			workflow.DeferredActions{},
+			workflow.DeferBatch{},
+		),
+	); diff != "" {
 		t.Fatalf("Read plan does not match the original plan: -want/+got:\n%s", diff)
+	}
+
+	// Explicitly verify DeferredActions round-tripped — the top-level cmp.Diff
+	// above covers it, but asserting presence here protects against a future
+	// regression where the DeferredActions reader path is accidentally skipped.
+	if storedPlan.DeferredActions == nil {
+		t.Fatalf("TestCommitPlan: storedPlan.DeferredActions is nil, want non-nil")
+	}
+	if got, want := len(storedPlan.DeferredActions.DeferredBatches), len(plan.DeferredActions.DeferredBatches); got != want {
+		t.Fatalf("TestCommitPlan: DeferredBatches count = %d, want %d", got, want)
+	}
+	failBatch := storedPlan.DeferredActions.DeferredBatches[0]
+	successBatch := storedPlan.DeferredActions.DeferredBatches[1]
+	if failBatch.When != workflow.OnFailure {
+		t.Errorf("TestCommitPlan: DeferredBatches[0].When = %s, want OnFailure", failBatch.When)
+	}
+	if !failBatch.FailElement {
+		t.Errorf("TestCommitPlan: DeferredBatches[0].FailElement = false, want true")
+	}
+	if got, want := failBatch.Name, "fail-batch"; got != want {
+		t.Errorf("TestCommitPlan: DeferredBatches[0].Name = %q, want %q", got, want)
+	}
+	if successBatch.When != workflow.OnSuccess {
+		t.Errorf("TestCommitPlan: DeferredBatches[1].When = %s, want OnSuccess", successBatch.When)
+	}
+	if got, want := successBatch.Name, "success-batch"; got != want {
+		t.Errorf("TestCommitPlan: DeferredBatches[1].Name = %q, want %q", got, want)
 	}
 }
 
@@ -252,6 +305,8 @@ func TestDeletePlan(t *testing.T) {
 	mustGetcount(pool, "actions", t)
 	mustGetcount(pool, "checks", t)
 	mustGetcount(pool, "sequences", t)
+	mustGetcount(pool, "deferredactions", t)
+	mustGetcount(pool, "deferbatches", t)
 
 	if err := deleter.Delete(context.Background(), plan.ID); err != nil {
 		t.Fatal(err)
@@ -262,6 +317,8 @@ func TestDeletePlan(t *testing.T) {
 	countExpect(pool, "actions", 0, t)
 	countExpect(pool, "checks", 0, t)
 	countExpect(pool, "sequences", 0, t)
+	countExpect(pool, "deferredactions", 0, t)
+	countExpect(pool, "deferbatches", 0, t)
 }
 
 func mustGetcount(pool *sqlitex.Pool, table string, t *testing.T) int64 {

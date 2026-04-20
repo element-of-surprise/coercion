@@ -89,6 +89,9 @@ func (d deleter) deletePlan(ctx context.Context, plan *workflow.Plan) error {
 	if err := d.deleteChecks(ctx, &batch, plan.DeferredChecks); err != nil {
 		return fmt.Errorf("couldn't delete plan deferredchecks: %w", err)
 	}
+	if err := d.deleteDeferredActions(ctx, &batch, plan.DeferredActions); err != nil {
+		return fmt.Errorf("couldn't delete plan deferredactions: %w", err)
+	}
 	if err := d.deleteBlocks(ctx, &batch, plan.Blocks); err != nil {
 		return fmt.Errorf("couldn't delete blocks: %w", err)
 	}
@@ -208,6 +211,48 @@ func (d deleter) deleteSeqs(ctx context.Context, batch *azcosmos.TransactionalBa
 
 		batch.DeleteItem(seq.ID.String(), itemOpt)
 	}
+	return nil
+}
+
+func (d deleter) deleteDeferredActions(ctx context.Context, batch *azcosmos.TransactionalBatch, da *workflow.DeferredActions) error {
+	if da == nil {
+		return nil
+	}
+
+	for _, b := range da.DeferredBatches {
+		if err := d.deleteDeferBatch(ctx, batch, b); err != nil {
+			return fmt.Errorf("couldn't delete defer batch: %w", err)
+		}
+	}
+
+	var ifMatchEtag *azcore.ETag = nil
+	if da.State.Get().ETag != "" {
+		etag := da.State.Get().ETag
+		ifMatchEtag = (*azcore.ETag)(&etag)
+	}
+	itemOpt := &azcosmos.TransactionalBatchItemOptions{IfMatchETag: ifMatchEtag}
+
+	batch.DeleteItem(da.ID.String(), itemOpt)
+	return nil
+}
+
+func (d deleter) deleteDeferBatch(ctx context.Context, batch *azcosmos.TransactionalBatch, b *workflow.DeferBatch) error {
+	if b == nil {
+		return nil
+	}
+
+	if err := d.deleteActions(ctx, batch, b.Actions); err != nil {
+		return fmt.Errorf("couldn't delete defer batch actions: %w", err)
+	}
+
+	var ifMatchEtag *azcore.ETag = nil
+	if b.State.Get().ETag != "" {
+		etag := b.State.Get().ETag
+		ifMatchEtag = (*azcore.ETag)(&etag)
+	}
+	itemOpt := &azcosmos.TransactionalBatchItemOptions{IfMatchETag: ifMatchEtag}
+
+	batch.DeleteItem(b.ID.String(), itemOpt)
 	return nil
 }
 

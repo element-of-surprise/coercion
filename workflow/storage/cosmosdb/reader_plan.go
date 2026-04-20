@@ -63,6 +63,10 @@ func (p reader) docToPlan(ctx context.Context, response *azcosmos.ItemResponse) 
 	if err != nil {
 		return nil, fmt.Errorf("couldn't get plan deferredchecks: %w", err)
 	}
+	plan.DeferredActions, err = p.idToDeferredActions(ctx, k, resp.DeferredActions)
+	if err != nil {
+		return nil, fmt.Errorf("couldn't get plan deferredactions: %w", err)
+	}
 	plan.Blocks, err = p.idsToBlocks(ctx, k, resp.Blocks)
 	if err != nil {
 		return nil, fmt.Errorf("couldn't get blocks: %w", err)

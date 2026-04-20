@@ -28,6 +28,7 @@ const insertPlan = `
 		postchecks,
 		contchecks,
 		deferredchecks,
+		deferredactions,
 		blocks,
 		state_status,
 		state_start,
@@ -35,7 +36,7 @@ const insertPlan = `
 		submit_time,
 		reason
 	) VALUES ($id, $group_id, $name, $descr, $meta, $bypasschecks, $prechecks, $postchecks, $contchecks, $deferredchecks,
-	$blocks, $state_status, $state_start, $state_end, $submit_time, $reason)`
+	$deferredactions, $blocks, $state_status, $state_start, $state_end, $submit_time, $reason)`
 
 var zeroTime = time.Unix(0, 0)
 
@@ -68,6 +69,9 @@ func commitPlan(ctx context.Context, conn *sqlite.Conn, p *workflow.Plan, captur
 	}
 	if p.DeferredChecks != nil {
 		stmt.SetText("$deferredchecks", p.DeferredChecks.ID.String())
+	}
+	if p.DeferredActions != nil {
+		stmt.SetText("$deferredactions", p.DeferredActions.ID.String())
 	}
 	blocks, err := idsToJSON(p.Blocks)
 	if err != nil {
@@ -109,6 +113,9 @@ func commitPlan(ctx context.Context, conn *sqlite.Conn, p *workflow.Plan, captur
 	}
 	if err := commitChecks(ctx, conn, p.ID, p.DeferredChecks, capture); err != nil {
 		return errors.E(ctx, errors.CatInternal, errors.TypeStoragePut, fmt.Errorf("planToSQL(commitChecks(deferredchecks)): %w", err))
+	}
+	if err := commitDeferredActions(ctx, conn, p.ID, p.DeferredActions, capture); err != nil {
+		return errors.E(ctx, errors.CatInternal, errors.TypeStoragePut, fmt.Errorf("planToSQL(commitDeferredActions): %w", err))
 	}
 	for i, b := range p.Blocks {
 		if err := commitBlock(ctx, conn, p.ID, i, b, capture); err != nil {

@@ -58,6 +58,9 @@ const (
 	FRContCheck FailureReason = 400 // ContCheck
 	// FRDeferredCheck represents a failure reason that occurred during a deferred check.
 	FRDeferredCheck FailureReason = 450 // DeferredCheck
+	// FRDeferredAction represents a failure reason that occurred during a DeferredActions
+	// batch with FailElement=true.
+	FRDeferredAction FailureReason = 475 // DeferredAction
 	// FRStopped represents a failure reason that occurred because the workflow was stopped.
 	FRStopped FailureReason = 500 // Stopped
 	// FRExceedRecovery represents a failure reason that occurred because the last update for
@@ -116,6 +119,10 @@ const (
 	OTSequence ObjectType = 6
 	// OTAction represents an Action.
 	OTAction ObjectType = 7
+	// OTDeferredActions represents a DeferredActions.
+	OTDeferredActions ObjectType = 8
+	// OTBatch represents a DeferBatch.
+	OTBatch ObjectType = 9
 )
 
 // Object is an interface that all workflow objects must implement.
@@ -152,12 +159,14 @@ type Plan struct {
 	// Checks are actions that are executed after the workflow has completed.
 	// Any error will cause the workflow to fail. Optional.
 	PostChecks *Checks
+	// DeferredActions are actions that are executed after the workflow has completed.
+	// These run before DeferredChecks. This is useful for things like cleanup.
+	DeferredActions *DeferredActions
 	// DeferredChecks are actions that are executed after the workflow has completed.
 	// This is executed regardless of Plan success or failure. However, if the
 	// Plan is bypassed via BypassChecks, this will not run.
 	// Useful for logging and similar operations. Optional.
 	DeferredChecks *Checks
-
 	// Blocks is a list of blocks that are executed in sequence.
 	// If a block fails, the workflow will fail.
 	// Only one block can be executed at a time. Required.
@@ -246,7 +255,7 @@ func (p *Plan) validate(ctx context.Context) ([]validator, error) {
 		return nil, errors.New("submit time should not be set by the user")
 	}
 
-	vals := []validator{p.BypassChecks, p.PreChecks, p.ContChecks, p.PostChecks, p.DeferredChecks}
+	vals := []validator{p.BypassChecks, p.PreChecks, p.ContChecks, p.PostChecks, p.DeferredChecks, p.DeferredActions}
 	for _, b := range p.Blocks {
 		vals = append(vals, b)
 	}
@@ -386,7 +395,7 @@ type Block struct {
 	// Any error will cause the block to fail. Optional.
 	PostChecks *Checks
 	// DeferredChecks are actions that are executed after the workflow has completed.
-	// This is executed regardless of Plan success or failure. However, if the
+	// This is executed regardless of Block success or failure. However, if the
 	// Block is bypassed via BypassChecks, this will not run.
 	// Useful for logging and similar operations. Optional.
 	DeferredChecks *Checks
@@ -614,6 +623,175 @@ func (s *Sequence) validate(ctx context.Context) ([]validator, error) {
 // self simply returns itself. This is here to allows use in a generic interface for equality operations.
 func (s *Sequence) self() *Sequence {
 	return s
+}
+
+// DeferredActions represents a set of Actions that are executed after a workflow element has completed.
+type DeferredActions struct {
+	// DeferredBatches is a list of batches that are executed after the workflow element has completed.
+	DeferredBatches []*DeferBatch
+
+	// ID is a unique identifier for the object. Should not be set by the user.
+	ID uuid.UUID
+	// State represents settings that should not be set by the user, but users can query.
+	State AtomicValue[State]
+
+	planID uuid.UUID
+}
+
+// GetID is a getter for the ID field.
+func (d *DeferredActions) GetID() uuid.UUID {
+	if d == nil {
+		return uuid.Nil
+	}
+	return d.ID
+}
+
+// SetID is a setter for the ID field.
+func (d *DeferredActions) SetID(id uuid.UUID) {
+	d.ID = id
+}
+
+// GetState is a getter for the State settings.
+func (d *DeferredActions) GetState() State {
+	return d.State.Get()
+}
+
+// SetState is a setter for the State settings.
+func (d *DeferredActions) SetState(state State) {
+	d.State.Set(state)
+}
+
+// GetPlanID returns the Plan ID that the object belongs to.
+func (d *DeferredActions) GetPlanID() uuid.UUID {
+	return d.planID
+}
+
+// SetPlanID sets the Plan ID that the object belongs to.
+// This should not be used by the user.
+func (d *DeferredActions) SetPlanID(u uuid.UUID) {
+	d.planID = u
+}
+
+// Type implements the Object.Type().
+func (d *DeferredActions) Type() ObjectType {
+	return OTDeferredActions
+}
+
+// object implements the Object interface.
+func (d *DeferredActions) object() {}
+
+// Defaults sets the default values for the object. For use internally.
+func (d *DeferredActions) Defaults() {
+	if d == nil {
+		return
+	}
+	d.ID = NewV7()
+	d.State.Set(State{
+		Status: NotStarted,
+	})
+}
+
+func (d *DeferredActions) validate(ctx context.Context) ([]validator, error) {
+	if d == nil {
+		return nil, nil
+	}
+	if d.ID != uuid.Nil {
+		return nil, fmt.Errorf("id should not be set by the user")
+	}
+
+	if d.State.Get() != (State{}) {
+		return nil, fmt.Errorf("internal settings should not be set by the user")
+	}
+
+	if len(d.DeferredBatches) == 0 {
+		return nil, fmt.Errorf("at least one DeferBatch is required")
+	}
+
+	vals := make([]validator, 0, len(d.DeferredBatches))
+	for _, a := range d.DeferredBatches {
+		vals = append(vals, a)
+	}
+	return vals, nil
+}
+
+// self simply returns itself. This is here to allows use in a generic interface for equality operations.
+func (d *DeferredActions) self() *DeferredActions {
+	return d
+}
+
+//go:generate go tool github.com/johnsiilver/stringer -type=WhenDeferred -linecomment -valid -invalid=0
+
+// WhenDeferred represents when the DeferBatch should be executed.
+type WhenDeferred uint8
+
+const (
+	// WhenUnknown represents an unknown value for when the DeferBatch should be executed. This is an indication of a bug.
+	WhenUnknown WhenDeferred = 0 // Unknown
+	// OnSuccess represents a DeferBatch that is executed if the workflow element succeeded.
+	OnSuccess WhenDeferred = 1
+	// OnFailure represents a DeferBatch that is executed if the workflow element failed.
+	OnFailure WhenDeferred = 2
+	// Always represents a DeferBatch that is executed regardless of the workflow element's success or failure.
+	Always WhenDeferred = 3
+)
+
+// DeferBatch represents a set of actions that are executed after a workflow element has completed.
+// If FailElement is true, the parent element will be marked as failed if any action fails.
+type DeferBatch struct {
+	// When represents the plan status that will trigger the execution of the batch. Required.
+	When WhenDeferred
+	// FailElement fails the parent element if the batch fails.
+	FailElement bool
+	Sequence
+}
+
+// Type implements the Object.Type().
+func (d *DeferBatch) Type() ObjectType {
+	return OTBatch
+}
+
+func (d *DeferBatch) validate(ctx context.Context) ([]validator, error) {
+	if d == nil {
+		return nil, fmt.Errorf("cannot have a nil DeferBatch")
+	}
+	if !d.When.Valid() {
+		return nil, fmt.Errorf("invalid When value: %d", d.When)
+	}
+
+	if d.ID != uuid.Nil {
+		return nil, fmt.Errorf("id should not be set by the user")
+	}
+	var err error
+	ctx, err = addOrErrKey(ctx, d.Key)
+	if err != nil {
+		return nil, fmt.Errorf("DeferBatch object(%s): %w", d.Name, err)
+	}
+
+	if strings.TrimSpace(d.Name) == "" {
+		return nil, fmt.Errorf("name is required")
+	}
+	if strings.TrimSpace(d.Descr) == "" {
+		return nil, fmt.Errorf("description is required")
+	}
+
+	if d.State.Get() != (State{}) {
+		return nil, fmt.Errorf("internal settings should not be set by the user")
+	}
+
+	if len(d.Actions) == 0 {
+		return nil, fmt.Errorf("at least one Action is required")
+	}
+
+	vals := make([]validator, 0, len(d.Actions))
+	for _, a := range d.Actions {
+		vals = append(vals, a)
+	}
+	return vals, nil
+}
+
+// self simply returns itself. This is here to allows use in a generic interface for equality operations.
+func (d *DeferBatch) self() *DeferBatch {
+	return d
 }
 
 // Attempt is the result of an action that is executed by a plugin.

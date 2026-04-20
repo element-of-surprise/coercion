@@ -20,6 +20,7 @@ SELECT
 	postchecks,
 	contchecks,
 	deferredchecks,
+	deferredactions,
 	blocks,
 	state_status,
 	state_start,
@@ -79,6 +80,35 @@ SELECT
 	state_end
 FROM sequences
 where id = $id`
+
+const fetchDeferredActionsByID = `
+SELECT
+	id,
+	plan_id,
+	batches,
+	state_status,
+	state_start,
+	state_end
+FROM deferredactions
+WHERE id = $id`
+
+const fetchDeferBatchesByID = `
+SELECT
+	id,
+	plan_id,
+	deferredactions_id,
+	pos,
+	when_run,
+	fail_element,
+	name,
+	descr,
+	actions,
+	state_status,
+	state_start,
+	state_end
+FROM deferbatches
+WHERE id IN $ids
+ORDER BY pos ASC`
 
 const fetchActionsByID = `
 SELECT

@@ -119,6 +119,8 @@ type Updater interface {
 	BlockUpdater
 	SequenceUpdater
 	ActionUpdater
+	DeferredActionsUpdater
+	DeferBatchUpdater
 
 	private.Storage
 }
@@ -160,6 +162,22 @@ type SequenceUpdater interface {
 type ActionUpdater interface {
 	// UpdateAction writes Action data to storage for Actions in the specific Sequence, PreChecks, PostChecks or ContChecks.
 	UpdateAction(context.Context, *workflow.Action) error
+
+	private.Storage
+}
+
+// DeferredActionsUpdater is a storage writer for the DeferredActions container on a Plan.
+type DeferredActionsUpdater interface {
+	// UpdateDeferredActions writes DeferredActions state to storage but not underlying batches/actions.
+	UpdateDeferredActions(context.Context, *workflow.DeferredActions) error
+
+	private.Storage
+}
+
+// DeferBatchUpdater is a storage writer for individual DeferBatches inside a DeferredActions container.
+type DeferBatchUpdater interface {
+	// UpdateDeferBatch writes DeferBatch state to storage but not underlying actions.
+	UpdateDeferBatch(context.Context, *workflow.DeferBatch) error
 
 	private.Storage
 }

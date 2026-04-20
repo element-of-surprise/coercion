@@ -14,23 +14,25 @@ func _() {
 	_ = x[OTBlock-5]
 	_ = x[OTSequence-6]
 	_ = x[OTAction-7]
+	_ = x[OTDeferredActions-8]
+	_ = x[OTBatch-9]
 }
 
 const (
 	_ObjectType_name_0 = "OTUnknownOTPlanOTCheck"
-	_ObjectType_name_1 = "OTBlockOTSequenceOTAction"
+	_ObjectType_name_1 = "OTBlockOTSequenceOTActionOTDeferredActionsOTBatch"
 )
 
 var (
 	_ObjectType_index_0 = [...]uint8{0, 9, 15, 22}
-	_ObjectType_index_1 = [...]uint8{0, 7, 17, 25}
+	_ObjectType_index_1 = [...]uint8{0, 7, 17, 25, 42, 49}
 )
 
 func (i ObjectType) String() string {
 	switch {
 	case 0 <= i && i <= 2:
 		return _ObjectType_name_0[_ObjectType_index_0[i]:_ObjectType_index_0[i+1]]
-	case 5 <= i && i <= 7:
+	case 5 <= i && i <= 9:
 		i -= 5
 		return _ObjectType_name_1[_ObjectType_index_1[i]:_ObjectType_index_1[i+1]]
 	default:

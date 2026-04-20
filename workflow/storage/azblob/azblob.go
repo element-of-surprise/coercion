@@ -287,6 +287,10 @@ func findObjectContainer(prefix string, obj workflow.Object) (string, error) {
 		planID = o.GetPlanID()
 	case *workflow.Action:
 		planID = o.GetPlanID()
+	case *workflow.DeferredActions:
+		planID = o.GetPlanID()
+	case *workflow.DeferBatch:
+		planID = o.GetPlanID()
 	default:
 		return "", fmt.Errorf("unknown object type: %T", obj)
 	}

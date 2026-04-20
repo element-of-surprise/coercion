@@ -200,6 +200,43 @@
             </table>
         </div>
         {{end}} {{/*with .DeferredChecks*/}}
+
+        {{with .DeferredActions}}
+        <div class="m-5 mb-0 p-5 pb-0">
+            <div class="section-row flex sitems-center">
+                <div>DeferredActions</div>
+                <div><span style="color:{{statusColor .State.Get.Status}}">{{.State.Get.Status}}</span></div>
+            </div>
+        </div>
+
+        {{if .DeferredBatches}}
+        <div class="m-5 mb-0 p-5 pb-0">
+            <div class="section-row flex sitems-center">
+                <div>Deferred Batches</div>
+            </div>
+        </div>
+        <div class="summary m-5 mt-0 p-5 pt-0">
+            <table class="w-full">
+                <tr>
+                    <th class="header text-left">Name</th>
+                    <th class="header text-left">Description</th>
+                    <th class="header text-left">When</th>
+                    <th class="header text-left">Fails Parent</th>
+                    <th class="header text-left">Status</th>
+                </tr>
+                {{range .DeferredBatches}}
+                    <tr class="group">
+                        <td class="group-hover:bg-yellow-400"><a href="./batches/{{.ID}}.html">{{.Name}}</a></td>
+                        <td class="group-hover:bg-yellow-400">{{.Descr}}</td>
+                        <td class="group-hover:bg-yellow-400">{{.When}}</td>
+                        <td class="group-hover:bg-yellow-400">{{.FailElement}}</td>
+                        <td class="group-hover:bg-yellow-400"><span style="color:{{statusColor .State.Get.Status}}">{{.State.Get.Status}}</span></td>
+                    </tr>
+                {{end}}
+            </table>
+        </div>
+        {{end}} {{/*if .DeferredBatches*/}}
+        {{end}} {{/*with .DeferredActions*/}}
     </div>
 
     {{range $index, $block := .Blocks}}
