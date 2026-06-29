@@ -8,7 +8,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gostdlib/base/concurrency/sync"
 	"github.com/gostdlib/base/context"
 
 	"github.com/element-of-surprise/coercion/internal/execute/sm"
@@ -124,7 +123,8 @@ func TestInitPlugins(t *testing.T) {
 type fakeStore struct {
 	storage.Vault
 
-	m map[uuid.UUID]*workflow.Plan
+	m           map[uuid.UUID]*workflow.Plan
+	updateCalls int
 }
 
 func (f *fakeStore) Read(ctx context.Context, id uuid.UUID) (*workflow.Plan, error) {
@@ -136,6 +136,7 @@ func (f *fakeStore) Read(ctx context.Context, id uuid.UUID) (*workflow.Plan, err
 }
 
 func (f *fakeStore) UpdatePlan(ctx context.Context, plan *workflow.Plan) error {
+	f.updateCalls++
 	return nil
 }
 
@@ -248,8 +249,7 @@ func TestStart(t *testing.T) {
 			store:     store,
 			runner:    fr.Run,
 			states:    &sm.States{},
-			stoppers:  sync.ShardedMap[uuid.UUID, context.CancelFunc]{},
-			waiters:   sync.ShardedMap[uuid.UUID, chan struct{}]{},
+			running:   newRunning(),
 			maxSubmit: 30 * time.Minute,
 		}
 		p.addValidators()
@@ -280,7 +280,7 @@ func TestStart(t *testing.T) {
 				t.Errorf("TestStart(%s): Next method in Request is not the expected Start method", test.name)
 			}
 
-			if p.stoppers.Len() > 0 {
+			if p.running.stoppers.Len() > 0 {
 				t.Errorf("TestStart(%s): did not delete the stopper entry", test.name)
 			}
 		} else {
@@ -293,6 +293,193 @@ func TestStart(t *testing.T) {
 			}
 		}
 	}
+}
+
+// TestStartDuplicateNoStorageWrite is a regression test that Start claims the per-ID run *before*
+// mutating storage. With a run already in flight for the ID, a duplicate Start must lose the claim
+// and return nil without ever calling UpdatePlan. Writing first (the old order) let the duplicate
+// overwrite the winner's in-flight progress with the stale NotStarted plan it had read.
+func TestStartDuplicateNoStorageWrite(t *testing.T) {
+	t.Parallel()
+
+	id := NewV7()
+	plan := &workflow.Plan{ID: id, SubmitTime: time.Now()}
+	plan.State.Set(workflow.State{Status: workflow.NotStarted})
+
+	store := &fakeStore{m: map[uuid.UUID]*workflow.Plan{id: plan}}
+	fr := &fakeRunner{ran: make(chan struct{})}
+
+	e := &Plans{
+		store:     store,
+		runner:    fr.Run,
+		states:    &sm.States{},
+		running:   newRunning(),
+		maxSubmit: 30 * time.Minute,
+	}
+	e.addValidators()
+
+	// Simulate a run already in flight for this ID by taking its claim.
+	if _, won := e.running.claim(id, func() {}); !won {
+		t.Fatalf("TestStartDuplicateNoStorageWrite: setup claim did not win")
+	}
+
+	if err := e.Start(context.Background(), id); err != nil {
+		t.Fatalf("TestStartDuplicateNoStorageWrite: got err == %v, want err == nil", err)
+	}
+
+	if store.updateCalls != 0 {
+		t.Errorf("TestStartDuplicateNoStorageWrite: got UpdatePlan called %d times, want 0", store.updateCalls)
+	}
+
+	select {
+	case <-fr.ran:
+		t.Errorf("TestStartDuplicateNoStorageWrite: duplicate Start launched a runner, want none")
+	case <-time.After(200 * time.Millisecond):
+	}
+}
+
+// blockingRunner records each invocation on started and blocks until release is closed. It lets a
+// test deterministically hold a runPlan goroutine "in flight" while issuing a second runPlan for the
+// same ID.
+type blockingRunner struct {
+	started chan struct{}
+	release chan struct{}
+}
+
+func (r *blockingRunner) Run(name string, req statemachine.Request[sm.Data], options ...statemachine.Option) (statemachine.Request[sm.Data], error) {
+	r.started <- struct{}{}
+	<-r.release
+	return req, nil
+}
+
+// TestRunPlan is a regression test for the "plan has a running state, but isn't in the waiters"
+// panic. Two runPlan calls for the same ID must start exactly one runner: the duplicate must not
+// overwrite the waiter. With the overwrite, the first goroutine to finish deleted the second's
+// (overwritten) waiter entry while the second was still running, leaving storage Running with no
+// waiter, which Wait reported as a TypeBug that the caller turned into a panic.
+func TestRunPlan(t *testing.T) {
+	t.Parallel()
+
+	id := NewV7()
+	plan := &workflow.Plan{ID: id}
+	plan.State.Set(workflow.State{Status: workflow.Running})
+
+	store := &fakeStore{m: map[uuid.UUID]*workflow.Plan{id: plan}}
+	br := &blockingRunner{started: make(chan struct{}, 4), release: make(chan struct{})}
+
+	e := &Plans{
+		store:   store,
+		runner:  br.Run,
+		states:  &sm.States{},
+		running: newRunning(),
+	}
+
+	ctx := context.Background()
+
+	// First run starts a single runner that we hold in flight.
+	e.runPlan(ctx, plan, nil)
+	select {
+	case <-br.started:
+	case <-time.After(2 * time.Second):
+		t.Fatalf("TestRunPlan: first runner never started")
+	}
+
+	// Duplicate run for the same ID while the first is still in flight must be a no-op.
+	e.runPlan(ctx, plan, nil)
+	select {
+	case <-br.started:
+		t.Errorf("TestRunPlan: duplicate runPlan for the same ID started a second runner, want exactly one")
+		return // On pre-fix code the clobbered waiter would crash cleanup; stop here.
+	case <-time.After(500 * time.Millisecond):
+		// Good: no second runner started.
+	}
+
+	// The single runner is still blocked, so its waiter is present. Wait must block and then return
+	// nil once the runner completes and closes its own waiter.
+	waitErr := make(chan error, 1)
+	go func() { waitErr <- e.Wait(ctx, id) }()
+
+	// Let Wait fetch the waiter and block on it before the runner completes and removes it.
+	time.Sleep(100 * time.Millisecond)
+	close(br.release)
+
+	select {
+	case err := <-waitErr:
+		if err != nil {
+			t.Errorf("TestRunPlan: Wait after the single runner completed: got err == %v, want err == nil", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Errorf("TestRunPlan: Wait did not return after the runner completed")
+	}
+
+	deadline := time.Now().Add(2 * time.Second)
+	for (e.running.waiters.Len() != 0 || e.running.stoppers.Len() != 0) && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if e.running.waiters.Len() != 0 {
+		t.Errorf("TestRunPlan: got waiters.Len() == %d, want 0 after completion", e.running.waiters.Len())
+	}
+	if e.running.stoppers.Len() != 0 {
+		t.Errorf("TestRunPlan: got stoppers.Len() == %d, want 0 after completion", e.running.stoppers.Len())
+	}
+}
+
+// TestRunPlanDistinctIDsAndRecovery pins the recovery-safety guarantees of the per-ID guard added to
+// runPlan: the guard must dedup only the *same* ID (so recovery still starts every Running plan), and
+// a duplicate run for an already in-flight recovered plan must close its recoveryStarted channel so
+// the recovery loop never hangs.
+func TestRunPlanDistinctIDsAndRecovery(t *testing.T) {
+	t.Parallel()
+
+	const n = 5
+
+	store := &fakeStore{m: map[uuid.UUID]*workflow.Plan{}}
+	br := &blockingRunner{started: make(chan struct{}, n+2), release: make(chan struct{})}
+	e := &Plans{
+		store:   store,
+		runner:  br.Run,
+		states:  &sm.States{},
+		running: newRunning(),
+	}
+	ctx := context.Background()
+
+	// Every distinct Running plan must get its own runner; none deduped away.
+	ids := make([]uuid.UUID, n)
+	for i := 0; i < n; i++ {
+		id := NewV7()
+		ids[i] = id
+		p := &workflow.Plan{ID: id}
+		p.State.Set(workflow.State{Status: workflow.Running})
+		store.m[id] = p
+		e.runPlan(ctx, p, nil)
+	}
+	for i := 0; i < n; i++ {
+		select {
+		case <-br.started:
+		case <-time.After(2 * time.Second):
+			t.Fatalf("TestRunPlanDistinctIDsAndRecovery: only %d of %d runners started", i, n)
+		}
+	}
+	if got := e.running.waiters.Len(); got != n {
+		t.Errorf("TestRunPlanDistinctIDsAndRecovery: got waiters.Len() == %d, want %d", got, n)
+	}
+
+	// A duplicate run for an already in-flight plan must close recoveryStarted (so recover()'s wait
+	// loop completes) and must not start another runner.
+	dupStarted := make(chan struct{})
+	e.runPlan(ctx, store.m[ids[0]], dupStarted)
+	select {
+	case <-dupStarted:
+	case <-time.After(2 * time.Second):
+		t.Errorf("TestRunPlanDistinctIDsAndRecovery: duplicate runPlan did not close recoveryStarted")
+	}
+	select {
+	case <-br.started:
+		t.Errorf("TestRunPlanDistinctIDsAndRecovery: duplicate runPlan started another runner, want none")
+	case <-time.After(300 * time.Millisecond):
+	}
+
+	close(br.release) // Let the runners finish and clean up their waiters.
 }
 
 func TestWait(t *testing.T) {
@@ -406,7 +593,7 @@ func TestWait(t *testing.T) {
 
 		p := &Plans{
 			store:   fakeStore,
-			waiters: sync.ShardedMap[uuid.UUID, chan struct{}]{},
+			running: newRunning(),
 		}
 
 		ctx := context.Background()
@@ -418,7 +605,7 @@ func TestWait(t *testing.T) {
 
 		if test.addWaiter {
 			waiter := make(chan struct{})
-			p.waiters.Set(test.id, waiter)
+			p.running.waiters.Set(test.id, waiter)
 			if test.closeWaiter {
 				close(waiter)
 			}
