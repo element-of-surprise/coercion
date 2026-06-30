@@ -304,15 +304,19 @@ func (s *States) ExecuteBlock(req statemachine.Request[Data]) statemachine.Reque
 }
 
 func (s *States) handleRecoveredSeqs(req statemachine.Request[Data], b *workflow.Block) {
+	// Detach from cancellation so recovered sequences run to completion, but keep the request's
+	// context values (pool, tracing, plan ID). Mirrors ExecuteSequences.
+	ctx := context.WithoutCancel(req.Ctx)
+
 	seqs := []*workflow.Sequence{}
-	g := context.Pool(context.Background()).Group()
+	g := context.Pool(ctx).Group()
 	var completed, failed, stopped atomic.Int64
 
 	for _, seq := range b.Sequences {
 		if seq.GetState().Status == workflow.Running {
 			seqs = append(seqs, seq)
 			g.Go(
-				context.Background(),
+				ctx,
 				func(ctx context.Context) error {
 					err := s.execSeq(ctx, seq)
 					switch seq.GetState().Status {
@@ -330,7 +334,7 @@ func (s *States) handleRecoveredSeqs(req statemachine.Request[Data], b *workflow
 			)
 		}
 	}
-	_ = g.Wait(context.Background())
+	_ = g.Wait(ctx)
 
 	if s.exceededFailures(b, &failed) {
 		state := b.State.Get()

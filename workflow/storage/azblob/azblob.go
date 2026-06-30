@@ -84,8 +84,13 @@ type Args struct {
 }
 
 func (a *Args) validate(ctx context.Context) error {
-	if a.RetentionDays <= 0 {
-		return errors.E(ctx, errors.CatInternal, errors.TypeBug, errors.New("retentionDays must be greater than 0"))
+	// RetentionDays must be at least 2. Recovery searches day-bucketed containers keyed to a plan's
+	// creation day (its UUIDv7 timestamp), but enumerates those containers by wall-clock now. With a
+	// single day of retention, a plan created just before a UTC midnight is written to the prior day's
+	// container and becomes invisible to recovery moments later. Two days guarantees the prior day is
+	// always searched, covering any plan that straddles a midnight boundary.
+	if a.RetentionDays < 2 {
+		return errors.E(ctx, errors.CatInternal, errors.TypeBug, errors.New("retentionDays must be at least 2"))
 	}
 	if a.Prefix == "" {
 		return errors.E(ctx, errors.CatInternal, errors.TypeBug, errors.New("prefix cannot be empty"))

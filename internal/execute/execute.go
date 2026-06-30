@@ -15,7 +15,6 @@ import (
 	"github.com/element-of-surprise/coercion/workflow/utils/walk"
 	"github.com/google/uuid"
 
-	"github.com/gostdlib/base/concurrency/sync"
 	"github.com/gostdlib/base/statemachine"
 )
 
@@ -40,8 +39,8 @@ type Plans struct {
 	// states is the statemachine that runs the Plans.
 	states *sm.States
 
-	waiters  sync.ShardedMap[uuid.UUID, chan struct{}]
-	stoppers sync.ShardedMap[uuid.UUID, context.CancelFunc]
+	// running tracks plan IDs executing in this process and guards against duplicate in-flight runs.
+	running *running
 
 	// runner is the function that runs the statemachine.
 	// In production this is the statemachine.Run function.
@@ -93,11 +92,9 @@ func WithNoRecovery() Option {
 // New creates a new Executor. This should only be created once.
 func New(ctx context.Context, store storage.Vault, reg *registry.Register, options ...Option) (*Plans, error) {
 	e := &Plans{
-		registry: reg,
-		store:    store,
-		waiters:  sync.ShardedMap[uuid.UUID, chan struct{}]{},
-		// Note: stoppers isn't currently utilized, this is for when we need to expose a Stop function.
-		stoppers:      sync.ShardedMap[uuid.UUID, context.CancelFunc]{},
+		registry:      reg,
+		store:         store,
+		running:       newRunning(),
 		runner:        statemachine.Run[sm.Data],
 		maxLastUpdate: 30 * time.Minute,
 		maxSubmit:     30 * time.Minute,
@@ -181,16 +178,26 @@ func (e *Plans) Start(ctx context.Context, id uuid.UUID) error {
 		return nil
 	}
 
-	// This ensures that before we return that this will be running.
+	// Claim before any storage mutation. The claim is the single source of truth for "is this ID
+	// running here", so taking it first guarantees that a duplicate Start cannot reach UpdatePlan and
+	// overwrite the winner's in-flight progress with a stale plan object. Losing the claim means a run
+	// is already in flight; the plan is (or is about to be) Running, so report success and do nothing.
+	runCtx, release, won := e.claimRun(ctx, plan.ID)
+	if !won {
+		return nil
+	}
+
+	// We own the run. Record Running before launching so the plan is durably Running when we return.
 	state := plan.State.Get()
 	state.Status = workflow.Running
 	state.Start = e.now()
 	plan.State.Set(state)
 	if err := e.store.UpdatePlan(ctx, plan); err != nil {
+		release()
 		return err
 	}
 
-	e.runPlan(ctx, plan, nil)
+	e.launch(ctx, runCtx, release, plan, nil)
 
 	return nil
 }
@@ -233,23 +240,47 @@ func (e *Plans) recover(ctx context.Context) error {
 	return nil
 }
 
-// runPlan runs a Plan through the statemachine. This is a non-blocking call.
+// runPlan runs a recovered Plan through the statemachine. This is a non-blocking call. It is
+// idempotent per plan ID: if a run for the same ID is already in flight in this process, this is a
+// no-op. This prevents a duplicate run from overwriting the waiter and letting the first finisher
+// delete the second's entry, which would leave storage Running with no waiter (the source of the
+// "running state, but isn't in the waiters" bug in Wait).
 func (e *Plans) runPlan(ctx context.Context, plan *workflow.Plan, recoveryStarted chan struct{}) {
+	runCtx, release, won := e.claimRun(ctx, plan.ID)
+	if !won {
+		// A recovery caller waits for this channel to be closed; the in-flight run owns closing it,
+		// so signal completion here to avoid hanging the recovery loop.
+		if recoveryStarted != nil {
+			close(recoveryStarted)
+		}
+		return
+	}
+
+	e.launch(ctx, runCtx, release, plan, recoveryStarted)
+}
+
+// claimRun takes the single-run claim for plan id, fencing out duplicate runs. On success it returns
+// the run context, a release closure that MUST be called exactly once when the run finishes (launch
+// defers it), and won==true. On failure a run for id is already in flight: runCtx and release are nil
+// and won==false. The run context is derived from ctx but not cancelled by it; only release (via
+// Stop, later) cancels the run.
+func (e *Plans) claimRun(ctx context.Context, id uuid.UUID) (runCtx context.Context, release func(), won bool) {
 	runCtx, cancel := context.WithCancel(context.WithoutCancel(ctx))
+	release, won = e.running.claim(id, cancel)
+	if !won {
+		cancel()
+		return nil, nil, false
+	}
+	return runCtx, release, true
+}
 
-	e.stoppers.Set(plan.ID, cancel)
-	e.waiters.Set(plan.ID, make(chan struct{}))
-
+// launch submits the statemachine run for plan on a goroutine and returns immediately. runCtx and
+// release must come from a winning claimRun; the goroutine calls release exactly once on completion.
+func (e *Plans) launch(ctx context.Context, runCtx context.Context, release func(), plan *workflow.Plan, recoveryStarted chan struct{}) {
 	context.Pool(ctx).Submit(
 		ctx,
 		func() {
-			defer func() {
-				cancel()
-				e.stoppers.Del(plan.ID)
-				waiter, _ := e.waiters.Get(plan.ID)
-				close(waiter)
-				e.waiters.Del(plan.ID)
-			}()
+			defer release()
 
 			next := e.states.Start
 			if recoveryStarted != nil {
@@ -281,7 +312,7 @@ func (e *Plans) now() time.Time {
 // Wait waits for a Plan to finish execution. Cancelling the Context will stop waiting and
 // return context.Canceled.
 func (e *Plans) Wait(ctx context.Context, id uuid.UUID) error {
-	waiter, ok := e.waiters.Get(id)
+	waiter, ok := e.running.wait(id)
 	if !ok {
 		// Plan is not running, check if it exists.
 		plan, err := e.store.Read(ctx, id)
