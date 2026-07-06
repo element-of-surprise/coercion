@@ -11,7 +11,7 @@ import (
 	"github.com/element-of-surprise/coercion/workflow/storage/azblob/internal/planlocks"
 	testPlugins "github.com/element-of-surprise/coercion/workflow/storage/sqlite/testing/plugins"
 	"github.com/go-json-experiment/json"
-	"golang.org/x/sync/singleflight"
+	"github.com/gostdlib/base/concurrency/sync"
 )
 
 // setupDeleterTest creates a test environment with fake client and deleter struct
@@ -31,8 +31,8 @@ func setupDeleterTest(t *testing.T) (*blobops.Fake, deleter) {
 	// Create reader
 	r := reader{
 		mu:            planMu,
-		readFlight:    &singleflight.Group{},
-		existsFlight:  &singleflight.Group{},
+		readFlight:    &sync.Flight[string, *workflow.Plan]{},
+		existsFlight:  &sync.Flight[string, bool]{},
 		prefix:        prefix,
 		client:        fakeClient,
 		reg:           reg,

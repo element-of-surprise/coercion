@@ -1,8 +1,13 @@
 package azblob
 
 import (
+	"fmt"
+	"net/http"
 	"testing"
 	"time"
+
+	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
+	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob/bloberror"
 
 	"github.com/element-of-surprise/coercion/plugins/registry"
 	"github.com/element-of-surprise/coercion/workflow"
@@ -11,8 +16,88 @@ import (
 	"github.com/element-of-surprise/coercion/workflow/storage/azblob/internal/planlocks"
 	testPlugins "github.com/element-of-surprise/coercion/workflow/storage/sqlite/testing/plugins"
 	"github.com/go-json-experiment/json"
-	"golang.org/x/sync/singleflight"
+	"github.com/gostdlib/base/concurrency/sync"
 )
+
+// groupErrs builds the *sync.Errors that a worker Group's Wait() returns, in the given order.
+func groupErrs(errs ...error) *sync.Errors {
+	var e sync.Errors
+	for i, err := range errs {
+		e.Add(i, err)
+	}
+	return &e
+}
+
+// TestUnwrapGroup verifies that unwrapGroup classifies a fan-out's aggregated errors
+// deterministically: a not-found is reported only when every failure was a not-found, so a
+// concurrent transient/internal failure is never masked as a not-found regardless of the order the
+// goroutines happened to finish in.
+func TestUnwrapGroup(t *testing.T) {
+	t.Parallel()
+
+	notFound := &azcore.ResponseError{ErrorCode: string(bloberror.BlobNotFound), RawResponse: &http.Response{}}
+	notFound2 := &azcore.ResponseError{ErrorCode: string(bloberror.ContainerNotFound), RawResponse: &http.Response{}}
+	transient := &azcore.ResponseError{ErrorCode: string(bloberror.ServerBusy), RawResponse: &http.Response{}}
+	internal := fmt.Errorf("internal boom") // carries no ResponseError
+
+	tests := []struct {
+		name         string
+		in           error
+		wantNil      bool
+		wantNotFound bool
+	}{
+		{
+			name:    "nil error passes through as nil",
+			in:      nil,
+			wantNil: true,
+		},
+		{
+			name: "non-group internal error passes through and is not a not-found",
+			in:   internal,
+		},
+		{
+			name:         "non-group not-found error passes through as a not-found",
+			in:           notFound,
+			wantNotFound: true,
+		},
+		{
+			name:         "group of only not-found errors classifies as a not-found",
+			in:           groupErrs(notFound, notFound2),
+			wantNotFound: true,
+		},
+		{
+			name: "not-found ahead of a transient ResponseError is not a not-found",
+			in:   groupErrs(notFound, transient),
+		},
+		{
+			name: "transient ResponseError ahead of a not-found is not a not-found",
+			in:   groupErrs(transient, notFound),
+		},
+		{
+			name: "not-found ahead of a ResponseError-less internal error is not a not-found",
+			in:   groupErrs(notFound, internal),
+		},
+		{
+			name: "ResponseError-less internal error ahead of a not-found is not a not-found",
+			in:   groupErrs(internal, notFound),
+		},
+	}
+
+	for _, test := range tests {
+		got := unwrapGroup(test.in)
+		switch {
+		case test.wantNil && got != nil:
+			t.Errorf("TestUnwrapGroup(%s): got err == %v, want err == nil", test.name, got)
+			continue
+		case !test.wantNil && got == nil:
+			t.Errorf("TestUnwrapGroup(%s): got err == nil, want err != nil", test.name)
+			continue
+		}
+		if gotNF := blobops.IsNotFound(got); gotNF != test.wantNotFound {
+			t.Errorf("TestUnwrapGroup(%s): blobops.IsNotFound == %v, want %v", test.name, gotNF, test.wantNotFound)
+		}
+	}
+}
 
 // makeAction creates a test action with the given parameters and properly initialized State.
 func makeAction(name, descr, plugin string, req any, status workflow.Status) *workflow.Action {
@@ -388,8 +473,8 @@ func TestFetchNonRunningPlanOrphanedEntry(t *testing.T) {
 
 	r := reader{
 		mu:            planlocks.New(ctx),
-		readFlight:    &singleflight.Group{},
-		existsFlight:  &singleflight.Group{},
+		readFlight:    &sync.Flight[string, *workflow.Plan]{},
+		existsFlight:  &sync.Flight[string, bool]{},
 		prefix:        prefix,
 		client:        fakeClient,
 		reg:           reg,

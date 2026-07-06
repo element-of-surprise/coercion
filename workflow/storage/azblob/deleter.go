@@ -34,15 +34,16 @@ func (d deleter) Delete(ctx context.Context, id uuid.UUID) error {
 
 	// Read the plan to get full hierarchy
 	v, err, _ := d.reader.readFlight.Do(
+		ctx,
 		id.String(),
-		func() (any, error) {
+		func() (*workflow.Plan, error) {
 			return d.reader.fetchPlan(ctx, id)
 		},
 	)
 	if err != nil {
 		return errors.E(ctx, errors.CatInternal, errors.TypeStorageGet, fmt.Errorf("failed to read plan for deletion: %w", err))
 	}
-	plan := v.(*workflow.Plan)
+	plan := v
 
 	// Get the container for this plan based on its ID
 	containerName := containerForPlan(d.prefix, id)

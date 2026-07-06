@@ -6,6 +6,8 @@ import (
 
 	"github.com/go-json-experiment/json"
 	"github.com/google/uuid"
+	"github.com/gostdlib/base/concurrency/sync"
+	"github.com/gostdlib/base/concurrency/worker"
 	"github.com/gostdlib/base/context"
 
 	"github.com/element-of-surprise/coercion/workflow"
@@ -14,6 +16,65 @@ import (
 	"github.com/element-of-surprise/coercion/workflow/storage/azblob/internal/blobops"
 	"github.com/element-of-surprise/coercion/workflow/utils/walk"
 )
+
+// fetchConcurrency bounds the number of concurrent blob fetches spawned at each individual object
+// fetch. Each fan-out creates its own Limited pool based on worker.Default() (the unbounded default
+// pool), never on another Limited pool, so nested waits can never starve and deadlock.
+const fetchConcurrency = 10
+
+// unwrapGroup collapses the *sync.Errors that a worker Group's Wait() returns into an error whose
+// chain still exposes the underlying errors, so blobops.IsNotFound and errors.Is/As keep working
+// through it. A fan-out runs every sibling to completion with no first-error short-circuit, so on
+// mixed failures the group holds a not-found alongside other failures in nondeterministic completion
+// order. Because blobops.IsNotFound only inspects the first ResponseError errors.As reaches, that
+// ordering would let a genuine not-found mask a transient/internal error (or vice versa) run to run.
+// To keep classification stable, when any non-not-found failure is present we surface only those, so
+// a retryable error is never reported as a not-found; a not-found is reported only when every failure
+// was a not-found. Non-group errors (and nil) pass through unchanged.
+func unwrapGroup(err error) error {
+	if err == nil {
+		return nil
+	}
+	var errs *sync.Errors
+	if !errors.As(err, &errs) {
+		return err
+	}
+	collected := errs.Errors()
+	if len(collected) == 0 {
+		return nil
+	}
+	other := make([]error, 0, len(collected))
+	var notFound []error
+	for _, e := range collected {
+		if blobops.IsNotFound(e) {
+			notFound = append(notFound, e)
+			continue
+		}
+		other = append(other, e)
+	}
+	if len(other) > 0 {
+		return errors.Join(other...)
+	}
+	return errors.Join(notFound...)
+}
+
+// goFetchChecks schedules a concurrent fetch of the checks blob identified by id (a no-op when id is
+// uuid.Nil) on g, assigning the result via set. It removes the need to pass the address of a struct
+// field into the goroutine. Shared by fetchRunningPlan and fetchBlock, which populate the same five
+// check-type fields on Plan and Block respectively.
+func (r reader) goFetchChecks(ctx context.Context, g *sync.Group, containerName string, planID, id uuid.UUID, set func(*workflow.Checks)) {
+	if id == uuid.Nil {
+		return
+	}
+	g.Go(ctx, func(ctx context.Context) error {
+		c, err := r.fetchChecks(ctx, containerName, planID, id)
+		if err != nil {
+			return err
+		}
+		set(c)
+		return nil
+	})
+}
 
 type setPlanIDer interface {
 	SetPlanID(uuid.UUID)
@@ -141,49 +202,41 @@ func (r reader) fetchRunningPlan(ctx context.Context, containerName string, id u
 	}
 	plan.State.Set(lr.State)
 
-	if entry.BypassChecks != uuid.Nil {
-		plan.BypassChecks, err = r.fetchChecks(ctx, containerName, id, entry.BypassChecks)
-		if err != nil {
-			return nil, err
-		}
-	}
-	if entry.PreChecks != uuid.Nil {
-		plan.PreChecks, err = r.fetchChecks(ctx, containerName, id, entry.PreChecks)
-		if err != nil {
-			return nil, err
-		}
-	}
-	if entry.PostChecks != uuid.Nil {
-		plan.PostChecks, err = r.fetchChecks(ctx, containerName, id, entry.PostChecks)
-		if err != nil {
-			return nil, err
-		}
-	}
-	if entry.ContChecks != uuid.Nil {
-		plan.ContChecks, err = r.fetchChecks(ctx, containerName, id, entry.ContChecks)
-		if err != nil {
-			return nil, err
-		}
-	}
-	if entry.DeferredChecks != uuid.Nil {
-		plan.DeferredChecks, err = r.fetchChecks(ctx, containerName, id, entry.DeferredChecks)
-		if err != nil {
-			return nil, err
-		}
-	}
+	// Fetch all plan-level checks, deferred actions, and blocks concurrently. Each writes to a
+	// distinct field/index, so no synchronization is needed beyond the group's Wait.
+	g := worker.Default().Limited(ctx, "azBlobReaderPlan", fetchConcurrency).Group()
+
+	r.goFetchChecks(ctx, &g, containerName, id, entry.BypassChecks, func(c *workflow.Checks) { plan.BypassChecks = c })
+	r.goFetchChecks(ctx, &g, containerName, id, entry.PreChecks, func(c *workflow.Checks) { plan.PreChecks = c })
+	r.goFetchChecks(ctx, &g, containerName, id, entry.PostChecks, func(c *workflow.Checks) { plan.PostChecks = c })
+	r.goFetchChecks(ctx, &g, containerName, id, entry.ContChecks, func(c *workflow.Checks) { plan.ContChecks = c })
+	r.goFetchChecks(ctx, &g, containerName, id, entry.DeferredChecks, func(c *workflow.Checks) { plan.DeferredChecks = c })
+
 	if entry.DeferredActions != uuid.Nil {
-		plan.DeferredActions, err = r.fetchDeferredActions(ctx, containerName, id, entry.DeferredActions)
-		if err != nil {
-			return nil, err
-		}
+		g.Go(ctx, func(ctx context.Context) error {
+			da, err := r.fetchDeferredActions(ctx, containerName, id, entry.DeferredActions)
+			if err != nil {
+				return err
+			}
+			plan.DeferredActions = da
+			return nil
+		})
 	}
 
 	plan.Blocks = make([]*workflow.Block, len(entry.Blocks))
 	for i, blockID := range entry.Blocks {
-		plan.Blocks[i], err = r.fetchBlock(ctx, containerName, id, blockID)
-		if err != nil {
-			return nil, err
-		}
+		g.Go(ctx, func(ctx context.Context) error {
+			block, err := r.fetchBlock(ctx, containerName, id, blockID)
+			if err != nil {
+				return err
+			}
+			plan.Blocks[i] = block
+			return nil
+		})
+	}
+
+	if err := unwrapGroup(g.Wait(ctx)); err != nil {
+		return nil, err
 	}
 
 	if err := r.setRegistry(plan); err != nil {
@@ -236,13 +289,21 @@ func (r reader) fetchChecks(ctx context.Context, containerName string, planID, c
 	}
 	checks.SetPlanID(planID)
 
-	// Fetch all actions
+	// Fetch all actions concurrently; each writes a distinct slice index.
 	checks.Actions = make([]*workflow.Action, len(entry.Actions))
+	g := worker.Default().Limited(ctx, "azBlobReaderChecks", fetchConcurrency).Group()
 	for i, actionID := range entry.Actions {
-		checks.Actions[i], err = r.fetchAction(ctx, containerName, planID, actionID)
-		if err != nil {
-			return nil, err
-		}
+		g.Go(ctx, func(ctx context.Context) error {
+			action, err := r.fetchAction(ctx, containerName, planID, actionID)
+			if err != nil {
+				return err
+			}
+			checks.Actions[i] = action
+			return nil
+		})
+	}
+	if err := unwrapGroup(g.Wait(ctx)); err != nil {
+		return nil, err
 	}
 
 	return checks, nil
@@ -270,45 +331,29 @@ func (r reader) fetchBlock(ctx context.Context, containerName string, planID, bl
 	}
 	block.SetPlanID(planID)
 
-	// Fetch all check objects
-	if entry.BypassChecks != uuid.Nil {
-		block.BypassChecks, err = r.fetchChecks(ctx, containerName, planID, entry.BypassChecks)
-		if err != nil {
-			return nil, err
-		}
-	}
-	if entry.PreChecks != uuid.Nil {
-		block.PreChecks, err = r.fetchChecks(ctx, containerName, planID, entry.PreChecks)
-		if err != nil {
-			return nil, err
-		}
-	}
-	if entry.PostChecks != uuid.Nil {
-		block.PostChecks, err = r.fetchChecks(ctx, containerName, planID, entry.PostChecks)
-		if err != nil {
-			return nil, err
-		}
-	}
-	if entry.ContChecks != uuid.Nil {
-		block.ContChecks, err = r.fetchChecks(ctx, containerName, planID, entry.ContChecks)
-		if err != nil {
-			return nil, err
-		}
-	}
-	if entry.DeferredChecks != uuid.Nil {
-		block.DeferredChecks, err = r.fetchChecks(ctx, containerName, planID, entry.DeferredChecks)
-		if err != nil {
-			return nil, err
-		}
-	}
+	// Fetch all check objects and sequences concurrently; each writes a distinct field/index.
+	g := worker.Default().Limited(ctx, "azBlobReaderBlock", fetchConcurrency).Group()
 
-	// Fetch all sequences
+	r.goFetchChecks(ctx, &g, containerName, planID, entry.BypassChecks, func(c *workflow.Checks) { block.BypassChecks = c })
+	r.goFetchChecks(ctx, &g, containerName, planID, entry.PreChecks, func(c *workflow.Checks) { block.PreChecks = c })
+	r.goFetchChecks(ctx, &g, containerName, planID, entry.PostChecks, func(c *workflow.Checks) { block.PostChecks = c })
+	r.goFetchChecks(ctx, &g, containerName, planID, entry.ContChecks, func(c *workflow.Checks) { block.ContChecks = c })
+	r.goFetchChecks(ctx, &g, containerName, planID, entry.DeferredChecks, func(c *workflow.Checks) { block.DeferredChecks = c })
+
 	block.Sequences = make([]*workflow.Sequence, len(entry.Sequences))
 	for i, seqID := range entry.Sequences {
-		block.Sequences[i], err = r.fetchSequence(ctx, containerName, planID, seqID)
-		if err != nil {
-			return nil, err
-		}
+		g.Go(ctx, func(ctx context.Context) error {
+			seq, err := r.fetchSequence(ctx, containerName, planID, seqID)
+			if err != nil {
+				return err
+			}
+			block.Sequences[i] = seq
+			return nil
+		})
+	}
+
+	if err := unwrapGroup(g.Wait(ctx)); err != nil {
+		return nil, err
 	}
 
 	return block, nil
@@ -336,13 +381,21 @@ func (r reader) fetchSequence(ctx context.Context, containerName string, planID,
 	}
 	seq.SetPlanID(planID)
 
-	// Fetch all actions
+	// Fetch all actions concurrently; each writes a distinct slice index.
 	seq.Actions = make([]*workflow.Action, len(entry.Actions))
+	g := worker.Default().Limited(ctx, "azBlobReaderSequence", fetchConcurrency).Group()
 	for i, actionID := range entry.Actions {
-		seq.Actions[i], err = r.fetchAction(ctx, containerName, planID, actionID)
-		if err != nil {
-			return nil, err
-		}
+		g.Go(ctx, func(ctx context.Context) error {
+			action, err := r.fetchAction(ctx, containerName, planID, actionID)
+			if err != nil {
+				return err
+			}
+			seq.Actions[i] = action
+			return nil
+		})
+	}
+	if err := unwrapGroup(g.Wait(ctx)); err != nil {
+		return nil, err
 	}
 
 	return seq, nil

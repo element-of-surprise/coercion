@@ -12,7 +12,7 @@ import (
 	"github.com/element-of-surprise/coercion/workflow/storage/azblob/internal/blobops"
 	"github.com/element-of-surprise/coercion/workflow/storage/azblob/internal/planlocks"
 	testPlugins "github.com/element-of-surprise/coercion/workflow/storage/sqlite/testing/plugins"
-	"golang.org/x/sync/singleflight"
+	"github.com/gostdlib/base/concurrency/sync"
 )
 
 // TestDeferredActionsRoundTrip creates a plan with DeferredActions (via the
@@ -45,8 +45,8 @@ func TestDeferredActionsRoundTrip(t *testing.T) {
 	planMu := planlocks.New(ctx)
 	r := reader{
 		mu:            planMu,
-		readFlight:    &singleflight.Group{},
-		existsFlight:  &singleflight.Group{},
+		readFlight:    &sync.Flight[string, *workflow.Plan]{},
+		existsFlight:  &sync.Flight[string, bool]{},
 		prefix:        prefix,
 		client:        fakeClient,
 		reg:           reg,
@@ -164,8 +164,8 @@ func TestDeferredActionsFetchMissing(t *testing.T) {
 
 	r := reader{
 		mu:            planlocks.New(ctx),
-		readFlight:    &singleflight.Group{},
-		existsFlight:  &singleflight.Group{},
+		readFlight:    &sync.Flight[string, *workflow.Plan]{},
+		existsFlight:  &sync.Flight[string, bool]{},
 		prefix:        prefix,
 		client:        fakeClient,
 		reg:           reg,

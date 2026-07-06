@@ -28,8 +28,8 @@ import (
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
 	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob"
 	"github.com/google/uuid"
+	"github.com/gostdlib/base/concurrency/sync"
 	"github.com/gostdlib/base/context"
-	"golang.org/x/sync/singleflight"
 
 	"github.com/element-of-surprise/coercion/internal/private"
 	"github.com/element-of-surprise/coercion/plugins/registry"
@@ -151,8 +151,8 @@ func New(ctx context.Context, args Args, options ...Option) (*Vault, error) {
 
 	v.reader = reader{
 		mu:            v.mu,
-		readFlight:    &singleflight.Group{},
-		existsFlight:  &singleflight.Group{},
+		readFlight:    &sync.Flight[string, *workflow.Plan]{},
+		existsFlight:  &sync.Flight[string, bool]{},
 		prefix:        args.Prefix,
 		client:        opsClient,
 		reg:           args.Reg,
