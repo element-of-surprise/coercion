@@ -493,8 +493,13 @@ func (r reader) fixActions(ctx context.Context, plan *workflow.Plan) error {
 			}
 		}
 
-		// Fix Attempt.Resp for all attempts
+		// Fix Attempt.Resp for all attempts. When the action has no attempts, leave Attempts unset:
+		// calling Set with an empty slice would materialize the AtomicSlice and make a reconstructed
+		// plan no longer match a submitted plan that never recorded an attempt.
 		attempts := action.Attempts.Get()
+		if len(attempts) == 0 {
+			return nil
+		}
 		for i := range attempts {
 			if attempts[i].Resp != nil {
 				respBytes, err := json.Marshal(attempts[i].Resp)

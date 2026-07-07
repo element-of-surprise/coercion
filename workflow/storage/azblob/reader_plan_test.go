@@ -17,6 +17,7 @@ import (
 	testPlugins "github.com/element-of-surprise/coercion/workflow/storage/sqlite/testing/plugins"
 	"github.com/go-json-experiment/json"
 	"github.com/gostdlib/base/concurrency/sync"
+	"github.com/kylelemons/godebug/pretty"
 )
 
 // groupErrs builds the *sync.Errors that a worker Group's Wait() returns, in the given order.
@@ -195,6 +196,52 @@ func makePlanFull(bypassChecks, preChecks, postChecks, contChecks, deferredCheck
 	}
 	p.State.Set(workflow.State{Status: status})
 	return p
+}
+
+// TestFixActionsAttempts verifies fixActions does not materialize the Attempts slice of an action
+// that has none. A non-running plan is read back via a full json.Unmarshal followed by fixActions;
+// if fixActions writes back an empty Attempts, the reconstructed plan no longer matches the submitted
+// plan under a SkipZeroFields comparison (the integration test's "Attempts: {}" mismatch).
+func TestFixActionsAttempts(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	reg := registry.New()
+	reg.Register(&testPlugins.HelloPlugin{})
+
+	// The submitted plan's check action has no attempts, so Attempts is an unset (zero) AtomicSlice.
+	want := makePlan(
+		"Test Plan",
+		"Test Description",
+		makeChecks(
+			[]*workflow.Action{
+				makeAction("test action", "test action", testPlugins.HelloPluginName, testPlugins.HelloReq{Say: "hello"}, workflow.NotStarted),
+			},
+			workflow.NotStarted,
+		),
+		[]*workflow.Block{},
+		workflow.NotStarted,
+	)
+
+	// Simulate the non-running read path: marshal to storage, unmarshal back, then fixActions.
+	b, err := json.Marshal(want)
+	if err != nil {
+		t.Fatalf("TestFixActionsAttempts: failed to marshal plan: %v", err)
+	}
+	got := &workflow.Plan{}
+	if err := json.Unmarshal(b, got); err != nil {
+		t.Fatalf("TestFixActionsAttempts: failed to unmarshal plan: %v", err)
+	}
+
+	r := reader{reg: reg}
+	if err := r.fixActions(ctx, got); err != nil {
+		t.Fatalf("TestFixActionsAttempts: fixActions returned err == %s, want err == nil", err)
+	}
+
+	cfg := pretty.Config{SkipZeroFields: true, PrintStringers: true, PrintTextMarshalers: true}
+	if diff := cfg.Compare(want, got); diff != "" {
+		t.Errorf("TestFixActionsAttempts: reconstructed plan mismatch, -want/+got:\n%s", diff)
+	}
 }
 
 func TestFixActions(t *testing.T) {

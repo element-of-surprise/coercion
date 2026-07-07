@@ -3,9 +3,17 @@ package workflow
 import (
 	"slices"
 	"sync/atomic"
+	"unsafe"
 
 	"github.com/go-json-experiment/json"
 )
+
+// bytesToStr converts a byte slice to a string without copying. The returned string
+// must not outlive the backing slice and the slice must not be mutated afterwards;
+// here it is used only for a transient comparison against a JSON literal.
+func bytesToStr(b []byte) string {
+	return unsafe.String(unsafe.SliceData(b), len(b))
+}
 
 // AtomicValue is a generic atomic value that can be used to store types that
 // are safe to be copied by value, like a non-pointer struct. Don't use for
@@ -50,10 +58,16 @@ func (a *AtomicValue[T]) MarshalJSON() ([]byte, error) {
 	return json.Marshal(v)
 }
 
-// UnmarshalJSON unmarshals the value from JSON.
+// UnmarshalJSON unmarshals the value from JSON. A JSON null leaves the value unset
+// (nil pointer), symmetric with MarshalJSON which emits null for an unset value, so a
+// value round-trips without a never-set field materializing into a non-zero zero value.
 func (a *AtomicValue[T]) UnmarshalJSON(data []byte) error {
 	if a.UnmarshalJSONer != nil {
 		return a.UnmarshalJSONer(data)
+	}
+	if bytesToStr(data) == "null" {
+		a.value.Store(nil)
+		return nil
 	}
 	var v T
 	if err := json.Unmarshal(data, &v); err != nil {
@@ -124,10 +138,16 @@ func (a *AtomicSlice[T]) MarshalJSON() ([]byte, error) {
 	return json.Marshal(v)
 }
 
-// UnmarshalJSON unmarshals the value from JSON.
+// UnmarshalJSON unmarshals the value from JSON. A JSON null leaves the slice unset
+// (nil pointer), symmetric with MarshalJSON which emits null for an unset slice, so a
+// value round-trips without a never-set field materializing into an empty slice.
 func (a *AtomicSlice[T]) UnmarshalJSON(data []byte) error {
 	if a.UnmarshalJSONer != nil {
 		return a.UnmarshalJSONer(data)
+	}
+	if bytesToStr(data) == "null" {
+		a.value.Store(nil)
+		return nil
 	}
 	var v = []T{}
 	if err := json.Unmarshal(data, &v); err != nil {

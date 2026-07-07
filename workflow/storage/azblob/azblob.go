@@ -107,6 +107,12 @@ func (a *Args) validate(ctx context.Context) error {
 	return nil
 }
 
+const (
+	planObjPoolSize = 5
+	blockPoolSize   = 5
+	leafObjPoolSize = 20
+)
+
 // Option is an option for configuring a Vault.
 type Option func(*Vault) error
 
@@ -144,9 +150,9 @@ func New(ctx context.Context, args Args, options ...Option) (*Vault, error) {
 		client:      opsClient,
 		mu:          v.mu,
 		prefix:      v.prefix,
-		planObjPool: context.Pool(ctx).Limited(ctx, "azBlobUploaderTop", 5),
-		blockPool:   context.Pool(ctx).Limited(ctx, "azBlobUploaderSub", 5),
-		leafObjPool: context.Pool(ctx).Limited(ctx, "azBlobUploaderLeaf", 20),
+		planObjPool: context.Pool(ctx).Limited(ctx, "azBlobUploaderTop", planObjPoolSize),
+		blockPool:   context.Pool(ctx).Limited(ctx, "azBlobUploaderSub", blockPoolSize),
+		leafObjPool: context.Pool(ctx).Limited(ctx, "azBlobUploaderLeaf", leafObjPoolSize),
 	}
 
 	v.reader = reader{

@@ -362,27 +362,35 @@ func TestListSearchCanceledContext(t *testing.T) {
 		wantErr bool
 	}{
 		{
-			name:    "Success: Search with live context returns an open channel and no error",
-			cancel:  false,
-			call:    func(ctx context.Context, r reader) (chan storage.Stream[storage.ListResult], error) { return r.Search(ctx, storage.Filters{ByStatus: []workflow.Status{workflow.Running}}) },
+			name:   "Success: Search with live context returns an open channel and no error",
+			cancel: false,
+			call: func(ctx context.Context, r reader) (chan storage.Stream[storage.ListResult], error) {
+				return r.Search(ctx, storage.Filters{ByStatus: []workflow.Status{workflow.Running}})
+			},
 			wantErr: false,
 		},
 		{
-			name:    "Success: List with live context returns an open channel and no error",
-			cancel:  false,
-			call:    func(ctx context.Context, r reader) (chan storage.Stream[storage.ListResult], error) { return r.List(ctx, 0) },
+			name:   "Success: List with live context returns an open channel and no error",
+			cancel: false,
+			call: func(ctx context.Context, r reader) (chan storage.Stream[storage.ListResult], error) {
+				return r.List(ctx, 0)
+			},
 			wantErr: false,
 		},
 		{
-			name:    "Error: Search with a canceled context closes the channel and errors",
-			cancel:  true,
-			call:    func(ctx context.Context, r reader) (chan storage.Stream[storage.ListResult], error) { return r.Search(ctx, storage.Filters{ByStatus: []workflow.Status{workflow.Running}}) },
+			name:   "Error: Search with a canceled context closes the channel and errors",
+			cancel: true,
+			call: func(ctx context.Context, r reader) (chan storage.Stream[storage.ListResult], error) {
+				return r.Search(ctx, storage.Filters{ByStatus: []workflow.Status{workflow.Running}})
+			},
 			wantErr: true,
 		},
 		{
-			name:    "Error: List with a canceled context closes the channel and errors",
-			cancel:  true,
-			call:    func(ctx context.Context, r reader) (chan storage.Stream[storage.ListResult], error) { return r.List(ctx, 0) },
+			name:   "Error: List with a canceled context closes the channel and errors",
+			cancel: true,
+			call: func(ctx context.Context, r reader) (chan storage.Stream[storage.ListResult], error) {
+				return r.List(ctx, 0)
+			},
 			wantErr: true,
 		},
 	}
@@ -412,8 +420,21 @@ func TestListSearchCanceledContext(t *testing.T) {
 				t.Errorf("TestListSearchCanceledContext(%s): got ch == nil, want a closed channel", test.name)
 				return
 			}
-			for range ch {
+
+			ctx, cancel = context.WithTimeout(t.Context(), 10*time.Second)
+			for {
+				var ok bool
+				select {
+				case <-ctx.Done():
+					t.Fatalf("test.call did not close the returned channel in a 10 second time span")
+				case _, ok = <-ch:
+					if ok {
+						continue
+					}
+				}
+				break
 			}
+			cancel()
 		})
 	}
 }

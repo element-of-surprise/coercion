@@ -178,8 +178,15 @@ func benchRecoverySetup(b *testing.B, latency time.Duration) (reader, recovery, 
 		retentionDays: 14,
 	}
 	rec := recovery{
-		reader:   r,
-		uploader: &uploader{mu: planlocks.New(ctx), client: lc, prefix: prefix, planObjPool: context.Pool(ctx).Limited(ctx, "", 5), blockPool: context.Pool(ctx).Limited(ctx, "", 10), leafObjPool: context.Pool(ctx).Limited(ctx, "", 20)},
+		reader: r,
+		uploader: &uploader{
+			mu:          planlocks.New(ctx),
+			client:      lc,
+			prefix:      prefix,
+			planObjPool: context.Pool(ctx).Limited(ctx, "", planObjPoolSize),
+			blockPool:   context.Pool(ctx).Limited(ctx, "", blockPoolSize),
+			leafObjPool: context.Pool(ctx).Limited(ctx, "", leafObjPoolSize),
+		},
 	}
 	return r, rec, containerName, plan
 }
