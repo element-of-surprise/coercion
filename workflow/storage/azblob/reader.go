@@ -14,8 +14,8 @@ import (
 	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob/container"
 
 	"github.com/google/uuid"
+	"github.com/gostdlib/base/concurrency/sync"
 	"github.com/gostdlib/base/context"
-	"golang.org/x/sync/singleflight"
 
 	"github.com/element-of-surprise/coercion/internal/private"
 	"github.com/element-of-surprise/coercion/plugins/registry"
@@ -31,8 +31,8 @@ var _ storage.Reader = reader{}
 // reader implements the storage.Reader interface.
 type reader struct {
 	mu            *planlocks.Group
-	readFlight    *singleflight.Group
-	existsFlight  *singleflight.Group
+	readFlight    *sync.Flight[string, *workflow.Plan]
+	existsFlight  *sync.Flight[string, bool]
 	prefix        string
 	client        blobops.Ops
 	reg           *registry.Register
@@ -57,15 +57,16 @@ func (r reader) Exists(ctx context.Context, id uuid.UUID) (bool, error) {
 	defer r.mu.RUnlock(id)
 
 	v, err, _ := r.existsFlight.Do(
+		ctx,
 		id.String(),
-		func() (any, error) {
+		func() (bool, error) {
 			return r.exists(ctx, id)
 		},
 	)
 	if err != nil {
 		return false, err
 	}
-	return v.(bool), nil
+	return v, nil
 }
 
 func (r reader) exists(ctx context.Context, id uuid.UUID) (bool, error) {
@@ -93,8 +94,9 @@ func (r reader) Read(ctx context.Context, id uuid.UUID) (*workflow.Plan, error) 
 	defer r.mu.RUnlock(id)
 
 	v, err, _ := r.readFlight.Do(
+		ctx,
 		id.String(),
-		func() (any, error) {
+		func() (*workflow.Plan, error) {
 			return r.fetchPlan(ctx, id)
 		},
 	)
@@ -102,7 +104,7 @@ func (r reader) Read(ctx context.Context, id uuid.UUID) (*workflow.Plan, error) 
 		return nil, err
 	}
 
-	return v.(*workflow.Plan), nil
+	return v, nil
 }
 
 // ReadDirect reads a plan from storage bypassing the retention check.
@@ -126,10 +128,17 @@ func (r reader) Search(ctx context.Context, filters storage.Filters) (chan stora
 
 	ch := make(chan storage.Stream[storage.ListResult], 1)
 
-	go func() {
-		defer close(ch)
-		r.search(ctx, filters, ch)
-	}()
+	ok := context.Pool(ctx).Submit(
+		ctx,
+		func() {
+			defer close(ch)
+			r.search(ctx, filters, ch)
+		},
+	)
+	if !ok {
+		close(ch)
+		return ch, errors.E(ctx, errors.CatUser, errors.TypeTimeout, context.Cause(ctx))
+	}
 
 	return ch, nil
 }
@@ -138,10 +147,17 @@ func (r reader) Search(ctx context.Context, filters storage.Filters) (chan stora
 func (r reader) List(ctx context.Context, limit int) (chan storage.Stream[storage.ListResult], error) {
 	ch := make(chan storage.Stream[storage.ListResult], 1)
 
-	go func() {
-		defer close(ch)
-		r.list(ctx, limit, ch)
-	}()
+	ok := context.Pool(ctx).Submit(
+		ctx,
+		func() {
+			defer close(ch)
+			r.list(ctx, limit, ch)
+		},
+	)
+	if !ok {
+		close(ch)
+		return ch, errors.E(ctx, errors.CatUser, errors.TypeTimeout, context.Cause(ctx))
+	}
 
 	return ch, nil
 }

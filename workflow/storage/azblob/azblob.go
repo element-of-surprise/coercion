@@ -28,8 +28,8 @@ import (
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
 	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob"
 	"github.com/google/uuid"
+	"github.com/gostdlib/base/concurrency/sync"
 	"github.com/gostdlib/base/context"
-	"golang.org/x/sync/singleflight"
 
 	"github.com/element-of-surprise/coercion/internal/private"
 	"github.com/element-of-surprise/coercion/plugins/registry"
@@ -107,6 +107,12 @@ func (a *Args) validate(ctx context.Context) error {
 	return nil
 }
 
+const (
+	planObjPoolSize = 5
+	blockPoolSize   = 5
+	leafObjPoolSize = 20
+)
+
 // Option is an option for configuring a Vault.
 type Option func(*Vault) error
 
@@ -144,15 +150,15 @@ func New(ctx context.Context, args Args, options ...Option) (*Vault, error) {
 		client:      opsClient,
 		mu:          v.mu,
 		prefix:      v.prefix,
-		planObjPool: context.Pool(ctx).Limited(ctx, "azBlobUploaderTop", 5),
-		blockPool:   context.Pool(ctx).Limited(ctx, "azBlobUploaderSub", 5),
-		leafObjPool: context.Pool(ctx).Limited(ctx, "azBlobUploaderLeaf", 20),
+		planObjPool: context.Pool(ctx).Limited(ctx, "azBlobUploaderTop", planObjPoolSize),
+		blockPool:   context.Pool(ctx).Limited(ctx, "azBlobUploaderSub", blockPoolSize),
+		leafObjPool: context.Pool(ctx).Limited(ctx, "azBlobUploaderLeaf", leafObjPoolSize),
 	}
 
 	v.reader = reader{
 		mu:            v.mu,
-		readFlight:    &singleflight.Group{},
-		existsFlight:  &singleflight.Group{},
+		readFlight:    &sync.Flight[string, *workflow.Plan]{},
+		existsFlight:  &sync.Flight[string, bool]{},
 		prefix:        args.Prefix,
 		client:        opsClient,
 		reg:           args.Reg,

@@ -435,7 +435,11 @@ func Action(ctx context.Context, a *workflow.Action, options ...Option) *workflo
 	if opts.keepState {
 		na.ID = a.ID
 		cloneStateAtomic(&na.State, &a.State)
-		na.Attempts.Set(cloneAttempts(a.Attempts.Get()))
+		// Only materialize Attempts when there is something to copy; Set with an empty slice would
+		// turn an unset AtomicSlice into a materialized one, so the clone would no longer match its source.
+		if attempts := cloneAttempts(a.Attempts.Get()); len(attempts) > 0 {
+			na.Attempts.Set(attempts)
+		}
 	}
 
 	if !opts.keepSecrets && opts.callNum == 1 {

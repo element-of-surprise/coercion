@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/gostdlib/base/concurrency/worker"
 	"github.com/gostdlib/base/context"
 
 	"github.com/element-of-surprise/coercion/internal/private"
@@ -76,7 +77,7 @@ func (r recovery) recoverPlansInContainer(ctx context.Context, containerName str
 		return err
 	}
 
-	g := context.Pool(ctx).Limited(ctx, "", 10).Group()
+	g := context.Pool(ctx).Limited(ctx, "azBlobRecoveryPlans", fetchConcurrency).Group()
 
 	for _, planResult := range planBlobs {
 		if ctx.Err() != nil {
@@ -92,11 +93,8 @@ func (r recovery) recoverPlansInContainer(ctx context.Context, containerName str
 			},
 		)
 	}
-	if err := g.Wait(ctx); err != nil {
-		return err
-	}
 
-	return nil
+	return unwrapGroup(g.Wait(ctx))
 }
 
 // recoverPlan recovers a single plan by ensuring all sub-object blobs exist.
@@ -146,21 +144,24 @@ func (r recovery) ensureSubObjectBlobs(ctx context.Context, containerName string
 		reader: r.reader,
 	}
 
+	g := worker.Default().Limited(ctx, "azBlobRecoverySubObjects", fetchConcurrency).Group()
+
 	for _, checks := range []*workflow.Checks{plan.BypassChecks, plan.PreChecks, plan.PostChecks, plan.ContChecks, plan.DeferredChecks} {
-		if checks != nil {
-			if err := r.ensureChecksBlob(ctx, c, containerName, plan.ID, checks); err != nil {
-				return err
-			}
+		if checks == nil {
+			continue
 		}
+		g.Go(ctx, func(ctx context.Context) error {
+			return r.ensureChecksBlob(ctx, c, containerName, plan.ID, checks)
+		})
 	}
 
 	for i, block := range plan.Blocks {
-		if err := r.ensureBlockBlob(ctx, c, containerName, plan.ID, block, i); err != nil {
-			return err
-		}
+		g.Go(ctx, func(ctx context.Context) error {
+			return r.ensureBlockBlob(ctx, c, containerName, plan.ID, block, i)
+		})
 	}
 
-	return nil
+	return unwrapGroup(g.Wait(ctx))
 }
 
 // ensureBlockBlob ensures a block blob and all its sub-objects exist.
@@ -177,21 +178,24 @@ func (r recovery) ensureBlockBlob(ctx context.Context, c creator, containerName 
 		}
 	}
 
+	g := worker.Default().Limited(ctx, "azBlobRecoveryBlock", fetchConcurrency).Group()
+
 	for _, checks := range []*workflow.Checks{block.BypassChecks, block.PreChecks, block.PostChecks, block.ContChecks, block.DeferredChecks} {
-		if checks != nil {
-			if err := r.ensureChecksBlob(ctx, c, containerName, planID, checks); err != nil {
-				return err
-			}
+		if checks == nil {
+			continue
 		}
+		g.Go(ctx, func(ctx context.Context) error {
+			return r.ensureChecksBlob(ctx, c, containerName, planID, checks)
+		})
 	}
 
 	for i, seq := range block.Sequences {
-		if err := r.ensureSequenceBlob(ctx, c, containerName, planID, seq, i); err != nil {
-			return err
-		}
+		g.Go(ctx, func(ctx context.Context) error {
+			return r.ensureSequenceBlob(ctx, c, containerName, planID, seq, i)
+		})
 	}
 
-	return nil
+	return unwrapGroup(g.Wait(ctx))
 }
 
 // ensureSequenceBlob ensures a sequence blob and all its actions exist.
@@ -208,13 +212,14 @@ func (r recovery) ensureSequenceBlob(ctx context.Context, c creator, containerNa
 		}
 	}
 
+	g := worker.Default().Limited(ctx, "azBlobRecoverySequence", fetchConcurrency).Group()
 	for i, action := range seq.Actions {
-		if err := r.ensureActionBlob(ctx, c, containerName, planID, action, i); err != nil {
-			return err
-		}
+		g.Go(ctx, func(ctx context.Context) error {
+			return r.ensureActionBlob(ctx, c, containerName, planID, action, i)
+		})
 	}
 
-	return nil
+	return unwrapGroup(g.Wait(ctx))
 }
 
 // ensureChecksBlob ensures a checks blob and all its actions exist.
@@ -231,13 +236,14 @@ func (r recovery) ensureChecksBlob(ctx context.Context, c creator, containerName
 		}
 	}
 
+	g := worker.Default().Limited(ctx, "azBlobRecoveryChecks", fetchConcurrency).Group()
 	for i, action := range checks.Actions {
-		if err := r.ensureActionBlob(ctx, c, containerName, planID, action, i); err != nil {
-			return err
-		}
+		g.Go(ctx, func(ctx context.Context) error {
+			return r.ensureActionBlob(ctx, c, containerName, planID, action, i)
+		})
 	}
 
-	return nil
+	return unwrapGroup(g.Wait(ctx))
 }
 
 // ensureActionBlob ensures an action blob exists.

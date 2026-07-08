@@ -14,7 +14,7 @@ import (
 	"github.com/element-of-surprise/coercion/workflow/storage/azblob/internal/planlocks"
 	testPlugins "github.com/element-of-surprise/coercion/workflow/storage/sqlite/testing/plugins"
 	"github.com/google/uuid"
-	"golang.org/x/sync/singleflight"
+	"github.com/gostdlib/base/concurrency/sync"
 )
 
 // createPlanIDForDate creates a UUID v7 that appears to have been created at the given time.
@@ -290,8 +290,8 @@ func TestSearchWithRetentionPeriod(t *testing.T) {
 			fakeClient := blobops.NewFake()
 			r := reader{
 				mu:            planlocks.New(ctx),
-				readFlight:    &singleflight.Group{},
-				existsFlight:  &singleflight.Group{},
+				readFlight:    &sync.Flight[string, *workflow.Plan]{},
+				existsFlight:  &sync.Flight[string, bool]{},
 				prefix:        "test",
 				client:        fakeClient,
 				reg:           reg,
@@ -323,6 +323,118 @@ func TestSearchWithRetentionPeriod(t *testing.T) {
 			if len(results) != test.wantPlanCount {
 				t.Errorf("TestSearchWithRetentionPeriod(%s): got %d results, want %d", test.name, len(results), test.wantPlanCount)
 			}
+		})
+	}
+}
+
+// TestListSearchCanceledContext verifies that when the worker pool declines to enqueue the
+// streaming work (because ctx is already canceled), Search and List still close the returned
+// channel and return an error, rather than handing back a channel that never closes.
+func TestListSearchCanceledContext(t *testing.T) {
+	t.Parallel()
+
+	now := time.Now().UTC()
+	retentionDays := 14
+
+	newReader := func(ctx context.Context) reader {
+		reg := registry.New()
+		reg.Register(&testPlugins.HelloPlugin{})
+
+		return reader{
+			mu:            planlocks.New(ctx),
+			readFlight:    &sync.Flight[string, *workflow.Plan]{},
+			existsFlight:  &sync.Flight[string, bool]{},
+			prefix:        "test",
+			client:        blobops.NewFake(),
+			reg:           reg,
+			retentionDays: retentionDays,
+			nowf:          func() time.Time { return now },
+			testListPlansInContainer: func(ctx context.Context, cn string) ([]storage.ListResult, error) {
+				return nil, nil
+			},
+		}
+	}
+
+	tests := []struct {
+		name    string
+		cancel  bool
+		call    func(ctx context.Context, r reader) (chan storage.Stream[storage.ListResult], error)
+		wantErr bool
+	}{
+		{
+			name:   "Success: Search with live context returns an open channel and no error",
+			cancel: false,
+			call: func(ctx context.Context, r reader) (chan storage.Stream[storage.ListResult], error) {
+				return r.Search(ctx, storage.Filters{ByStatus: []workflow.Status{workflow.Running}})
+			},
+			wantErr: false,
+		},
+		{
+			name:   "Success: List with live context returns an open channel and no error",
+			cancel: false,
+			call: func(ctx context.Context, r reader) (chan storage.Stream[storage.ListResult], error) {
+				return r.List(ctx, 0)
+			},
+			wantErr: false,
+		},
+		{
+			name:   "Error: Search with a canceled context closes the channel and errors",
+			cancel: true,
+			call: func(ctx context.Context, r reader) (chan storage.Stream[storage.ListResult], error) {
+				return r.Search(ctx, storage.Filters{ByStatus: []workflow.Status{workflow.Running}})
+			},
+			wantErr: true,
+		},
+		{
+			name:   "Error: List with a canceled context closes the channel and errors",
+			cancel: true,
+			call: func(ctx context.Context, r reader) (chan storage.Stream[storage.ListResult], error) {
+				return r.List(ctx, 0)
+			},
+			wantErr: true,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			if test.cancel {
+				cancel()
+			}
+
+			r := newReader(ctx)
+
+			ch, err := test.call(ctx, r)
+			switch {
+			case err == nil && test.wantErr:
+				t.Errorf("TestListSearchCanceledContext(%s): got err == nil, want err != nil", test.name)
+			case err != nil && !test.wantErr:
+				t.Errorf("TestListSearchCanceledContext(%s): got err == %v, want err == nil", test.name, err)
+			}
+
+			// On the canceled path the contract is a closed, non-nil channel so callers ranging
+			// over it terminate immediately. If the bug regresses, this range blocks forever and
+			// the test times out.
+			if test.wantErr && ch == nil {
+				t.Errorf("TestListSearchCanceledContext(%s): got ch == nil, want a closed channel", test.name)
+				return
+			}
+
+			ctx, cancel = context.WithTimeout(t.Context(), 10*time.Second)
+			for {
+				var ok bool
+				select {
+				case <-ctx.Done():
+					t.Fatalf("test.call did not close the returned channel in a 10 second time span")
+				case _, ok = <-ch:
+					if ok {
+						continue
+					}
+				}
+				break
+			}
+			cancel()
 		})
 	}
 }
@@ -387,8 +499,8 @@ func TestSearchRecoveryScenario(t *testing.T) {
 			fakeClient := blobops.NewFake()
 			r := reader{
 				mu:            planlocks.New(ctx),
-				readFlight:    &singleflight.Group{},
-				existsFlight:  &singleflight.Group{},
+				readFlight:    &sync.Flight[string, *workflow.Plan]{},
+				existsFlight:  &sync.Flight[string, bool]{},
 				prefix:        "test",
 				client:        fakeClient,
 				reg:           reg,
@@ -513,8 +625,8 @@ func TestListWithRetentionPeriod(t *testing.T) {
 			fakeClient := blobops.NewFake()
 			r := reader{
 				mu:            planlocks.New(ctx),
-				readFlight:    &singleflight.Group{},
-				existsFlight:  &singleflight.Group{},
+				readFlight:    &sync.Flight[string, *workflow.Plan]{},
+				existsFlight:  &sync.Flight[string, bool]{},
 				prefix:        "test",
 				client:        fakeClient,
 				reg:           reg,

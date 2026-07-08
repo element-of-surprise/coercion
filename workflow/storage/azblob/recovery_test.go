@@ -15,7 +15,6 @@ import (
 	"github.com/go-json-experiment/json"
 	"github.com/google/uuid"
 	"github.com/gostdlib/base/concurrency/sync"
-	"golang.org/x/sync/singleflight"
 )
 
 // setupRecoveryTest creates a test environment with fake client and recovery struct
@@ -33,8 +32,8 @@ func setupRecoveryTest(t *testing.T) (*blobops.Fake, recovery) {
 	// Create reader
 	r := reader{
 		mu:            planlocks.New(ctx),
-		readFlight:    &singleflight.Group{},
-		existsFlight:  &singleflight.Group{},
+		readFlight:    &sync.Flight[string, *workflow.Plan]{},
+		existsFlight:  &sync.Flight[string, bool]{},
 		prefix:        prefix,
 		client:        fakeClient,
 		reg:           reg,
