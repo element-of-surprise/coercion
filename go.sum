@@ -146,8 +146,8 @@ github.com/google/pprof v0.0.0-20250317173921-a4b03ec1a45e h1:ijClszYn+mADRFY17k
 github.com/google/pprof v0.0.0-20250317173921-a4b03ec1a45e/go.mod h1:boTsfXsheKC2y+lKOCMpSfarhxDeIzfZG1jqGcPl3cA=
 github.com/google/uuid v1.6.0 h1:NIvaJDMOsjHA8n1jAhLSgzrAzy1Hgr+hNrb57e+94F0=
 github.com/google/uuid v1.6.0/go.mod h1:TIyPZe4MgqvfeYDBFedMoGGpEw/LqOeaOT+nhxU+yHo=
-github.com/gostdlib/base v0.0.0-20260701180745-9440ac4633af h1:IA6fCAeajiVbNcKGYZxpQKN1ZJZsFDGAYJRWB/jqTnA=
-github.com/gostdlib/base v0.0.0-20260701180745-9440ac4633af/go.mod h1:Fw09ETZEiMAuvJ4+D23S/5++VfMRe9ihP1zXXsMXOGA=
+github.com/gostdlib/base v0.0.0-20260802170211-f46987c5dccd h1:MDXHxceOQColPJxcFsTLqI7HLZtsmTIhki0a+ezePpI=
+github.com/gostdlib/base v0.0.0-20260802170211-f46987c5dccd/go.mod h1:6ATzKXqpEiNiFOnTbQqlu+RDf3A3Zpa2dGqennppFGk=
 github.com/grafana/regexp v0.0.0-20240518133315-a468a5bfb3bc h1:GN2Lv3MGO7AS6PrRoT6yV5+wkrOpcszoIsO4+4ds248=
 github.com/grafana/regexp v0.0.0-20240518133315-a468a5bfb3bc/go.mod h1:+JKpmjMGhpgPL+rXZ5nsZieVzvarn86asRlBg4uNGnk=
 github.com/grpc-ecosystem/grpc-gateway/v2 v2.27.1 h1:X5VWvz21y3gzm9Nw/kaUeku/1+uBhcekkmy4IkffJww=
