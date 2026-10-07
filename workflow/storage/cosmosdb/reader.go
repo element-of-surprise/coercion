@@ -91,6 +91,9 @@ func (r reader) Read(ctx context.Context, id uuid.UUID) (*workflow.Plan, error) 
 		return nil
 	}
 	if err := backoff.Retry(context.WithoutCancel(ctx), fetchPlan); err != nil {
+		if isNotFound(err) {
+			return nil, errors.ErrNotFound(ctx, fmt.Errorf("plan(%s) not found: %w", id, err))
+		}
 		return nil, errors.E(ctx, errors.CatInternal, errors.TypeStorageGet, fmt.Errorf("failed to fetch plan: %w", err))
 	}
 	return plan, nil

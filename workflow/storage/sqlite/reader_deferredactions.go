@@ -49,7 +49,7 @@ func (r reader) fetchDeferredActionsByID(ctx context.Context, conn *sqlite.Conn,
 		return nil, fmt.Errorf("couldn't fetch DeferredActions by id: %w", err)
 	}
 	if da == nil {
-		return nil, fmt.Errorf("couldn't find DeferredActions by id(%s)", id)
+		return nil, errMissingRow(ctx, "DeferredActions", id)
 	}
 	return da, nil
 }
@@ -122,7 +122,7 @@ func (r reader) fetchDeferBatchesByIDs(ctx context.Context, conn *sqlite.Conn, i
 	for _, id := range ids {
 		b, ok := byID[id]
 		if !ok {
-			return nil, fmt.Errorf("couldn't find DeferBatch by id(%s)", id)
+			return nil, errMissingRow(ctx, "DeferBatch", id)
 		}
 		out = append(out, b)
 	}

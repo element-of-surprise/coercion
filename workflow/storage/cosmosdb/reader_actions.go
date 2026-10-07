@@ -8,6 +8,7 @@ import (
 
 	"github.com/Azure/azure-sdk-for-go/sdk/data/azcosmos"
 	"github.com/element-of-surprise/coercion/workflow"
+	"github.com/element-of-surprise/coercion/workflow/errors"
 	"github.com/go-json-experiment/json"
 	"github.com/google/uuid"
 )
@@ -37,6 +38,15 @@ func (r reader) idsToActions(ctx context.Context, planID azcosmos.PartitionKey, 
 	actions, err := r.fetchActionsByIDs(ctx, planID, actionIDs)
 	if err != nil {
 		return nil, fmt.Errorf("couldn't fetch actions by ids: %w", err)
+	}
+	found := make(map[uuid.UUID]struct{}, len(actions))
+	for _, action := range actions {
+		found[action.ID] = struct{}{}
+	}
+	for _, id := range actionIDs {
+		if _, ok := found[id]; !ok {
+			return nil, errors.ErrNotFound(ctx, fmt.Errorf("action(%s) not found", id))
+		}
 	}
 	return actions, nil
 }

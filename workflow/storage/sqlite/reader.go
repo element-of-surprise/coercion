@@ -2,9 +2,12 @@ package sqlite
 
 import (
 	"fmt"
+	"maps"
 	"strings"
 	"time"
 	"unsafe"
+
+	"github.com/gostdlib/base/concurrency/sync"
 
 	"github.com/gostdlib/base/context"
 
@@ -21,13 +24,61 @@ import (
 
 // reader implements the storage.PlanReader interface.
 type reader struct {
+	// mu is the Vault's lock. Reads hold it for reading. The pool shares its cache between connections, which locks
+	// tables one at a time, so a read holding some tables could otherwise deadlock with a write transaction holding
+	// others (SQLITE_LOCKED, "database is deadlocked").
+	mu   *sync.RWMutex
 	pool *sqlitex.Pool
 	reg  *registry.Register
+	// sendTimeout is how long a List or Search stream waits for its caller to take a result before it gives up.
+	// Zero means defaultSendTimeout.
+	sendTimeout time.Duration
+}
+
+const listPageSize = 100
+
+// defaultSendTimeout is how long a List or Search stream waits for its caller to take a result before it gives up and
+// ends with an error. It bounds the life of a stream whose caller stops reading without cancelling ctx.
+const defaultSendTimeout = time.Minute
+
+type listCursor struct {
+	submitTime int64
+	id         string
+}
+
+// listItem is one item of a List or Search stream, and listStream is the stream.
+type (
+	listItem   = storage.Stream[storage.ListResult]
+	listStream = chan listItem
+)
+
+// pageQuery is a List or Search query, built once per stream. Only its cursor and limit change between pages.
+type pageQuery struct {
+	// first reads the first page, and next reads each later page, after the cursor.
+	first, next string
+	args        []any
+	// named holds the filters' named arguments. page copies it, so it never holds a page's limit or cursor.
+	named map[string]any
+}
+
+// page returns the query and arguments that read at most limit rows after cursor, or the first page if cursor is nil.
+// Each call returns its own named arguments, holding only the ones its query uses.
+func (q pageQuery) page(cursor *listCursor, limit int) (string, []any, map[string]any) {
+	named := make(map[string]any, len(q.named)+3)
+	maps.Copy(named, q.named)
+	named["$page_limit"] = limit
+	if cursor == nil {
+		return q.first, q.args, named
+	}
+	named["$cursor_submit_time"] = cursor.submitTime
+	named["$cursor_id"] = cursor.id
+	return q.next, q.args, named
 }
 
 // Exists returns true if the Plan ID exists in the storage.
 func (r reader) Exists(ctx context.Context, id uuid.UUID) (bool, error) {
-	const q = "SELECT COUNT(*) FROM 'plans' WHERE 'id' = ?;"
+	r.mu.RLock()
+	defer r.mu.RUnlock()
 
 	conn, err := r.pool.Take(ctx)
 	if err != nil {
@@ -35,13 +86,20 @@ func (r reader) Exists(ctx context.Context, id uuid.UUID) (bool, error) {
 	}
 	defer r.pool.Put(conn)
 
+	return planStored(ctx, conn, id)
+}
+
+// planStored reports whether conn has a row for the Plan with id.
+func planStored(ctx context.Context, conn *sqlite.Conn, id uuid.UUID) (bool, error) {
+	const q = "SELECT COUNT(*) FROM plans WHERE id = $id;"
+
 	count := -1
-	err = sqlitex.ExecuteTransient(
+	err := sqlitex.Execute(
 		conn,
 		q,
 		&sqlitex.ExecOptions{
-			Args: []any{
-				id[:],
+			Named: map[string]any{
+				"$id": id.String(),
 			},
 			ResultFunc: func(stmt *sqlite.Stmt) error {
 				count = stmt.ColumnInt(0)
@@ -58,8 +116,16 @@ func (r reader) Exists(ctx context.Context, id uuid.UUID) (bool, error) {
 	return count > 0, nil
 }
 
+// errMissingRow returns the error for a stored Plan that names an object with no row: its storage is damaged.
+func errMissingRow(ctx context.Context, kind string, id uuid.UUID) error {
+	return errors.E(ctx, errors.CatInternal, errors.TypeStorageInconsistent, fmt.Errorf("stored plan names %s(%s), which has no row", kind, id))
+}
+
 // Read returns a Plan from the storage.
 func (r reader) Read(ctx context.Context, id uuid.UUID) (*workflow.Plan, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
 	return r.fetchPlan(ctx, id)
 }
 
@@ -69,162 +135,202 @@ func (r reader) Search(ctx context.Context, filters storage.Filters) (chan stora
 		return nil, errors.E(ctx, errors.CatUser, errors.TypeParameter, fmt.Errorf("invalid filter: %w", err))
 	}
 
-	conn, err := r.pool.Take(ctx)
-	if err != nil {
-		return nil, errors.E(ctx, errors.CatInternal, errors.TypeConn, fmt.Errorf("couldn't get a connection from the pool: %w", err))
-	}
-
-	q, args, named := r.buildSearchQuery(filters)
-
-	results := make(chan storage.Stream[storage.ListResult], 1)
-
-	context.Pool(ctx).Submit(
-		ctx,
-		func() {
-			defer r.pool.Put(conn)
-			defer close(results)
-			err := sqlitex.Execute(
-				conn,
-				q,
-				&sqlitex.ExecOptions{
-					Args:  args,
-					Named: named,
-					ResultFunc: func(stmt *sqlite.Stmt) error {
-						r, err := r.listResultsFunc(stmt)
-						if err != nil {
-							return errors.E(ctx, errors.CatInternal, errors.TypeStorageGet, fmt.Errorf("problem searching plans: %w", err))
-						}
-						select {
-						case <-ctx.Done():
-							err := errors.E(ctx, errors.CatInternal, errors.TypeTimeout, ctx.Err())
-							results <- storage.Stream[storage.ListResult]{
-								Err: err,
-							}
-							return ctx.Err()
-						case results <- storage.Stream[storage.ListResult]{Result: r}:
-							return nil
-						}
-					},
-				},
-			)
-
-			if err != nil {
-				results <- storage.Stream[storage.ListResult]{Err: err}
-			}
-		},
-	)
-	return results, nil
+	return r.streamList(ctx, r.buildSearchQuery(filters), 0, "search")
 }
 
-func (r reader) buildSearchQuery(filters storage.Filters) (string, []any, map[string]any) {
-	const sel = `SELECT id, group_id, name, descr, submit_time, state_status, state_start, state_end FROM plans WHERE`
+// buildSearchQuery returns the paged query for the plans that match filters, newest first.
+func (r reader) buildSearchQuery(filters storage.Filters) pageQuery {
+	const (
+		sel    = `SELECT id, group_id, name, descr, submit_time, state_status, state_start, state_end FROM plans`
+		after  = `(submit_time < $cursor_submit_time OR (submit_time = $cursor_submit_time AND id < $cursor_id))`
+		order  = ` ORDER BY submit_time DESC, id DESC LIMIT $page_limit;`
+		andStr = " AND "
+	)
 
-	var named = map[string]any{}
+	named := map[string]any{}
 	var args []any
-
-	build := strings.Builder{}
-	build.WriteString(sel)
-
-	numFilters := 0
+	var filtersSQL []string
 
 	if len(filters.ByIDs) > 0 {
-		numFilters++
-		build.WriteString(" id IN $ids")
+		filtersSQL = append(filtersSQL, "id IN $ids")
 	}
 	if len(filters.ByGroupIDs) > 0 {
-		if numFilters > 0 {
-			build.WriteString(" AND")
-		}
-		numFilters++
-		build.WriteString(" group_id IN $group_ids")
+		filtersSQL = append(filtersSQL, "group_id IN $group_ids")
 	}
 	if len(filters.ByStatus) > 0 {
-		if numFilters > 0 {
-			build.WriteString(" AND")
-		}
-		numFilters++ // I know this says inEffectual assignment and it is, but it is here for completeness.
+		var statuses []string
 		for i, s := range filters.ByStatus {
 			name := fmt.Sprintf("$status%d", i)
 			named[name] = int64(s)
-			if i == 0 {
-				build.WriteString(fmt.Sprintf(" state_status = %s", name))
-			} else {
-				build.WriteString(fmt.Sprintf(" OR state_status = %s", name))
-			}
+			statuses = append(statuses, fmt.Sprintf("state_status = %s", name))
 		}
+		filtersSQL = append(filtersSQL, "("+strings.Join(statuses, " OR ")+")")
 	}
 
-	build.WriteString(" ORDER BY submit_time DESC;")
-
-	query := build.String()
+	filter := strings.Join(filtersSQL, andStr)
 	if len(filters.ByIDs) > 0 {
 		var idArgs []any
-		query, idArgs = replaceWithIDs(query, "$id", filters.ByIDs)
+		filter, idArgs = replaceWithIDs(filter, "$ids", filters.ByIDs)
 		args = append(args, idArgs...)
 	}
 	if len(filters.ByGroupIDs) > 0 {
 		var groupArgs []any
-		query, groupArgs = replaceWithIDs(query, "$group_id", filters.ByGroupIDs)
+		filter, groupArgs = replaceWithIDs(filter, "$group_ids", filters.ByGroupIDs)
 		args = append(args, groupArgs...)
 	}
-	return query, args, named
+
+	q := pageQuery{args: args, named: named}
+	if filter == "" {
+		q.first = sel + order
+		q.next = sel + " WHERE " + after + order
+		return q
+	}
+	q.first = sel + " WHERE " + filter + order
+	q.next = sel + " WHERE " + filter + andStr + after + order
+	return q
 }
 
 // List returns a list of Plan IDs in the storage in order from newest to oldest. This should
 // return with most recent submiited first. Limit sets the maximum number of
 // entrie to return
 func (r reader) List(ctx context.Context, limit int) (chan storage.Stream[storage.ListResult], error) {
-	const listPlans = `SELECT id, group_id, name, descr, submit_time, state_status, state_start, state_end FROM plans ORDER BY submit_time DESC`
+	return r.streamList(ctx, r.buildSearchQuery(storage.Filters{}), limit, "list")
+}
 
-	named := map[string]any{}
-
-	q := listPlans
-	if limit > 0 {
-		q += " LIMIT $limit;"
-		named["$limit"] = limit
+func (r reader) streamList(ctx context.Context, q pageQuery, limit int, operation string) (listStream, error) {
+	results := make(listStream, 1)
+	// The producer parks until the caller reads or cancels, so it runs on the default pool rather than taking a slot
+	// from a Limited pool the caller's ctx may carry.
+	ok := context.Pool(ctx).Default().Submit(
+		ctx,
+		func() {
+			defer close(results)
+			sender := r.newListSender(results, operation)
+			var cursor *listCursor
+			remaining := limit
+			for {
+				pageLimit := listPageSize
+				if remaining > 0 && remaining < pageLimit {
+					pageLimit = remaining
+				}
+				query, args, named := q.page(cursor, pageLimit)
+				page, err := r.readListPage(ctx, query, args, named)
+				if err != nil {
+					if ctx.Err() != nil {
+						// Cancelled while reading the page: classify it as the cancellation, not a storage failure.
+						err = errors.E(ctx, errors.CatInternal, errors.TypeTimeout, fmt.Errorf("%s was cancelled: %w", operation, err))
+					}
+					sender.sendErr(ctx, err)
+					return
+				}
+				for _, result := range page {
+					if err := sender.send(ctx, listItem{Result: result}); err != nil {
+						sender.sendErr(ctx, err)
+						return
+					}
+				}
+				if remaining > 0 {
+					remaining -= len(page)
+				}
+				if len(page) < pageLimit || (limit > 0 && remaining == 0) {
+					return
+				}
+				last := page[len(page)-1]
+				cursor = &listCursor{submitTime: last.SubmitTime.UnixNano(), id: last.ID.String()}
+			}
+		},
+	)
+	if !ok {
+		close(results)
+		return nil, errors.E(ctx, errors.CatInternal, errors.TypeTimeout, fmt.Errorf("could not start %s: %w", operation, context.Cause(ctx)))
 	}
+	return results, nil
+}
+
+// readListPage materializes one bounded page while holding the Vault's read lock. The lock and connection are released
+// before the page is sent to the caller.
+func (r reader) readListPage(ctx context.Context, query string, args []any, named map[string]any) ([]storage.ListResult, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
 
 	conn, err := r.pool.Take(ctx)
 	if err != nil {
 		return nil, errors.E(ctx, errors.CatInternal, errors.TypeConn, fmt.Errorf("couldn't get a connection from the pool: %w", err))
 	}
-	results := make(chan storage.Stream[storage.ListResult], 1)
+	defer r.pool.Put(conn)
 
-	context.Pool(ctx).Submit(
-		ctx,
-		func() {
-			defer r.pool.Put(conn)
-			defer close(results)
-			err := sqlitex.Execute(
-				conn,
-				q,
-				&sqlitex.ExecOptions{
-					Named: named,
-					ResultFunc: func(stmt *sqlite.Stmt) error {
-						result, err := r.listResultsFunc(stmt)
-						if err != nil {
-							return errors.E(ctx, errors.CatInternal, errors.TypeStorageGet, fmt.Errorf("problem listing plans: %w", err))
-						}
-						select {
-						case <-ctx.Done():
-							err := errors.E(ctx, errors.CatInternal, errors.TypeTimeout, ctx.Err())
-							results <- storage.Stream[storage.ListResult]{
-								Err: err,
-							}
-							return ctx.Err()
-						case results <- storage.Stream[storage.ListResult]{Result: result}:
-							return nil
-						}
-					},
-				},
-			)
-
+	results := make([]storage.ListResult, 0, listPageSize)
+	err = sqlitex.Execute(conn, query, &sqlitex.ExecOptions{
+		Args:  args,
+		Named: named,
+		ResultFunc: func(stmt *sqlite.Stmt) error {
+			result, err := r.listResultsFunc(stmt)
 			if err != nil {
-				results <- storage.Stream[storage.ListResult]{Err: err}
+				return err
 			}
+			results = append(results, result)
+			return nil
 		},
-	)
+	})
+	if err != nil {
+		return nil, errors.E(ctx, errors.CatInternal, errors.TypeStorageList, fmt.Errorf("couldn't read a page of plans: %w", err))
+	}
 	return results, nil
+}
+
+// listSender sends the items of one List or Search stream. It reuses one timer for every send.
+type listSender struct {
+	results   listStream
+	operation string
+	timeout   time.Duration
+	timer     *time.Timer
+	// failed is set once a send fails. The caller is gone or ctx is done, so no later send waits.
+	failed bool
+}
+
+// newListSender returns a listSender for results.
+func (r reader) newListSender(results listStream, operation string) *listSender {
+	timeout := r.sendTimeout
+	if timeout == 0 {
+		timeout = defaultSendTimeout
+	}
+	timer := time.NewTimer(timeout)
+	timer.Stop()
+	return &listSender{results: results, operation: operation, timeout: timeout, timer: timer}
+}
+
+// send sends item. It returns a TypeTimeout error, without sending, if ctx is done or the caller does not take the
+// item within the send timeout.
+func (s *listSender) send(ctx context.Context, item listItem) error {
+	s.timer.Reset(s.timeout)
+	defer s.timer.Stop()
+
+	select {
+	case s.results <- item:
+		return nil
+	case <-ctx.Done():
+		s.failed = true
+		return errors.E(ctx, errors.CatInternal, errors.TypeTimeout, fmt.Errorf("%s was cancelled: %w", s.operation, context.Cause(ctx)))
+	case <-s.timer.C:
+		s.failed = true
+		return errors.E(ctx, errors.CatInternal, errors.TypeTimeout, fmt.Errorf("%s caller did not take a result within %v", s.operation, s.timeout))
+	}
+}
+
+// sendErr sends err as the last item, so the caller can tell a stream that failed or was cancelled from one that
+// finished. Unless a send already failed, it first waits up to the send timeout for the caller to take it. Once a send
+// has failed, ctx is done or the caller stopped reading, so it drops the buffered result to make room instead of
+// waiting. The producer is the only sender, so once the buffer has room the final send cannot block.
+func (s *listSender) sendErr(ctx context.Context, err error) {
+	item := listItem{Err: err}
+	if !s.failed && s.send(ctx, item) == nil {
+		return
+	}
+	select {
+	case <-s.results:
+	default:
+	}
+	s.results <- item
 }
 
 // listResultsFunc is a helper function to convert a SQLite statement into a ListResult.

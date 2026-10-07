@@ -31,6 +31,7 @@ type updater struct {
 	actionUpdater
 	deferredActionsUpdater
 	deferBatchUpdater
+	changesUpdater
 
 	reader reader
 	private.Storage
@@ -73,6 +74,10 @@ func newUpdater(mu *sync.RWMutex, client planPatcher, defaultIOpts *azcosmos.Ite
 		mu:           mu,
 		client:       client,
 		defaultIOpts: defaultIOpts,
+	}
+	uo.changesUpdater = changesUpdater{
+		mu:     mu,
+		client: client,
 	}
 	return uo
 }

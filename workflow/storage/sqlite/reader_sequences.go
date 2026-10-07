@@ -31,13 +31,13 @@ func (p reader) fieldToSequences(ctx context.Context, conn *sqlite.Conn, stmt *s
 
 // fetchSequenceByID fetches a sequence by its id.
 func (p reader) fetchSequenceByID(ctx context.Context, conn *sqlite.Conn, id uuid.UUID) (*workflow.Sequence, error) {
-	sequence := &workflow.Sequence{}
+	var sequence *workflow.Sequence
 	do := func(conn *sqlite.Conn) (err error) {
 		err = sqlitex.Execute(
 			conn,
 			fetchSequencesByID,
 			&sqlitex.ExecOptions{
-				Named: map[string]interface{}{
+				Named: map[string]any{
 					"$id": id.String(),
 				},
 				ResultFunc: func(stmt *sqlite.Stmt) error {
@@ -57,6 +57,9 @@ func (p reader) fetchSequenceByID(ctx context.Context, conn *sqlite.Conn, id uui
 
 	if err := do(conn); err != nil {
 		return nil, fmt.Errorf("couldn't fetch sequence by id: %w", err)
+	}
+	if sequence == nil {
+		return nil, errMissingRow(ctx, "Sequence", id)
 	}
 	return sequence, nil
 }

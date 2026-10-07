@@ -56,7 +56,7 @@ func (p reader) fetchChecksByID(ctx context.Context, conn *sqlite.Conn, id uuid.
 		return nil, fmt.Errorf("couldn't fetch checks by ids: %w", err)
 	}
 	if check == nil {
-		return nil, fmt.Errorf("couldn't find checks by id(%s)", id)
+		return nil, errMissingRow(ctx, "Checks", id)
 	}
 	return check, nil
 }

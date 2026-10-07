@@ -126,10 +126,19 @@ CREATE Table If Not Exists deferbatches (
 
 var indexes = []string{
 	`CREATE INDEX If Not Exists idx_plans ON plans(id, group_id, state_status, state_start, state_end, reason);`,
+	// idx_plans_submit orders the keyset pages that List and Search read, so a page doesn't scan and sort all plans.
+	`CREATE INDEX If Not Exists idx_plans_submit ON plans(submit_time DESC, id DESC);`,
 	`CREATE INDEX If Not Exists idx_blocks ON blocks(id, key, plan_id, state_status, state_start, state_end);`,
 	`CREATE INDEX If Not Exists idx_checks ON checks(id, key, plan_id, state_status, state_start, state_end);`,
 	`CREATE INDEX If Not Exists idx_sequences ON sequences(id, key, plan_id, state_status, state_start, state_end);`,
 	`CREATE INDEX If Not Exists idx_actions ON actions(id, key, plan_id, state_status, state_start, state_end, plugin);`,
 	`CREATE INDEX If Not Exists idx_deferredactions ON deferredactions(id, plan_id, state_status, state_start, state_end);`,
 	`CREATE INDEX If Not Exists idx_deferbatches ON deferbatches(id, plan_id, deferredactions_id, state_status, state_start, state_end);`,
+	// The idx_*_plan_id indexes let Delete find a plan's rows in each table without scanning it.
+	`CREATE INDEX If Not Exists idx_blocks_plan_id ON blocks(plan_id);`,
+	`CREATE INDEX If Not Exists idx_checks_plan_id ON checks(plan_id);`,
+	`CREATE INDEX If Not Exists idx_sequences_plan_id ON sequences(plan_id);`,
+	`CREATE INDEX If Not Exists idx_actions_plan_id ON actions(plan_id);`,
+	`CREATE INDEX If Not Exists idx_deferredactions_plan_id ON deferredactions(plan_id);`,
+	`CREATE INDEX If Not Exists idx_deferbatches_plan_id ON deferbatches(plan_id);`,
 }

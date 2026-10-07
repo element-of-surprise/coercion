@@ -32,7 +32,7 @@ func (p reader) fieldToBlocks(ctx context.Context, conn *sqlite.Conn, stmt *sqli
 
 // fetchBlockByID fetches a block by its id.
 func (p reader) fetchBlockByID(ctx context.Context, conn *sqlite.Conn, id uuid.UUID) (*workflow.Block, error) {
-	block := &workflow.Block{}
+	var block *workflow.Block
 	do := func(conn *sqlite.Conn) (err error) {
 		err = sqlitex.Execute(
 			conn,
@@ -58,6 +58,9 @@ func (p reader) fetchBlockByID(ctx context.Context, conn *sqlite.Conn, id uuid.U
 
 	if err := do(conn); err != nil {
 		return nil, fmt.Errorf("couldn't fetch block by id: %w", err)
+	}
+	if block == nil {
+		return nil, errMissingRow(ctx, "Block", id)
 	}
 	return block, nil
 }

@@ -8,6 +8,7 @@ import (
 	"github.com/gostdlib/base/context"
 
 	"github.com/element-of-surprise/coercion/workflow"
+	"github.com/element-of-surprise/coercion/workflow/errors"
 	"github.com/go-json-experiment/json"
 	"github.com/google/uuid"
 	"zombiezen.com/go/sqlite"
@@ -55,6 +56,23 @@ func (r reader) fetchActionsByIDs(ctx context.Context, conn *sqlite.Conn, ids []
 	)
 	if err != nil {
 		return nil, fmt.Errorf("couldn't fetch actions by ids: %w", err)
+	}
+	// One row comes back per distinct ID, so a listed ID that is missing or repeated leaves the counts unequal.
+	if len(actions) != len(ids) {
+		found := make(map[uuid.UUID]bool, len(actions))
+		for _, a := range actions {
+			found[a.ID] = true
+		}
+		listed := make(map[uuid.UUID]bool, len(ids))
+		for _, id := range ids {
+			if !found[id] {
+				return nil, errMissingRow(ctx, "Action", id)
+			}
+			if listed[id] {
+				return nil, errors.E(ctx, errors.CatInternal, errors.TypeStorageInconsistent, fmt.Errorf("stored plan lists Action(%s) more than once", id))
+			}
+			listed[id] = true
+		}
 	}
 	return actions, nil
 }

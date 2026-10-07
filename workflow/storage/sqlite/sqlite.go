@@ -37,7 +37,7 @@ var _ storage.Vault = &Vault{}
 type Vault struct {
 	// root is the root path for the storage.
 	root      string
-	mu        *sync.Mutex
+	mu        *sync.RWMutex
 	pool      *sqlitex.Pool
 	openFlags []sqlite.OpenFlags
 
@@ -82,7 +82,7 @@ func New(ctx context.Context, root string, reg *registry.Register, options ...Op
 
 	r := &Vault{
 		root:      root,
-		mu:        &sync.Mutex{},
+		mu:        &sync.RWMutex{},
 		openFlags: []sqlite.OpenFlags{sqlite.OpenReadWrite, sqlite.OpenCreate, sqlite.OpenWAL},
 	}
 	for _, o := range options {
@@ -140,11 +140,11 @@ func New(ctx context.Context, root string, reg *registry.Register, options ...Op
 	}
 
 	r.pool = pool
-	r.reader = reader{pool: pool, reg: reg}
-	r.creator = creator{mu: r.mu, pool: pool, reader: r.reader, capture: r.capture}
+	r.reader = reader{mu: r.mu, pool: pool, reg: reg}
+	r.creator = creator{mu: r.mu, pool: pool, capture: r.capture}
 	r.updater = newUpdater(r.mu, pool, r.capture)
-	r.closer = closer{pool: pool}
-	r.deleter = deleter{mu: r.mu, pool: pool, reader: r.reader}
+	r.closer = closer{pool: pool, mu: r.mu}
+	r.deleter = deleter{mu: r.mu, pool: pool}
 	return r, nil
 }
 
