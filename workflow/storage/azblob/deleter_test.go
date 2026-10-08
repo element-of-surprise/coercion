@@ -18,7 +18,7 @@ import (
 func setupDeleterTest(t *testing.T) (*blobops.Fake, deleter) {
 	t.Helper()
 
-	ctx := context.Background()
+	ctx := t.Context()
 	fakeClient := blobops.NewFake()
 	prefix := "test"
 
@@ -215,7 +215,6 @@ func createAndUploadTestPlan(ctx context.Context, t *testing.T, fakeClient *blob
 
 	// Upload all sub-objects
 	uploader := &uploader{
-		mu:          planlocks.New(ctx),
 		client:      fakeClient,
 		prefix:      prefix,
 		planObjPool: context.Pool(ctx).Limited(ctx, "", 5),
@@ -236,12 +235,21 @@ func TestDelete(t *testing.T) {
 	tests := []struct {
 		name       string
 		withBlocks bool
-		wantErr    bool
+		// readInFlight starts a shared read of the plan that does not finish until the test ends.
+		readInFlight bool
+		wantErr      bool
 	}{
 		{
 			name:       "Success: delete plan with blocks and sequences",
 			withBlocks: true,
 			wantErr:    false,
+		},
+		{
+			// Regression: Delete joined the plan's shared read while holding the plan's write lock. A Read whose shared
+			// fetch was waiting for that lock never finished, so Delete waited on it forever and never unlocked.
+			name:         "Success: delete does not wait on a read of the plan already in flight",
+			withBlocks:   true,
+			readInFlight: true,
 		},
 		{
 			name:       "Success: delete plan without blocks",
@@ -252,7 +260,9 @@ func TestDelete(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			ctx := context.Background()
+			t.Parallel()
+
+			ctx := t.Context()
 			fakeClient, del := setupDeleterTest(t)
 
 			// Create and upload test plan
@@ -261,11 +271,31 @@ func TestDelete(t *testing.T) {
 
 			// Verify blobs exist before deletion
 			if !fakeClient.BlobExists(containerName, planEntryBlobName(plan.ID)) {
-				t.Fatalf("TestDelete: plan entry blob should exist before deletion")
+				t.Fatalf("TestDelete(%s): plan entry blob should exist before deletion", test.name)
+			}
+
+			if test.readInFlight {
+				// Stands in for a Read whose shared fetch is blocked waiting for the plan lock Delete holds.
+				block := make(chan struct{})
+				t.Cleanup(func() { close(block) })
+				del.reader.readFlight.DoChan(ctx, plan.ID.String(), func() (*workflow.Plan, error) {
+					<-block
+					return nil, nil
+				})
 			}
 
 			// Delete the plan
-			err := del.Delete(ctx, plan.ID)
+			var err error
+			done := make(chan struct{})
+			context.Pool(ctx).Submit(ctx, func() {
+				defer close(done)
+				err = del.Delete(ctx, plan.ID)
+			})
+			select {
+			case <-done:
+			case <-time.After(5 * time.Second):
+				t.Fatalf("TestDelete(%s): Delete did not return", test.name)
+			}
 
 			switch {
 			case err == nil && test.wantErr:
@@ -381,7 +411,9 @@ func TestDeletePlanInContainer(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			ctx := context.Background()
+			t.Parallel()
+
+			ctx := t.Context()
 			fakeClient, del := setupDeleterTest(t)
 
 			// Create a simple plan
@@ -440,7 +472,9 @@ func TestDeleteBlockBlobs(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			ctx := context.Background()
+			t.Parallel()
+
+			ctx := t.Context()
 			fakeClient, del := setupDeleterTest(t)
 
 			// Create and upload plan with blocks
@@ -450,7 +484,7 @@ func TestDeleteBlockBlobs(t *testing.T) {
 
 			// Verify block blob exists before deletion
 			if !fakeClient.BlobExists(containerName, blockBlobName(plan.ID, block.ID)) {
-				t.Fatalf("TestDeleteBlockBlobs: block blob should exist before deletion")
+				t.Fatalf("TestDeleteBlockBlobs(%s): block blob should exist before deletion", test.name)
 			}
 
 			err := del.deleteBlockBlobs(ctx, containerName, plan.ID, block)
@@ -503,7 +537,9 @@ func TestDeleteSequenceBlobs(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			ctx := context.Background()
+			t.Parallel()
+
+			ctx := t.Context()
 			fakeClient, del := setupDeleterTest(t)
 
 			// Create and upload plan with blocks
@@ -513,7 +549,7 @@ func TestDeleteSequenceBlobs(t *testing.T) {
 
 			// Verify sequence blob exists before deletion
 			if !fakeClient.BlobExists(containerName, sequenceBlobName(plan.ID, seq.ID)) {
-				t.Fatalf("TestDeleteSequenceBlobs: sequence blob should exist before deletion")
+				t.Fatalf("TestDeleteSequenceBlobs(%s): sequence blob should exist before deletion", test.name)
 			}
 
 			err := del.deleteSequenceBlobs(ctx, containerName, plan.ID, seq)
@@ -559,7 +595,9 @@ func TestDeleteChecksBlobs(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			ctx := context.Background()
+			t.Parallel()
+
+			ctx := t.Context()
 			fakeClient, del := setupDeleterTest(t)
 
 			// Create and upload plan
@@ -569,7 +607,7 @@ func TestDeleteChecksBlobs(t *testing.T) {
 
 			// Verify checks blob exists before deletion
 			if !fakeClient.BlobExists(containerName, checksBlobName(plan.ID, checks.ID)) {
-				t.Fatalf("TestDeleteChecksBlobs: checks blob should exist before deletion")
+				t.Fatalf("TestDeleteChecksBlobs(%s): checks blob should exist before deletion", test.name)
 			}
 
 			err := del.deleteChecksBlobs(ctx, containerName, plan.ID, checks)
@@ -622,7 +660,9 @@ func TestDeleteActionBlob(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			ctx := context.Background()
+			t.Parallel()
+
+			ctx := t.Context()
 			fakeClient, del := setupDeleterTest(t)
 
 			// Create and upload plan

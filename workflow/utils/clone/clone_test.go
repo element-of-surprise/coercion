@@ -830,6 +830,8 @@ func TestAction(t *testing.T) {
 		// instead of writing the entire action.
 		replaceReq Req
 		want       *workflow.Action
+		// wantAttemptsSet is whether the clone's Attempts must be set. Compare cannot see this.
+		wantAttemptsSet bool
 	}{
 		{
 			name: "nil",
@@ -849,16 +851,35 @@ func TestAction(t *testing.T) {
 			},
 		},
 		{
-			name:    "WithKeepState(), WithKeepSecrets()",
-			action:  action,
-			options: cloneOptions{keepState: true, keepSecrets: true},
-			want:    action,
+			name:            "WithKeepState(), WithKeepSecrets()",
+			action:          action,
+			options:         cloneOptions{keepState: true, keepSecrets: true},
+			want:            action,
+			wantAttemptsSet: true,
 		},
 		{
-			name:       "WithKeepState()",
-			action:     action,
-			options:    cloneOptions{keepState: true},
-			replaceReq: Req{Data: SecureStr},
+			name:    "Success: WithKeepState() leaves unset Attempts unset",
+			action:  &workflow.Action{ID: id, Name: "name", Req: Req{Data: "hello"}},
+			options: cloneOptions{keepState: true, keepSecrets: true},
+			want:    &workflow.Action{ID: id, Name: "name", Req: Req{Data: "hello"}},
+		},
+		{
+			name: "Success: WithKeepState() keeps Attempts set to an empty slice set",
+			action: func() *workflow.Action {
+				a := &workflow.Action{ID: id, Name: "name", Req: Req{Data: "hello"}}
+				a.Attempts.Set([]workflow.Attempt{})
+				return a
+			}(),
+			options:         cloneOptions{keepState: true, keepSecrets: true},
+			want:            &workflow.Action{ID: id, Name: "name", Req: Req{Data: "hello"}},
+			wantAttemptsSet: true,
+		},
+		{
+			name:            "WithKeepState()",
+			action:          action,
+			options:         cloneOptions{keepState: true},
+			replaceReq:      Req{Data: SecureStr},
+			wantAttemptsSet: true,
 			want: func() *workflow.Action {
 				a := &workflow.Action{
 					ID:     id,
@@ -918,6 +939,9 @@ func TestAction(t *testing.T) {
 		if diff := pretty.Compare(test.want, got); diff != "" {
 			t.Errorf("TestAction(%s): -want/+got:\n%s", test.name, diff)
 		}
+		if got != nil && got.Attempts.IsSet() != test.wantAttemptsSet {
+			t.Errorf("TestAction(%s): got Attempts.IsSet() == %v, want %v", test.name, got.Attempts.IsSet(), test.wantAttemptsSet)
+		}
 		if test.want != nil {
 			test.want.Req = oldReq
 		}
@@ -931,15 +955,24 @@ func TestCloneStateAtomic(t *testing.T) {
 	end := time.Now()
 
 	tests := []struct {
-		name  string
-		state workflow.State
-		want  workflow.State
+		name string
+		// unset leaves the source unset instead of setting it to state.
+		unset   bool
+		state   workflow.State
+		want    workflow.State
+		wantSet bool
 	}{
 		{
-			name: "nil",
+			name:  "Success: an unset state stays unset",
+			unset: true,
 		},
 		{
-			name: "Success",
+			name:    "Success: a state set to the zero value stays set",
+			wantSet: true,
+		},
+		{
+			name:    "Success: a set state is copied",
+			wantSet: true,
 			state: workflow.State{
 				Status: workflow.Completed,
 				Start:  start,
@@ -955,12 +988,17 @@ func TestCloneStateAtomic(t *testing.T) {
 
 	for _, test := range tests {
 		var src, dst workflow.AtomicValue[workflow.State]
-		src.Set(test.state)
+		if !test.unset {
+			src.Set(test.state)
+		}
 		cloneStateAtomic(&dst, &src)
 		got := dst.Get()
 
 		if diff := pretty.Compare(test.want, got); diff != "" {
 			t.Errorf("TestCloneStateAtomic(%s): -want/+got:\n%s", test.name, diff)
+		}
+		if dst.IsSet() != test.wantSet {
+			t.Errorf("TestCloneStateAtomic(%s): got IsSet() == %v, want %v", test.name, dst.IsSet(), test.wantSet)
 		}
 	}
 }

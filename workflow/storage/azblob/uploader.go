@@ -12,12 +12,10 @@ import (
 	"github.com/element-of-surprise/coercion/workflow"
 	"github.com/element-of-surprise/coercion/workflow/errors"
 	"github.com/element-of-surprise/coercion/workflow/storage/azblob/internal/blobops"
-	"github.com/element-of-surprise/coercion/workflow/storage/azblob/internal/planlocks"
 )
 
 // uploader uploads a plan and its sub-objects to blob storage.
 type uploader struct {
-	mu          *planlocks.Group
 	client      blobops.Ops
 	prefix      string
 	planObjPool *worker.Pool // For blocks and plan-level checks
@@ -66,10 +64,12 @@ func (u *uploader) uploadPlan(ctx context.Context, p *workflow.Plan, uploadPlanT
 
 	// Do NOT attempt to make these uploads concurrent. This will screw up the ordering that is required to
 	// do consistency checks since we don't have transactions.
+	//
+	// The entry is always written before the object. The entry's metadata is the authority for the plan's state, so
+	// if the object upload fails on an update or completion the stale object is left in place and readers rebuild the
+	// plan from the entry (see fetchPlanFromContainer). Only a failed create removes the entry, because a create that
+	// never wrote its object is not a plan yet.
 	if err := u.uploadPlanEntry(ctx, p, md); err != nil {
-		if uploadPlanType == uptCreate {
-			_ = u.client.DeleteBlob(ctx, containerName, planObjectBlobName(p.ID))
-		}
 		return err
 	}
 
@@ -78,15 +78,33 @@ func (u *uploader) uploadPlan(ctx context.Context, p *workflow.Plan, uploadPlanT
 	// plan object.
 	if uploadPlanType == uptCreate {
 		if err := u.uploadSubObjects(ctx, containerName, p); err != nil {
-			_ = u.client.DeleteBlob(ctx, containerName, planEntryBlobName(p.ID))
-			return err
+			return u.failCreate(ctx, containerName, p.ID, err)
 		}
 	}
 
-	if err := u.uploadPlanObject(ctx, p, md); err != nil {
+	if err := u.uploadPlanObject(ctx, p, md, uploadPlanType); err != nil {
 		return err
 	}
 
+	return nil
+}
+
+// failCreate cleans up after a create failed with err by deleting its planEntry, and returns err as a storage put
+// error. If the cleanup also fails, both are returned, wrapped as a storage put error.
+func (u *uploader) failCreate(ctx context.Context, containerName string, id uuid.UUID, err error) error {
+	dErr := deleteEntry(ctx, u.client, containerName, id)
+	if dErr == nil {
+		return errors.E(ctx, errors.CatInternal, errors.TypeStoragePut, err)
+	}
+	return errors.E(ctx, errors.CatInternal, errors.TypeStoragePut, errors.Join(err, dErr))
+}
+
+// deleteEntry deletes plan id's entry blob, as is done when a create did not finish so the plan does not look half
+// created. A missing entry is not an error.
+func deleteEntry(ctx context.Context, client blobops.Ops, containerName string, id uuid.UUID) error {
+	if err := client.DeleteBlob(ctx, containerName, planEntryBlobName(id)); err != nil && !blobops.IsNotFound(err) {
+		return errors.E(ctx, errors.CatInternal, errors.TypeStorageDelete, fmt.Errorf("failed to delete planEntry blob(%s): %w", id, err))
+	}
 	return nil
 }
 
@@ -117,22 +135,28 @@ func (u *uploader) uploadPlanEntry(ctx context.Context, p *workflow.Plan, md map
 	return nil
 }
 
-// uploadPlanObject uploads the full plan object blob for a plan.
-func (u *uploader) uploadPlanObject(ctx context.Context, p *workflow.Plan, md map[string]*string) error {
+// uploadPlanObject uploads the full plan object blob for a plan. If the upload fails during a create, the planEntry is
+// removed (see uploadPlan for why only a create does this).
+func (u *uploader) uploadPlanObject(ctx context.Context, p *workflow.Plan, md map[string]*string, uploadPlanType uploadPlanType) error {
 	containerName := containerForPlan(u.prefix, p.ID)
+
+	cleanup := func(err error) error {
+		if uploadPlanType != uptCreate {
+			return err
+		}
+		return u.failCreate(ctx, containerName, p.ID, err)
+	}
 
 	planObjectData, err := json.Marshal(p)
 	if err != nil {
-		_ = u.client.DeleteBlob(ctx, containerName, planEntryBlobName(p.ID))
-		return errors.E(ctx, errors.CatInternal, errors.TypeStoragePut, fmt.Errorf("failed to marshal plan object: %w", err))
+		return cleanup(errors.E(ctx, errors.CatInternal, errors.TypeStoragePut, fmt.Errorf("failed to marshal plan object: %w", err)))
 	}
 
 	objectBlobName := planObjectBlobName(p.ID)
 	md = maps.Clone(md)
 	md[mdPlanType] = toPtr(string(ptObject))
 	if err := u.client.UploadBlob(ctx, containerName, objectBlobName, md, planObjectData); err != nil {
-		_ = u.client.DeleteBlob(ctx, containerName, planEntryBlobName(p.ID))
-		return errors.E(ctx, errors.CatInternal, errors.TypeStoragePut, fmt.Errorf("failed to upload plan object blob: %w", err))
+		return cleanup(errors.E(ctx, errors.CatInternal, errors.TypeStoragePut, fmt.Errorf("failed to upload plan object blob: %w", err)))
 	}
 	return nil
 }
@@ -177,7 +201,15 @@ func (u *uploader) uploadSubObjects(ctx context.Context, containerName string, p
 		)
 	}
 
-	return g.Wait(ctx)
+	if err := g.Wait(ctx); err != nil {
+		return err
+	}
+	// The loops here and below stop starting uploads once ctx ends, without an error. Not every sub-object was then
+	// written, and the plan object must never be written over missing sub-objects.
+	if ctx.Err() != nil {
+		return errors.E(ctx, errors.CatInternal, errors.TypeTimeout, fmt.Errorf("sub-object uploads stopped: %w", context.Cause(ctx)))
+	}
+	return nil
 }
 
 // uploadBlockBlob uploads a block blob and all its sub-objects.

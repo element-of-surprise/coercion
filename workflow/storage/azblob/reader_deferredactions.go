@@ -5,7 +5,6 @@ import (
 
 	"github.com/go-json-experiment/json"
 	"github.com/google/uuid"
-	"github.com/gostdlib/base/concurrency/worker"
 	"github.com/gostdlib/base/context"
 
 	"github.com/element-of-surprise/coercion/workflow"
@@ -33,7 +32,7 @@ func (r reader) fetchDeferredActions(ctx context.Context, containerName string, 
 	da.SetPlanID(planID)
 
 	da.DeferredBatches = make([]*workflow.DeferBatch, len(entry.DeferredBatches))
-	g := worker.Default().Limited(ctx, "azBlobReaderDeferred", fetchConcurrency).Group()
+	g := context.Pool(ctx).Default().Limited(ctx, "azBlobReaderDeferred", fetchConcurrency).Group()
 	for i, id := range entry.DeferredBatches {
 		g.Go(ctx, func(ctx context.Context) error {
 			batch, err := r.fetchDeferBatch(ctx, containerName, planID, id)
@@ -70,7 +69,7 @@ func (r reader) fetchDeferBatch(ctx context.Context, containerName string, planI
 	b.SetPlanID(planID)
 
 	b.Actions = make([]*workflow.Action, len(entry.Actions))
-	g := worker.Default().Limited(ctx, "azBlobReaderDeferBatch", fetchConcurrency).Group()
+	g := context.Pool(ctx).Default().Limited(ctx, "azBlobReaderDeferBatch", fetchConcurrency).Group()
 	for i, aid := range entry.Actions {
 		g.Go(ctx, func(ctx context.Context) error {
 			action, err := r.fetchAction(ctx, containerName, planID, aid)

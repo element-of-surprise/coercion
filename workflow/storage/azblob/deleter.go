@@ -32,18 +32,12 @@ func (d deleter) Delete(ctx context.Context, id uuid.UUID) error {
 	d.mu.Lock(id)
 	defer d.mu.Unlock(id)
 
-	// Read the plan to get full hierarchy
-	v, err, _ := d.reader.readFlight.Do(
-		ctx,
-		id.String(),
-		func() (*workflow.Plan, error) {
-			return d.reader.fetchPlan(ctx, id)
-		},
-	)
+	// Read the plan to get its full hierarchy. fetchPlan, not the shared read: a Read's shared fetch waits for the plan
+	// lock held here, so joining it would wait forever. Under the write lock there is nothing to share anyway.
+	plan, err := d.reader.fetchPlan(ctx, id)
 	if err != nil {
 		return errors.E(ctx, errors.CatInternal, errors.TypeStorageGet, fmt.Errorf("failed to read plan for deletion: %w", err))
 	}
-	plan := v
 
 	// Get the container for this plan based on its ID
 	containerName := containerForPlan(d.prefix, id)

@@ -46,6 +46,18 @@ func (a *AtomicValue[T]) Set(val T) {
 	a.value.Store(&val)
 }
 
+// IsSet reports whether a value has been stored. A value Set to the zero value of T is set; Get cannot tell it apart
+// from an unset value, but MarshalJSON writes it instead of null.
+func (a *AtomicValue[T]) IsSet() bool {
+	return a.value.Load() != nil
+}
+
+// Clear removes the stored value, leaving the AtomicValue unset: IsSet reports false, Get returns the zero value of T
+// and MarshalJSON writes null.
+func (a *AtomicValue[T]) Clear() {
+	a.value.Store(nil)
+}
+
 // MarshalJSON marshals the value to JSON.
 func (a *AtomicValue[T]) MarshalJSON() ([]byte, error) {
 	if a.MarshalJSONer != nil {
@@ -106,6 +118,18 @@ func (a *AtomicSlice[T]) Get() []T {
 // as the caller's value is copied before storing.
 func (a *AtomicSlice[T]) Set(val []T) {
 	a.value.Store(&val)
+}
+
+// IsSet reports whether a slice has been stored. A slice Set to nil or an empty slice is set; Get cannot tell it apart
+// from an unset slice, but MarshalJSON writes it instead of null.
+func (a *AtomicSlice[T]) IsSet() bool {
+	return a.value.Load() != nil
+}
+
+// Clear removes the stored slice, leaving the AtomicSlice unset: IsSet reports false, Get returns nil and MarshalJSON
+// writes null.
+func (a *AtomicSlice[T]) Clear() {
+	a.value.Store(nil)
 }
 
 // Append appends items to the slice atomically using compare-and-swap.

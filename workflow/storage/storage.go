@@ -4,18 +4,23 @@ package storage
 
 import (
 	"fmt"
+	"slices"
 	"time"
-
-	"github.com/gostdlib/base/context"
 
 	"github.com/element-of-surprise/coercion/internal/private"
 	"github.com/element-of-surprise/coercion/workflow"
+	"github.com/element-of-surprise/coercion/workflow/context"
+	"github.com/element-of-surprise/coercion/workflow/errors"
+	"github.com/element-of-surprise/coercion/workflow/utils/changes"
+	"github.com/element-of-surprise/coercion/workflow/utils/walk"
 
 	"github.com/google/uuid"
 )
 
-// ErrNotFound is returned when an object is not found in storage.
-var ErrNotFound = fmt.Errorf("plan not found")
+// ErrNotFound is returned when an object is not found in storage. It is errors.NotFound: a comparable sentinel that
+// every not-found error a Vault returns wraps (see errors.ErrNotFound), so errors.Is(err, ErrNotFound) and
+// errors.IsNotFound(err) find it in all of them, and it is safe to compare with == or use in a switch.
+var ErrNotFound = errors.NotFound
 
 // Filters is a filter for searching Plans.
 type Filters struct {
@@ -112,6 +117,20 @@ type Reader interface {
 	private.Storage
 }
 
+// ChangesUpdater allows for writing Plan data to storage based on a snapshot of the Plan's child objects.
+type ChangesUpdater interface {
+	// UpdateChanges writes the objects below plan whose state (or, for an Action, attempt count) differs from before,
+	// which changes.Record took before the objects were changed in place. A nil before writes every object. The Plan
+	// itself is never written. Objects are compared by walk order, so plan must have the same shape it had when before
+	// was recorded; any object past the end of before counts as changed.
+	//
+	// An object must never be stored after its parent: recovery skips an object whose stored state is already final, so
+	// a parent stored as final over children that are not would never be fixed. A store that writes objects one at a
+	// time writes each after all of its descendants and stops at the first failure (see WriteChanges); a store that
+	// writes them together must write all of them or none.
+	UpdateChanges(ctx context.Context, plan *workflow.Plan, before changes.Snapshot) error
+}
+
 // Updater allows for writing Plan data to storage.
 type Updater interface {
 	PlanUpdater
@@ -121,6 +140,7 @@ type Updater interface {
 	ActionUpdater
 	DeferredActionsUpdater
 	DeferBatchUpdater
+	ChangesUpdater
 
 	private.Storage
 }
@@ -186,4 +206,45 @@ type DeferBatchUpdater interface {
 // or restart. Not all Vaults implement this.
 type Recovery interface {
 	Recovery(context.Context) error
+}
+
+// RecoveredRunning is a Vault whose Recovery already found the Plans that are Running, so startup recovery can use
+// them instead of running a Search. Not all Vaults implement this.
+type RecoveredRunning interface {
+	// RecoveredRunning returns the Running Plans found by the last Recovery call and forgets them, so it returns
+	// ok == true at most once per Recovery. ok is false if Recovery has not run since the last call.
+	RecoveredRunning() (results []ListResult, ok bool)
+}
+
+// WriteChanges implements ChangesUpdater.UpdateChanges for a store that writes objects one at a time: it writes each
+// changed object after all of its descendants and stops at the first failure.
+func WriteChanges(ctx context.Context, store Updater, plan *workflow.Plan, before changes.Snapshot) error {
+	for _, item := range slices.Backward(changes.Since(plan, before)) {
+		if err := WriteObject(ctx, store, item); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// WriteObject writes one object below a Plan to storage. It does not write the Plan itself.
+func WriteObject(ctx context.Context, store Updater, item walk.Item) error {
+	if item.IsZero() {
+		return errors.E(ctx, errors.CatInternal, errors.TypeBug, fmt.Errorf("cannot write a zero walk.Item"))
+	}
+	switch item.Value.Type() {
+	case workflow.OTBlock:
+		return store.UpdateBlock(ctx, item.Block())
+	case workflow.OTSequence:
+		return store.UpdateSequence(ctx, item.Sequence())
+	case workflow.OTCheck:
+		return store.UpdateChecks(ctx, item.Checks())
+	case workflow.OTAction:
+		return store.UpdateAction(ctx, item.Action())
+	case workflow.OTDeferredActions:
+		return store.UpdateDeferredActions(ctx, item.DeferredActions())
+	case workflow.OTBatch:
+		return store.UpdateDeferBatch(ctx, item.DeferBatch())
+	}
+	return errors.E(ctx, errors.CatInternal, errors.TypeBug, fmt.Errorf("cannot write object of type %v", item.Value.Type()))
 }

@@ -7,7 +7,6 @@ import (
 	"github.com/go-json-experiment/json"
 	"github.com/google/uuid"
 	"github.com/gostdlib/base/concurrency/sync"
-	"github.com/gostdlib/base/concurrency/worker"
 	"github.com/gostdlib/base/context"
 
 	"github.com/element-of-surprise/coercion/workflow"
@@ -17,9 +16,9 @@ import (
 	"github.com/element-of-surprise/coercion/workflow/utils/walk"
 )
 
-// fetchConcurrency bounds the number of concurrent blob fetches spawned at each individual object
-// fetch. Each fan-out creates its own Limited pool based on worker.Default() (the unbounded default
-// pool), never on another Limited pool, so nested waits can never starve and deadlock.
+// fetchConcurrency bounds the number of concurrent blob fetches spawned at each individual object fetch. Each fan-out
+// creates its own Limited pool from context.Pool(ctx).Default() (the unbounded default pool), never on another Limited
+// pool, so nested waits can never starve and deadlock.
 const fetchConcurrency = 10
 
 // unwrapGroup collapses the *sync.Errors that a worker Group's Wait() returns into an error whose
@@ -85,7 +84,7 @@ func (r reader) fetchPlan(ctx context.Context, id uuid.UUID) (*workflow.Plan, er
 	plan, err := r.fetchPlanFromContainer(ctx, id)
 	if err != nil {
 		if blobops.IsNotFound(err) {
-			return nil, errors.E(ctx, errors.CatUser, errors.TypeParameter, fmt.Errorf("plan with ID %s not found: %w", id, storage.ErrNotFound))
+			return nil, errors.ErrNotFound(ctx, fmt.Errorf("plan with ID %s not found: %w", id, err))
 		}
 		return nil, errors.E(ctx, errors.CatInternal, errors.TypeStorageGet, err)
 	}
@@ -106,30 +105,71 @@ func (r reader) fetchPlanFromContainer(ctx context.Context, id uuid.UUID) (*work
 	if pm.State.Status == workflow.Running {
 		return r.fetchRunningPlan(ctx, containerName, id, pm.ListResult)
 	}
-	return r.fetchNonRunningPlan(ctx, containerName, id)
+	plan, err := r.fetchNonRunningPlan(ctx, containerName, id)
+	if err != nil {
+		return nil, err
+	}
+	if plan.State.Get().Status == pm.State.Status {
+		return plan, nil
+	}
+	return r.rebuildTornPlan(ctx, id, pm, plan.State.Get().Status)
+}
+
+// rebuildTornPlan handles a plan whose entry and object disagree on status. uploadPlan writes the entry and then the
+// object, so if the object upload fails (for example after exhausting retries against a throttled account) the entry
+// holds the new status and the object the old one. The entry is the authority, so the plan is rebuilt from the entry
+// and the sub-object blobs, the same way a running plan is read. Returning the stale object would report a finished
+// plan as Running forever, which no process owns.
+func (r reader) rebuildTornPlan(ctx context.Context, id uuid.UUID, pm planMeta, objStatus workflow.Status) (*workflow.Plan, error) {
+	context.Log(ctx).Warn(fmt.Sprintf("azblob: plan(%s) entry status %v disagrees with object status %v, rebuilding from the entry", id, pm.State.Status, objStatus))
+
+	plan, err := r.fetchRunningPlan(ctx, containerForPlan(r.prefix, id), id, pm.ListResult)
+	if err != nil {
+		return nil, err
+	}
+	settleRunningObjects(ctx, plan)
+	return plan, nil
+}
+
+// missingSubObject classifies err from reading a plan's sub-object blobs when the plan's entry exists. A not-found then
+// means storage is damaged, not that the plan is gone, so it becomes a TypeStorageInconsistent error described by what.
+// It is formatted with %v, not %w, so callers do not see a not-found error and give up on a plan that still exists.
+// Any other error, such as a throttled read, is returned unchanged and keeps its type and permanence.
+func missingSubObject(ctx context.Context, err error, what string) error {
+	if !blobops.IsNotFound(err) {
+		return err
+	}
+	return errors.E(ctx, errors.CatInternal, errors.TypeStorageInconsistent, fmt.Errorf("%s: %v", what, err))
+}
+
+// hasRunningObjects reports whether any object below plan is still marked Running.
+func hasRunningObjects(plan *workflow.Plan) bool {
+	for range walk.RunningObjects(plan) {
+		return true
+	}
+	return false
+}
+
+// settleRunningObjects handles objects still marked Running under a finished Plan that was rebuilt from its sub-object
+// blobs. Those blobs are written one by one and can lag the Plan's final write. Under a Failed or Stopped Plan nothing
+// can still be running, so they take the Plan's status and end time, the same way the engine fails running objects
+// when it gives up on a Plan. Under a Completed Plan that would be a contradiction, so it is logged and left alone.
+func settleRunningObjects(ctx context.Context, plan *workflow.Plan) {
+	ps := plan.State.Get()
+	switch ps.Status {
+	case workflow.Failed, workflow.Stopped:
+		walk.SettleRunning(plan, ps.Status, ps.End)
+	case workflow.Completed:
+		for item := range walk.RunningObjects(plan) {
+			context.Log(ctx).Warn(fmt.Sprintf("azblob: plan(%s) is Completed but its %v object is still Running", plan.ID, item.Value.Type()))
+		}
+	}
 }
 
 func (r reader) fetchPlanEntryMeta(ctx context.Context, id uuid.UUID) (planMeta, error) {
 	containerName := containerForPlan(r.prefix, id)
 	entryBlobName := planEntryBlobName(id)
 	md, err := r.client.GetMetadata(ctx, containerName, entryBlobName)
-	if err != nil {
-		if blobops.IsNotFound(err) {
-			return planMeta{}, err
-		}
-		return planMeta{}, errors.E(ctx, errors.CatInternal, errors.TypeStorageGet, fmt.Errorf("failed to get planEntry blob metadata: %w", err))
-	}
-	pm, err := mapToPlanMeta(md)
-	if err != nil {
-		return planMeta{}, errors.E(ctx, errors.CatInternal, errors.TypeStorageGet, fmt.Errorf("failed to parse planEntry metadata: %w", err))
-	}
-	return pm, nil
-}
-
-func (r reader) fetchPlanObjectMeta(ctx context.Context, id uuid.UUID) (planMeta, error) {
-	containerName := containerForPlan(r.prefix, id)
-	objBlobName := planObjectBlobName(id)
-	md, err := r.client.GetMetadata(ctx, containerName, objBlobName)
 	if err != nil {
 		if blobops.IsNotFound(err) {
 			return planMeta{}, err
@@ -154,7 +194,9 @@ func (r reader) fetchNonRunningPlan(ctx context.Context, containerName string, i
 		if blobops.IsNotFound(err) {
 			// Object blob doesn't exist but entry does (we got here via entry metadata).
 			// This is an orphaned entry from a failed creation - clean it up.
-			_ = r.client.DeleteBlob(ctx, containerName, planEntryBlobName(id))
+			if dErr := deleteEntry(ctx, r.client, containerName, id); dErr != nil {
+				context.Log(ctx).Warn(fmt.Sprintf("azblob: failed to delete orphaned planEntry for plan(%s), recovery will retry: %v", id, dErr))
+			}
 			return nil, err
 		}
 		return nil, errors.E(ctx, errors.CatInternal, errors.TypeStorageGet, fmt.Errorf("failed to download plan object blob: %w", err))
@@ -192,19 +234,23 @@ func (r reader) fetchRunningPlan(ctx context.Context, containerName string, id u
 	}
 
 	plan := &workflow.Plan{
-		ID:         id,
-		Name:       lr.Name,
-		Descr:      lr.Descr,
+		ID: id,
+		// The entry's JSON, not its metadata: metadata holds Name and Descr escaped, for listing.
+		Name:       entry.Name,
+		Descr:      entry.Descr,
 		GroupID:    lr.GroupID,
 		Meta:       entry.Meta,
 		SubmitTime: lr.SubmitTime,
 		Reason:     entry.Reason,
 	}
 	plan.State.Set(lr.State)
+	if !entry.RuntimeUpdate.IsZero() {
+		plan.RuntimeUpdate.Set(entry.RuntimeUpdate)
+	}
 
 	// Fetch all plan-level checks, deferred actions, and blocks concurrently. Each writes to a
 	// distinct field/index, so no synchronization is needed beyond the group's Wait.
-	g := worker.Default().Limited(ctx, "azBlobReaderPlan", fetchConcurrency).Group()
+	g := context.Pool(ctx).Default().Limited(ctx, "azBlobReaderPlan", fetchConcurrency).Group()
 
 	r.goFetchChecks(ctx, &g, containerName, id, entry.BypassChecks, func(c *workflow.Checks) { plan.BypassChecks = c })
 	r.goFetchChecks(ctx, &g, containerName, id, entry.PreChecks, func(c *workflow.Checks) { plan.PreChecks = c })
@@ -236,7 +282,9 @@ func (r reader) fetchRunningPlan(ctx context.Context, containerName string, id u
 	}
 
 	if err := unwrapGroup(g.Wait(ctx)); err != nil {
-		return nil, err
+		// Only the sub-object fetches are classified this way: a not-found on the entry, read above, means the plan
+		// is gone and keeps its not-found.
+		return nil, missingSubObject(ctx, err, fmt.Sprintf("plan(%s) is missing a sub-object", id))
 	}
 
 	if err := r.setRegistry(plan); err != nil {
@@ -291,7 +339,7 @@ func (r reader) fetchChecks(ctx context.Context, containerName string, planID, c
 
 	// Fetch all actions concurrently; each writes a distinct slice index.
 	checks.Actions = make([]*workflow.Action, len(entry.Actions))
-	g := worker.Default().Limited(ctx, "azBlobReaderChecks", fetchConcurrency).Group()
+	g := context.Pool(ctx).Default().Limited(ctx, "azBlobReaderChecks", fetchConcurrency).Group()
 	for i, actionID := range entry.Actions {
 		g.Go(ctx, func(ctx context.Context) error {
 			action, err := r.fetchAction(ctx, containerName, planID, actionID)
@@ -332,7 +380,7 @@ func (r reader) fetchBlock(ctx context.Context, containerName string, planID, bl
 	block.SetPlanID(planID)
 
 	// Fetch all check objects and sequences concurrently; each writes a distinct field/index.
-	g := worker.Default().Limited(ctx, "azBlobReaderBlock", fetchConcurrency).Group()
+	g := context.Pool(ctx).Default().Limited(ctx, "azBlobReaderBlock", fetchConcurrency).Group()
 
 	r.goFetchChecks(ctx, &g, containerName, planID, entry.BypassChecks, func(c *workflow.Checks) { block.BypassChecks = c })
 	r.goFetchChecks(ctx, &g, containerName, planID, entry.PreChecks, func(c *workflow.Checks) { block.PreChecks = c })
@@ -383,7 +431,7 @@ func (r reader) fetchSequence(ctx context.Context, containerName string, planID,
 
 	// Fetch all actions concurrently; each writes a distinct slice index.
 	seq.Actions = make([]*workflow.Action, len(entry.Actions))
-	g := worker.Default().Limited(ctx, "azBlobReaderSequence", fetchConcurrency).Group()
+	g := context.Pool(ctx).Default().Limited(ctx, "azBlobReaderSequence", fetchConcurrency).Group()
 	for i, actionID := range entry.Actions {
 		g.Go(ctx, func(ctx context.Context) error {
 			action, err := r.fetchAction(ctx, containerName, planID, actionID)
@@ -493,13 +541,10 @@ func (r reader) fixActions(ctx context.Context, plan *workflow.Plan) error {
 			}
 		}
 
-		// Fix Attempt.Resp for all attempts. When the action has no attempts, leave Attempts unset:
-		// calling Set with an empty slice would materialize the AtomicSlice and make a reconstructed
-		// plan no longer match a submitted plan that never recorded an attempt.
-		attempts := action.Attempts.Get()
-		if len(attempts) == 0 {
+		if !action.Attempts.IsSet() {
 			return nil
 		}
+		attempts := action.Attempts.Get()
 		for i := range attempts {
 			if attempts[i].Resp != nil {
 				respBytes, err := json.Marshal(attempts[i].Resp)

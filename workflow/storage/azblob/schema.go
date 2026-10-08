@@ -27,7 +27,13 @@ const (
 	mdKeySubmitTime = "submittime"
 	mdKeyState      = "state"
 	mdPlanType      = "plantype"
+	// mdKeyEncoding marks metadata whose name and descr are escaped (see escapeMetadata). Metadata written before
+	// they were escaped has no marker and is read as stored.
+	mdKeyEncoding = "mdenc"
 )
+
+// mdEncodingEscaped is the mdKeyEncoding value for name and descr escaped with escapeMetadata.
+const mdEncodingEscaped = "1"
 
 const (
 	// ptEntry means the file contains a planEntry structure.
@@ -50,6 +56,7 @@ type planMeta struct {
 func mapToPlanMeta(m map[string]*string) (planMeta, error) {
 	pm := planMeta{}
 	lr := storage.ListResult{}
+	escaped := false
 	for k, v := range m {
 		if v == nil {
 			continue
@@ -85,10 +92,72 @@ func mapToPlanMeta(m map[string]*string) (planMeta, error) {
 			lr.State = state
 		case mdPlanType:
 			pm.PlanType = *v
+		case mdKeyEncoding:
+			escaped = *v == mdEncodingEscaped
 		}
+	}
+	// Decoded after the loop, since map order decides whether the marker is seen before or after the values.
+	if escaped {
+		lr.Name = unescapeMetadata(lr.Name)
+		lr.Descr = unescapeMetadata(lr.Descr)
 	}
 	pm.ListResult = lr
 	return pm, nil
+}
+
+// escapeMetadata makes s, a Name or Descr that workflow validation limited to printable ASCII, newlines and tabs, safe
+// to store as a blob metadata value, which is sent as an HTTP header: backslash, newline and tab become \\, \n and \t.
+// unescapeMetadata reverses it.
+func escapeMetadata(s string) string {
+	if !strings.ContainsAny(s, "\\\n\t") {
+		return s
+	}
+	var b strings.Builder
+	b.Grow(len(s) + len(s)/8)
+	for i := 0; i < len(s); i++ {
+		switch s[i] {
+		case '\\':
+			b.WriteString(`\\`)
+		case '\n':
+			b.WriteString(`\n`)
+		case '\t':
+			b.WriteString(`\t`)
+		default:
+			b.WriteByte(s[i])
+		}
+	}
+	return b.String()
+}
+
+// unescapeMetadata reverses escapeMetadata. A value that is not a valid escape sequence is returned as stored: it is a
+// display string, and a damaged one must not make the plan's metadata unreadable.
+func unescapeMetadata(s string) string {
+	if !strings.Contains(s, `\`) {
+		return s
+	}
+	var b strings.Builder
+	b.Grow(len(s))
+	for i := 0; i < len(s); i++ {
+		if s[i] != '\\' {
+			b.WriteByte(s[i])
+			continue
+		}
+		if i+1 == len(s) {
+			return s
+		}
+		i++
+		switch s[i] {
+		case '\\':
+			b.WriteByte('\\')
+		case 'n':
+			b.WriteByte('\n')
+		case 't':
+			b.WriteByte('\t')
+		default:
+			return s
+		}
+	}
+	return b.String()
 }
 
 // planToMetadata converts a workflow.Plan to a metadata map for blob storage.
@@ -100,8 +169,9 @@ func planToMetadata(ctx context.Context, p *workflow.Plan) (map[string]*string, 
 
 	md := map[string]*string{
 		mdKeyPlanID:     toPtr(p.ID.String()),
-		mdKeyName:       toPtr(p.Name),
-		mdKeyDescr:      toPtr(p.Descr),
+		mdKeyName:       toPtr(escapeMetadata(p.Name)),
+		mdKeyDescr:      toPtr(escapeMetadata(p.Descr)),
+		mdKeyEncoding:   toPtr(mdEncodingEscaped),
 		mdKeySubmitTime: toPtr(p.SubmitTime.Format(time.RFC3339Nano)),
 		mdKeyState:      toPtr(bytesToStr(stateJSON)),
 	}
@@ -134,6 +204,7 @@ type planEntry struct {
 	StateEnd        time.Time              `json:"stateEnd,omitempty"`
 	SubmitTime      time.Time              `json:"submitTime"`
 	Reason          workflow.FailureReason `json:"reason,omitempty"`
+	RuntimeUpdate   time.Time              `json:"runtimeUpdate,omitempty"`
 }
 
 // blocksEntry represents a Block object in blob storage.
@@ -217,16 +288,17 @@ func planToPlanEntry(p *workflow.Plan) (planEntry, error) {
 	}
 
 	entry := planEntry{
-		Type:        workflow.OTPlan,
-		ID:          p.ID,
-		PlanID:      p.ID, // Duplicate for consistency
-		GroupID:     p.GroupID,
-		Name:        p.Name,
-		Descr:       p.Descr,
-		Meta:        p.Meta,
-		SubmitTime:  p.SubmitTime,
-		Reason:      p.Reason,
-		StateStatus: workflow.NotStarted,
+		Type:          workflow.OTPlan,
+		ID:            p.ID,
+		PlanID:        p.ID, // Duplicate for consistency
+		GroupID:       p.GroupID,
+		Name:          p.Name,
+		Descr:         p.Descr,
+		Meta:          p.Meta,
+		SubmitTime:    p.SubmitTime,
+		Reason:        p.Reason,
+		StateStatus:   workflow.NotStarted,
+		RuntimeUpdate: p.RuntimeUpdate.Get(),
 	}
 
 	if state := p.State.Get(); state != (workflow.State{}) {

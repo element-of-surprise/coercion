@@ -54,8 +54,7 @@ type Vault struct {
 	// For example: https://mystorageaccount.blob.core.windows.net
 	endpoint string
 
-	client *azblob.Client
-	mu     *planlocks.Group
+	mu *planlocks.Group
 
 	reader
 	creator
@@ -130,7 +129,6 @@ func New(ctx context.Context, args Args, options ...Option) (*Vault, error) {
 	v := &Vault{
 		prefix:   args.Prefix,
 		endpoint: args.Endpoint,
-		mu:       planlocks.New(ctx),
 	}
 
 	for _, o := range options {
@@ -139,20 +137,28 @@ func New(ctx context.Context, args Args, options ...Option) (*Vault, error) {
 		}
 	}
 
-	client, err := azblob.NewClient(args.Endpoint, args.Cred, nil)
+	client, err := azblob.NewClient(args.Endpoint, args.Cred, blobops.ClientOptions())
 	if err != nil {
 		return nil, errors.E(ctx, errors.CatInternal, errors.TypeConn, fmt.Errorf("failed to create blob client: %w", err))
 	}
-	v.client = client
-	opsClient := &blobops.Real{Client: client}
+	// The plan locks start a cleanup goroutine that only Close stops, so they are made once nothing above can fail.
+	v.mu = planlocks.New(ctx)
+	v.wire(ctx, args, &blobops.Real{Client: client})
 
+	return v, nil
+}
+
+// wire builds the Vault's reader, writers and recovery on top of ops. New calls it with the real blob client; tests
+// call it with blobops.Fake.
+func (v *Vault) wire(ctx context.Context, args Args, ops blobops.Ops) {
+	// Upload tasks wait on their children, so the pools take their limits from the default pool, never from a Limited
+	// pool the caller's Context may carry: sharing one budget, waiting parents could take every slot their children need.
 	uploader := &uploader{
-		client:      opsClient,
-		mu:          v.mu,
+		client:      ops,
 		prefix:      v.prefix,
-		planObjPool: context.Pool(ctx).Limited(ctx, "azBlobUploaderTop", planObjPoolSize),
-		blockPool:   context.Pool(ctx).Limited(ctx, "azBlobUploaderSub", blockPoolSize),
-		leafObjPool: context.Pool(ctx).Limited(ctx, "azBlobUploaderLeaf", leafObjPoolSize),
+		planObjPool: context.Pool(ctx).Default().Limited(ctx, "azBlobUploaderTop", planObjPoolSize),
+		blockPool:   context.Pool(ctx).Default().Limited(ctx, "azBlobUploaderSub", blockPoolSize),
+		leafObjPool: context.Pool(ctx).Default().Limited(ctx, "azBlobUploaderLeaf", leafObjPoolSize),
 	}
 
 	v.reader = reader{
@@ -160,7 +166,7 @@ func New(ctx context.Context, args Args, options ...Option) (*Vault, error) {
 		readFlight:    &sync.Flight[string, *workflow.Plan]{},
 		existsFlight:  &sync.Flight[string, bool]{},
 		prefix:        args.Prefix,
-		client:        opsClient,
+		client:        ops,
 		reg:           args.Reg,
 		retentionDays: args.RetentionDays,
 	}
@@ -171,22 +177,19 @@ func New(ctx context.Context, args Args, options ...Option) (*Vault, error) {
 		reader:   v.reader,
 		uploader: uploader,
 	}
-	v.updater = newUpdater(v.mu, args.Prefix, opsClient, args.Endpoint, uploader)
+	v.updater = newUpdater(v.mu, args.Prefix, ops, args.Endpoint, uploader)
 	v.deleter = deleter{
 		mu:     v.mu,
 		prefix: args.Prefix,
-		client: opsClient,
+		client: ops,
 		reader: v.reader,
 	}
-	v.closer = closer{}
+	v.closer = closer{mu: v.mu}
 	v.recovery = recovery{
-		reader:        v.reader,
-		updater:       v.updater,
-		uploader:      uploader,
-		retentionDays: args.RetentionDays,
+		reader:   v.reader,
+		uploader: uploader,
+		running:  &sync.MutexValue[runningSnapshot]{},
 	}
-
-	return v, nil
 }
 
 // ReadDirect reads a plan from storage bypassing the retention check.

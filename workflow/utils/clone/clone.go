@@ -435,10 +435,9 @@ func Action(ctx context.Context, a *workflow.Action, options ...Option) *workflo
 	if opts.keepState {
 		na.ID = a.ID
 		cloneStateAtomic(&na.State, &a.State)
-		// Only materialize Attempts when there is something to copy; Set with an empty slice would
-		// turn an unset AtomicSlice into a materialized one, so the clone would no longer match its source.
-		if attempts := cloneAttempts(a.Attempts.Get()); len(attempts) > 0 {
-			na.Attempts.Set(attempts)
+		// Attempts is set only if the source's is, so the clone matches its source whether or not it ran.
+		if a.Attempts.IsSet() {
+			na.Attempts.Set(cloneAttempts(a.Attempts.Get()))
 		}
 	}
 
@@ -450,11 +449,12 @@ func Action(ctx context.Context, a *workflow.Action, options ...Option) *workflo
 }
 
 // cloneStateAtomic clones the state from src AtomicValue[State] into dst AtomicValue[State].
+// dst is set only if src is, so an unset state stays unset and a zero one stays set.
 func cloneStateAtomic(dst, src *workflow.AtomicValue[workflow.State]) {
-	state := src.Get()
-	if state == (workflow.State{}) {
+	if !src.IsSet() {
 		return
 	}
+	state := src.Get()
 	dst.Set(workflow.State{
 		Status: state.Status,
 		Start:  state.Start,

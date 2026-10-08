@@ -2,12 +2,11 @@ package azblob
 
 import (
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/element-of-surprise/coercion/workflow"
-	"github.com/element-of-surprise/coercion/workflow/storage/azblob/internal/blobops"
 	"github.com/google/uuid"
-	"github.com/gostdlib/base/context"
 )
 
 const (
@@ -34,76 +33,6 @@ func containerForPlan(prefix string, id uuid.UUID) string {
 	return containerName(prefix, time.Unix(id.Time().UnixTime()).UTC())
 }
 
-// recoveryContainerNames returns a list of container names to check for recovery, this will keep
-// going back in time for retentionDays.
-func recoveryContainerNames(ctx context.Context, prefix string, reader reader, retentionDays int) ([]string, error) {
-	if retentionDays <= 0 {
-		return nil, fmt.Errorf("retentionDays must be greater than 0")
-	}
-	t := time.Now().UTC().AddDate(0, 0, 1) // One day ahead.
-	containers := make([]string, retentionDays)
-
-	g := context.Pool(ctx).Limited(ctx, "", 10).Group()
-	for i := 0; i < retentionDays; i++ {
-		if ctx.Err() != nil {
-			break
-		}
-
-		t = t.AddDate(0, 0, -1)
-		date := t
-		g.Go(
-			ctx,
-			func(ctx context.Context) error {
-				cn, err := recoveryContainerName(ctx, reader, containerName(prefix, date))
-				if err != nil {
-					return err
-				}
-				containers[i] = cn
-				return nil
-			},
-		)
-	}
-	if err := g.Wait(ctx); err != nil {
-		return nil, err
-	}
-
-	s := []string{}
-	for i := 0; i < len(containers); i++ {
-		if containers[i] != "" {
-			s = append(s, containers[i])
-		}
-	}
-	return s, nil
-}
-
-// recoveryContainerName checks if a specific container has uncompleted plans. If so it returns the container name.
-// If not, it returns an empty string. It will only return an error if it encounters an unexpected error.
-func recoveryContainerName(ctx context.Context, reader reader, cn string) (string, error) {
-	results, err := reader.listPlansInContainer(ctx, cn)
-	if err != nil {
-		// Maybe nothing happens for a day.
-		if blobops.IsNotFound(err) {
-			return "", nil
-		}
-		return "", err
-	}
-	// Maybe nothing happens for a day.
-	if len(results) == 0 {
-		return "", nil
-	}
-
-	notCompleted := 0
-	for _, lr := range results {
-		if lr.State.Status == workflow.NotStarted || lr.State.Status == workflow.Running {
-			notCompleted++
-		}
-	}
-	if notCompleted != 0 {
-		return cn, nil
-	}
-	return "", nil
-}
-
 // searchContainerNames returns a list of container names to search for plans,
 // covering the full retention period. This ensures that recovery can find
 // plans that may be several days old.
@@ -120,6 +49,49 @@ func searchContainerNames(prefix string, retentionDays int) []string {
 	}
 
 	return containers
+}
+
+//go:generate go tool github.com/gostdlib/base/values/generators/stringer -type=blobKind -linecomment
+
+// blobKind is which of a plan's two top-level blobs a blob is.
+type blobKind uint8
+
+const (
+	unknownBlobKind blobKind = iota // Unknown
+	entryBlob                       // Entry
+	objectBlob                      // Object
+)
+
+// planType returns the plantype metadata value that blobs of kind k carry, or "" for an unknown kind.
+func (k blobKind) planType() string {
+	switch k {
+	case entryBlob:
+		return ptEntry
+	case objectBlob:
+		return ptObject
+	}
+	return ""
+}
+
+// parsePlanBlobName returns the plan ID and kind of a plan entry or object blob name, as written by planEntryBlobName
+// and planObjectBlobName. ok is false for any other name.
+func parsePlanBlobName(name string) (id uuid.UUID, kind blobKind, ok bool) {
+	rest, ok := strings.CutPrefix(name, planBlobPrefix())
+	if !ok {
+		return uuid.Nil, unknownBlobKind, false
+	}
+	for _, k := range []blobKind{entryBlob, objectBlob} {
+		idStr, ok := strings.CutSuffix(rest, "-"+k.planType()+".json")
+		if !ok {
+			continue
+		}
+		id, err := uuid.Parse(idStr)
+		if err != nil {
+			return uuid.Nil, unknownBlobKind, false
+		}
+		return id, k, true
+	}
+	return uuid.Nil, unknownBlobKind, false
 }
 
 // planEntryBlobName returns the blob name for a lightweight planEntry object.

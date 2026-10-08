@@ -142,7 +142,7 @@ func createLargePlan(blocks, seqsPerBlock, actionsPerSeq int, running bool) *wor
 func benchRecoverySetup(b *testing.B, latency time.Duration) (reader, recovery, string, *workflow.Plan) {
 	b.Helper()
 
-	ctx := context.Background()
+	ctx := b.Context()
 	prefix := "bench"
 
 	reg := registry.New()
@@ -156,7 +156,6 @@ func benchRecoverySetup(b *testing.B, latency time.Duration) (reader, recovery, 
 	// is not what we are measuring).
 	uploadPlanToFakeB(ctx, b, fake, prefix, plan)
 	plainUploader := &uploader{
-		mu:          planlocks.New(ctx),
 		client:      fake,
 		prefix:      prefix,
 		planObjPool: context.Pool(ctx).Limited(ctx, "", 5),
@@ -178,9 +177,9 @@ func benchRecoverySetup(b *testing.B, latency time.Duration) (reader, recovery, 
 		retentionDays: 14,
 	}
 	rec := recovery{
-		reader: r,
+		reader:  r,
+		running: &sync.MutexValue[runningSnapshot]{},
 		uploader: &uploader{
-			mu:          planlocks.New(ctx),
 			client:      lc,
 			prefix:      prefix,
 			planObjPool: context.Pool(ctx).Limited(ctx, "", planObjPoolSize),
@@ -194,7 +193,7 @@ func benchRecoverySetup(b *testing.B, latency time.Duration) (reader, recovery, 
 // BenchmarkRecoveryFetchRunningPlan exercises path A: reconstructing a running plan from its
 // sub-object blobs.
 func BenchmarkRecoveryFetchRunningPlan(b *testing.B) {
-	ctx := context.Background()
+	ctx := b.Context()
 	r, _, _, plan := benchRecoverySetup(b, 500*time.Microsecond)
 
 	b.ResetTimer()
@@ -209,16 +208,16 @@ func BenchmarkRecoveryFetchRunningPlan(b *testing.B) {
 	}
 }
 
-// BenchmarkRecoveryEnsureSubObjectBlobs exercises path B: verifying every sub-object blob exists
-// (all present, so it is a pure HEAD walk).
-func BenchmarkRecoveryEnsureSubObjectBlobs(b *testing.B) {
-	ctx := context.Background()
-	_, rec, containerName, plan := benchRecoverySetup(b, 500*time.Microsecond)
+// BenchmarkRecovery exercises the whole storage recovery: one listing of the retention window, with no per-plan
+// requests for a consistent plan.
+func BenchmarkRecovery(b *testing.B) {
+	ctx := b.Context()
+	_, rec, _, _ := benchRecoverySetup(b, 500*time.Microsecond)
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		if err := rec.ensureSubObjectBlobs(ctx, containerName, plan); err != nil {
-			b.Fatalf("BenchmarkRecoveryEnsureSubObjectBlobs: %v", err)
+		if err := rec.Recovery(ctx); err != nil {
+			b.Fatalf("BenchmarkRecovery: %v", err)
 		}
 	}
 }

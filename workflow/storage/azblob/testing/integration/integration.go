@@ -48,6 +48,8 @@ func init() {
 	flag.Parse()
 
 	plan = cosmosdb.NewTestPlan()
+	// A multiline description and a backslash, which blob metadata (sent as HTTP headers) cannot hold as is.
+	plan.Descr = "integration test plan\nwith a second line and a \\ backslash"
 }
 
 var prettyConfig = pretty.Config{
