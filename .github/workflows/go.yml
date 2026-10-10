@@ -1,12 +1,7 @@
 name: Go
 
 on:
-  push:
-    branches: [main]
-  pull_request:
-    branches: [main]
-  schedule:
-    - cron: "0 14 * * 2"
+  push: # Every branch, including those with an open PR.
   workflow_dispatch: # This allows manual triggering of the workflow
 
 permissions:
