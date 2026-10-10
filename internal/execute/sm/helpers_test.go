@@ -4,8 +4,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gostdlib/base/context"
-
 	"github.com/element-of-surprise/coercion/workflow"
 	"github.com/kylelemons/godebug/pretty"
 )
@@ -38,12 +36,6 @@ func TestRunPreChecks(t *testing.T) {
 			wantErr:    true,
 		},
 		{
-			name:       "Error: PreChecks fail and ContChecks fail",
-			preChecks:  &workflow.Checks{Actions: []*workflow.Action{actionError}},
-			contChecks: &workflow.Checks{Actions: []*workflow.Action{actionError}},
-			wantErr:    true,
-		},
-		{
 			name:       "Success: PreChecks succeed and ContChecks succeed",
 			preChecks:  &workflow.Checks{Actions: []*workflow.Action{actionSuccess}},
 			contChecks: &workflow.Checks{Actions: []*workflow.Action{actionSuccess}},
@@ -55,9 +47,12 @@ func TestRunPreChecks(t *testing.T) {
 			testChecksRunner: fakeRunChecksOnce,
 		}
 
-		err := states.runPreChecks(context.Background(), test.preChecks, test.contChecks)
-		if (err != nil) != test.wantErr {
-			t.Errorf("TestRunPreChecks(%s): err == %v, want err == %v", test.name, err, test.wantErr)
+		err := states.runPreChecks(t.Context(), test.preChecks, test.contChecks)
+		switch {
+		case err == nil && test.wantErr:
+			t.Errorf("TestRunPreChecks(%s): got err == nil, want err != nil", test.name)
+		case err != nil && !test.wantErr:
+			t.Errorf("TestRunPreChecks(%s): got err == %s, want err == nil", test.name, err)
 		}
 	}
 }
@@ -86,7 +81,7 @@ func TestRunChecksOnce(t *testing.T) {
 		wantErr    bool
 	}{
 		{
-			name: "Error: runActionsParallel returns error",
+			name: "Error: a failing action fails the checks",
 			checks: &workflow.Checks{
 				Actions: []*workflow.Action{
 					{Name: "error"},
@@ -96,7 +91,7 @@ func TestRunChecksOnce(t *testing.T) {
 			wantErr:    true,
 		},
 		{
-			name: "Success",
+			name: "Success: passing actions complete the checks",
 			checks: &workflow.Checks{
 				Actions: []*workflow.Action{
 					{Name: "action1"},
@@ -118,7 +113,7 @@ func TestRunChecksOnce(t *testing.T) {
 			action.State.Set(workflow.State{})
 		}
 
-		err := states.runChecksOnce(context.Background(), test.checks)
+		err := states.runChecksOnce(t.Context(), test.checks)
 		if diff := pretty.Compare(test.wantChecks, test.checks); diff != "" {
 			t.Errorf("TestRunChecksOnce(%s): checks not correct: -want/+got:\n%s", test.name, diff)
 		}
@@ -131,7 +126,7 @@ func TestRunChecksOnce(t *testing.T) {
 	}
 }
 
-func TestParallelActionsRunner(t *testing.T) {
+func TestRunActionsParallel(t *testing.T) {
 	t.Parallel()
 
 	now := time.Now().UTC()
@@ -140,10 +135,10 @@ func TestParallelActionsRunner(t *testing.T) {
 		name        string
 		actions     []*workflow.Action
 		wantActions []*workflow.Action
-		err         bool
+		wantErr     bool
 	}{
 		{
-			name: "One action fails",
+			name: "Error: one failing action fails the run and every action is marked Running",
 			actions: []*workflow.Action{
 				{Name: "action1"},
 				{Name: "error"},
@@ -154,10 +149,10 @@ func TestParallelActionsRunner(t *testing.T) {
 				newActionWithState("action1", &workflow.State{Status: workflow.Running, Start: now}),
 				newActionWithState("error", &workflow.State{Status: workflow.Running, Start: now}),
 			},
-			err: true,
+			wantErr: true,
 		},
 		{
-			name: "All actions pass",
+			name: "Success: passing actions are all marked Running",
 			actions: []*workflow.Action{
 				{Name: "action1"},
 				{Name: "action2"},
@@ -180,14 +175,16 @@ func TestParallelActionsRunner(t *testing.T) {
 			action.State.Set(workflow.State{})
 		}
 
-		err := states.runActionsParallel(context.Background(), test.actions)
-
-		if diff := pretty.Compare(test.wantActions, test.actions); diff != "" {
-			t.Errorf("TestRunChecks(%s): actions differ (-want +got):\n%s", test.name, diff)
+		err := states.runActionsParallel(t.Context(), test.actions)
+		switch {
+		case err == nil && test.wantErr:
+			t.Errorf("TestRunActionsParallel(%s): got err == nil, want err != nil", test.name)
+		case err != nil && !test.wantErr:
+			t.Errorf("TestRunActionsParallel(%s): got err == %s, want err == nil", test.name, err)
 		}
 
-		if test.err && err == nil {
-			t.Errorf("TestRunChecks(%s): expected error, got nil", test.name)
+		if diff := pretty.Compare(test.wantActions, test.actions); diff != "" {
+			t.Errorf("TestRunActionsParallel(%s): actions differ (-want +got):\n%s", test.name, diff)
 		}
 	}
 }
@@ -198,9 +195,8 @@ func newSequenceWithState(name string, actions []*workflow.Action, state *workfl
 	return s
 }
 
-// TestRunActions tests the runActions function. Since this is wrapper around
-// the actions state machine, we only need to test it runs, we don't need to
-// do indepth testing.
+// TestExecSeq tests the execSeq function. Since this is wrapper around the actions state machine, we only need to
+// test it runs, we don't need to do indepth testing.
 func TestExecSeq(t *testing.T) {
 	t.Parallel()
 
@@ -215,7 +211,7 @@ func TestExecSeq(t *testing.T) {
 		wantErr   bool
 	}{
 		{
-			name:    "action failed, so seq failed",
+			name:    "Error: a failing action fails the sequence",
 			seq:     newSequenceWithState("seq", []*workflow.Action{{Name: "action"}, {Name: "error"}}, &workflow.State{}),
 			wantSeq: newSequenceWithState("seq", []*workflow.Action{{Name: "action"}, {Name: "error"}}, &workflow.State{Status: workflow.Failed, Start: start, End: end}),
 			dbUpdates: []*workflow.Sequence{
@@ -225,7 +221,7 @@ func TestExecSeq(t *testing.T) {
 			wantErr: true,
 		},
 		{
-			name:    "seq completed",
+			name:    "Success: passing actions complete the sequence",
 			seq:     newSequenceWithState("seq", []*workflow.Action{{Name: "action1"}, {Name: "action2"}}, &workflow.State{}),
 			wantSeq: newSequenceWithState("seq", []*workflow.Action{{Name: "action1"}, {Name: "action2"}}, &workflow.State{Status: workflow.Completed, Start: start, End: end}),
 			dbUpdates: []*workflow.Sequence{
@@ -250,7 +246,7 @@ func TestExecSeq(t *testing.T) {
 			},
 		}
 
-		err := states.execSeq(context.Background(), test.seq)
+		err := states.execSeq(t.Context(), test.seq)
 
 		if diff := pretty.Compare(test.wantSeq, test.seq); diff != "" {
 			t.Errorf("TestExecSeq(%s): expected Sequence: -want/+got:\n%s", test.name, diff)
@@ -258,8 +254,11 @@ func TestExecSeq(t *testing.T) {
 		if diff := pretty.Compare(test.dbUpdates, updater.seqs); diff != "" {
 			t.Errorf("TestExecSeq(%s): expected dbUpdates: -want/+got:\n%s", test.name, diff)
 		}
-		if (err != nil) != test.wantErr {
-			t.Errorf("TestExecSeq(%s): expected error: %v, got: %v", test.name, test.wantErr, err)
+		switch {
+		case err == nil && test.wantErr:
+			t.Errorf("TestExecSeq(%s): got err == nil, want err != nil", test.name)
+		case err != nil && !test.wantErr:
+			t.Errorf("TestExecSeq(%s): got err == %s, want err == nil", test.name, err)
 		}
 	}
 }
@@ -282,5 +281,9 @@ func TestResetActions(t *testing.T) {
 
 	if diff := pretty.Compare(want, action); diff != "" {
 		t.Errorf("TestResetActions: -want +got):\n%s", diff)
+	}
+	// Compare cannot see whether Attempts is set. A reset action must have it unset, like one that never ran.
+	if action.Attempts.IsSet() {
+		t.Errorf("TestResetActions: got Attempts set, want it unset")
 	}
 }

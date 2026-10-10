@@ -915,6 +915,9 @@ func TestRead(t *testing.T) {
 		name string
 		// missing returns an object of the stored Plan whose row is deleted before the Read, or nil.
 		missing func(p *workflow.Plan) workflow.Object
+		// corrupt returns an object of the stored Plan and one of its row's columns, which is overwritten with bytes
+		// that do not decode before the Read, or a nil object.
+		corrupt func(p *workflow.Plan) (workflow.Object, string)
 		wantErr bool
 	}{
 		{name: "Success: a stored Plan is read."},
@@ -948,6 +951,65 @@ func TestRead(t *testing.T) {
 			missing: func(p *workflow.Plan) workflow.Object { return p.DeferredActions.DeferredBatches[0] },
 			wantErr: true,
 		},
+		{
+			name:    "Error: a Plan whose list of Block IDs does not decode is inconsistent.",
+			corrupt: func(p *workflow.Plan) (workflow.Object, string) { return p, "blocks" },
+			wantErr: true,
+		},
+		{
+			name:    "Error: a Plan whose PreChecks ID does not parse is inconsistent.",
+			corrupt: func(p *workflow.Plan) (workflow.Object, string) { return p, "prechecks" },
+			wantErr: true,
+		},
+		{
+			name:    "Error: a Plan whose DeferredActions ID does not parse is inconsistent.",
+			corrupt: func(p *workflow.Plan) (workflow.Object, string) { return p, "deferredactions" },
+			wantErr: true,
+		},
+		{
+			name:    "Error: a Checks whose list of Action IDs does not decode is inconsistent.",
+			corrupt: func(p *workflow.Plan) (workflow.Object, string) { return p.PreChecks, "actions" },
+			wantErr: true,
+		},
+		{
+			name:    "Error: a Block whose list of Sequence IDs does not decode is inconsistent.",
+			corrupt: func(p *workflow.Plan) (workflow.Object, string) { return p.Blocks[0], "sequences" },
+			wantErr: true,
+		},
+		{
+			name:    "Error: a Block whose Key does not parse is inconsistent.",
+			corrupt: func(p *workflow.Plan) (workflow.Object, string) { return p.Blocks[0], "key" },
+			wantErr: true,
+		},
+		{
+			name:    "Error: a Sequence whose list of Action IDs does not decode is inconsistent.",
+			corrupt: func(p *workflow.Plan) (workflow.Object, string) { return p.Blocks[0].Sequences[0], "actions" },
+			wantErr: true,
+		},
+		{
+			name:    "Error: an Action whose request does not decode is inconsistent.",
+			corrupt: func(p *workflow.Plan) (workflow.Object, string) { return p.Blocks[0].Sequences[0].Actions[0], "req" },
+			wantErr: true,
+		},
+		{
+			name: "Error: an Action whose attempts do not decode is inconsistent.",
+			corrupt: func(p *workflow.Plan) (workflow.Object, string) {
+				return p.Blocks[0].Sequences[0].Actions[0], "attempts"
+			},
+			wantErr: true,
+		},
+		{
+			name:    "Error: a DeferredActions whose list of DeferBatch IDs does not decode is inconsistent.",
+			corrupt: func(p *workflow.Plan) (workflow.Object, string) { return p.DeferredActions, "batches" },
+			wantErr: true,
+		},
+		{
+			name: "Error: a DeferBatch whose list of Action IDs does not decode is inconsistent.",
+			corrupt: func(p *workflow.Plan) (workflow.Object, string) {
+				return p.DeferredActions.DeferredBatches[0], "actions"
+			},
+			wantErr: true,
+		},
 	}
 
 	for _, test := range tests {
@@ -969,6 +1031,10 @@ func TestRead(t *testing.T) {
 		if test.missing != nil {
 			deleteRow(t, pool, test.missing(plan))
 		}
+		if test.corrupt != nil {
+			obj, column := test.corrupt(plan)
+			corruptColumn(t, pool, obj, column)
+		}
 
 		r := reader{mu: &sync.RWMutex{}, pool: pool, reg: reg}
 		got, err := r.Read(t.Context(), plan.ID)
@@ -980,14 +1046,45 @@ func TestRead(t *testing.T) {
 			t.Errorf("TestRead(%s): got err == %s, want err == nil", test.name, err)
 			continue
 		case err != nil:
+			// internal/execute's recover.fetchPlans and Plans.resumeOrExit/Plans.stranded skip a Plan for which
+			// errors.IsStorageInconsistent is true; any other error is retried until the process exits.
 			if !errors.IsStorageInconsistent(err) {
 				t.Errorf("TestRead(%s): got err == %s, want it classified by errors.IsStorageInconsistent", test.name, err)
+			}
+			// Workstream.Wait (coercion.go) promises callers that an error retrying cannot fix wraps errors.ErrPermanent,
+			// and exponential backoff stops retrying on it.
+			if !errors.Is(err, errors.ErrPermanent) {
+				t.Errorf("TestRead(%s): got err == %s, want it to wrap errors.ErrPermanent", test.name, err)
 			}
 			continue
 		}
 		if got.ID != plan.ID {
 			t.Errorf("TestRead(%s): got Plan %s, want %s", test.name, got.ID, plan.ID)
 		}
+	}
+}
+
+// corruptColumn overwrites column of obj's row with bytes that are neither a UUID nor complete JSON.
+func corruptColumn(t *testing.T, pool *sqlitex.Pool, obj workflow.Object, column string) {
+	t.Helper()
+
+	conn, err := pool.Take(t.Context())
+	if err != nil {
+		t.Fatalf("corruptColumn: Take: %s", err)
+	}
+	defer pool.Put(conn)
+
+	table := "plans"
+	if obj.Type() != workflow.OTPlan {
+		table = objectTables[obj.Type()]
+	}
+	q := fmt.Sprintf("UPDATE %s SET %s = $v WHERE id = $id;", table, column)
+	named := map[string]any{"$id": obj.(ider).GetID().String(), "$v": []byte(`["trunc`)}
+	if err := sqlitex.Execute(conn, q, &sqlitex.ExecOptions{Named: named}); err != nil {
+		t.Fatalf("corruptColumn: %s", err)
+	}
+	if conn.Changes() != 1 {
+		t.Fatalf("corruptColumn: updated %d rows of %s, want 1", conn.Changes(), table)
 	}
 }
 
@@ -1098,8 +1195,16 @@ func TestFetchActionsByIDs(t *testing.T) {
 			t.Errorf("TestFetchActionsByIDs(%s): got err == %s, want err == nil", test.name, err)
 			continue
 		case err != nil:
+			// fetchActionsByIDs feeds Read: internal/execute's recover.fetchPlans and Plans.resumeOrExit/Plans.stranded
+			// skip a Plan for which errors.IsStorageInconsistent is true; any other error is retried until the process
+			// exits.
 			if !errors.IsStorageInconsistent(err) {
 				t.Errorf("TestFetchActionsByIDs(%s): got err == %s, want it classified by errors.IsStorageInconsistent", test.name, err)
+			}
+			// Workstream.Wait (coercion.go) promises callers that an error retrying cannot fix wraps errors.ErrPermanent,
+			// and exponential backoff stops retrying on it.
+			if !errors.Is(err, errors.ErrPermanent) {
+				t.Errorf("TestFetchActionsByIDs(%s): got err == %s, want it to wrap errors.ErrPermanent", test.name, err)
 			}
 			continue
 		}

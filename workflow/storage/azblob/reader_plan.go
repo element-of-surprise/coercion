@@ -7,6 +7,7 @@ import (
 	"github.com/go-json-experiment/json"
 	"github.com/google/uuid"
 	"github.com/gostdlib/base/concurrency/sync"
+	"github.com/gostdlib/base/concurrency/worker"
 	"github.com/gostdlib/base/context"
 
 	"github.com/element-of-surprise/coercion/workflow"
@@ -16,9 +17,33 @@ import (
 	"github.com/element-of-surprise/coercion/workflow/utils/walk"
 )
 
-// fetchConcurrency bounds the number of concurrent blob fetches spawned at each individual object fetch. Each fan-out
-// creates its own Limited pool from context.Pool(ctx).Default() (the unbounded default pool), never on another Limited
-// pool, so nested waits can never starve and deadlock.
+// The fetch fan-outs run on pools that every read shares, one per tier, so one large plan or many concurrent reads
+// cannot multiply the limits. The plan tier fetches a Plan's checks, blocks and DeferredActions; the block tier fetches
+// a Block's checks and sequences and the DeferredActions' batches; the leaf tier fetches actions. A task waits only on
+// tasks of a lower tier and leaf tasks wait on nothing, so the shared limits can never deadlock.
+const (
+	planFetchPoolSize  = 10
+	blockFetchPoolSize = 20
+	leafFetchPoolSize  = 40
+)
+
+// fetchPools are the reader's fetch tiers. They take their limits from the default pool, never from a Limited pool the
+// caller's Context may carry.
+type fetchPools struct {
+	plan  *worker.Pool
+	block *worker.Pool
+	leaf  *worker.Pool
+}
+
+func newFetchPools(ctx context.Context) fetchPools {
+	return fetchPools{
+		plan:  context.Pool(ctx).Default().Limited(ctx, "azBlobReaderPlan", planFetchPoolSize),
+		block: context.Pool(ctx).Default().Limited(ctx, "azBlobReaderBlock", blockFetchPoolSize),
+		leaf:  context.Pool(ctx).Default().Limited(ctx, "azBlobReaderLeaf", leafFetchPoolSize),
+	}
+}
+
+// fetchConcurrency bounds how many plans recovery reads at once.
 const fetchConcurrency = 10
 
 // unwrapGroup collapses the *sync.Errors that a worker Group's Wait() returns into an error whose
@@ -139,7 +164,14 @@ func missingSubObject(ctx context.Context, err error, what string) error {
 	if !blobops.IsNotFound(err) {
 		return err
 	}
-	return errors.E(ctx, errors.CatInternal, errors.TypeStorageInconsistent, fmt.Errorf("%s: %v", what, err))
+	return errors.ErrStorageInconsistent(ctx, fmt.Errorf("%s: %v", what, err))
+}
+
+// errUndecodable returns the error for a stored blob, or its metadata, that does not decode, described by what. The
+// stored bytes stay the same however often they are read, so retrying or restarting cannot fix it: the storage is
+// damaged, so it is a TypeStorageInconsistent error, and it wraps errors.ErrPermanent so retries stop.
+func errUndecodable(ctx context.Context, what string, err error) error {
+	return errors.ErrStorageInconsistent(ctx, fmt.Errorf("%s: %w", what, err))
 }
 
 // hasRunningObjects reports whether any object below plan is still marked Running.
@@ -178,7 +210,7 @@ func (r reader) fetchPlanEntryMeta(ctx context.Context, id uuid.UUID) (planMeta,
 	}
 	pm, err := mapToPlanMeta(md)
 	if err != nil {
-		return planMeta{}, errors.E(ctx, errors.CatInternal, errors.TypeStorageGet, fmt.Errorf("failed to parse planEntry metadata: %w", err))
+		return planMeta{}, errUndecodable(ctx, "failed to parse planEntry metadata", err)
 	}
 	return pm, nil
 }
@@ -205,7 +237,7 @@ func (r reader) fetchNonRunningPlan(ctx context.Context, containerName string, i
 	// Unmarshal the full workflow.Plan object
 	plan := &workflow.Plan{}
 	if err := json.Unmarshal(data, plan); err != nil {
-		return nil, errors.E(ctx, errors.CatInternal, errors.TypeStorageGet, fmt.Errorf("failed to unmarshal plan object: %w", err))
+		return nil, errUndecodable(ctx, "failed to unmarshal plan object", err)
 	}
 
 	// Set registry for all actions
@@ -250,7 +282,7 @@ func (r reader) fetchRunningPlan(ctx context.Context, containerName string, id u
 
 	// Fetch all plan-level checks, deferred actions, and blocks concurrently. Each writes to a
 	// distinct field/index, so no synchronization is needed beyond the group's Wait.
-	g := context.Pool(ctx).Default().Limited(ctx, "azBlobReaderPlan", fetchConcurrency).Group()
+	g := r.pools.plan.Group()
 
 	r.goFetchChecks(ctx, &g, containerName, id, entry.BypassChecks, func(c *workflow.Checks) { plan.BypassChecks = c })
 	r.goFetchChecks(ctx, &g, containerName, id, entry.PreChecks, func(c *workflow.Checks) { plan.PreChecks = c })
@@ -309,7 +341,7 @@ func (r reader) fetchPlanEntry(ctx context.Context, planID uuid.UUID) (planEntry
 
 	var entry planEntry
 	if err := json.Unmarshal(data, &entry); err != nil {
-		return planEntry{}, errors.E(ctx, errors.CatInternal, errors.TypeStorageGet, fmt.Errorf("failed to unmarshal planEntry: %w", err))
+		return planEntry{}, errUndecodable(ctx, "failed to unmarshal planEntry", err)
 	}
 
 	return entry, nil
@@ -328,18 +360,18 @@ func (r reader) fetchChecks(ctx context.Context, containerName string, planID, c
 
 	var entry checksEntry
 	if err := json.Unmarshal(data, &entry); err != nil {
-		return nil, errors.E(ctx, errors.CatInternal, errors.TypeStorageGet, fmt.Errorf("failed to unmarshal checks: %w", err))
+		return nil, errUndecodable(ctx, "failed to unmarshal checks", err)
 	}
 
 	checks, err := entryToChecks(entry)
 	if err != nil {
-		return nil, errors.E(ctx, errors.CatInternal, errors.TypeStorageGet, fmt.Errorf("failed to convert entry to checks: %w", err))
+		return nil, errUndecodable(ctx, "failed to convert entry to checks", err)
 	}
 	checks.SetPlanID(planID)
 
 	// Fetch all actions concurrently; each writes a distinct slice index.
 	checks.Actions = make([]*workflow.Action, len(entry.Actions))
-	g := context.Pool(ctx).Default().Limited(ctx, "azBlobReaderChecks", fetchConcurrency).Group()
+	g := r.pools.leaf.Group()
 	for i, actionID := range entry.Actions {
 		g.Go(ctx, func(ctx context.Context) error {
 			action, err := r.fetchAction(ctx, containerName, planID, actionID)
@@ -370,17 +402,17 @@ func (r reader) fetchBlock(ctx context.Context, containerName string, planID, bl
 
 	var entry blocksEntry
 	if err := json.Unmarshal(data, &entry); err != nil {
-		return nil, errors.E(ctx, errors.CatInternal, errors.TypeStorageGet, fmt.Errorf("failed to unmarshal block: %w", err))
+		return nil, errUndecodable(ctx, "failed to unmarshal block", err)
 	}
 
 	block, err := entryToBlock(entry)
 	if err != nil {
-		return nil, errors.E(ctx, errors.CatInternal, errors.TypeStorageGet, fmt.Errorf("failed to convert entry to block: %w", err))
+		return nil, errUndecodable(ctx, "failed to convert entry to block", err)
 	}
 	block.SetPlanID(planID)
 
 	// Fetch all check objects and sequences concurrently; each writes a distinct field/index.
-	g := context.Pool(ctx).Default().Limited(ctx, "azBlobReaderBlock", fetchConcurrency).Group()
+	g := r.pools.block.Group()
 
 	r.goFetchChecks(ctx, &g, containerName, planID, entry.BypassChecks, func(c *workflow.Checks) { block.BypassChecks = c })
 	r.goFetchChecks(ctx, &g, containerName, planID, entry.PreChecks, func(c *workflow.Checks) { block.PreChecks = c })
@@ -420,18 +452,18 @@ func (r reader) fetchSequence(ctx context.Context, containerName string, planID,
 
 	var entry sequencesEntry
 	if err := json.Unmarshal(data, &entry); err != nil {
-		return nil, errors.E(ctx, errors.CatInternal, errors.TypeStorageGet, fmt.Errorf("failed to unmarshal sequence: %w", err))
+		return nil, errUndecodable(ctx, "failed to unmarshal sequence", err)
 	}
 
 	seq, err := entryToSequence(entry)
 	if err != nil {
-		return nil, errors.E(ctx, errors.CatInternal, errors.TypeStorageGet, fmt.Errorf("failed to convert entry to sequence: %w", err))
+		return nil, errUndecodable(ctx, "failed to convert entry to sequence", err)
 	}
 	seq.SetPlanID(planID)
 
 	// Fetch all actions concurrently; each writes a distinct slice index.
 	seq.Actions = make([]*workflow.Action, len(entry.Actions))
-	g := context.Pool(ctx).Default().Limited(ctx, "azBlobReaderSequence", fetchConcurrency).Group()
+	g := r.pools.leaf.Group()
 	for i, actionID := range entry.Actions {
 		g.Go(ctx, func(ctx context.Context) error {
 			action, err := r.fetchAction(ctx, containerName, planID, actionID)
@@ -530,11 +562,11 @@ func (r reader) fixActions(ctx context.Context, plan *workflow.Plan) error {
 			if req != nil {
 				if reflect.TypeOf(req).Kind() != reflect.Pointer {
 					if err := json.Unmarshal(reqBytes, &req); err != nil {
-						return fmt.Errorf("failed to unmarshal req: %w", err)
+						return errUndecodable(ctx, fmt.Sprintf("action(%s) request", action.ID), err)
 					}
 				} else {
 					if err := json.Unmarshal(reqBytes, req); err != nil {
-						return fmt.Errorf("failed to unmarshal req: %w", err)
+						return errUndecodable(ctx, fmt.Sprintf("action(%s) request", action.ID), err)
 					}
 				}
 				action.Req = req
@@ -556,11 +588,11 @@ func (r reader) fixActions(ctx context.Context, plan *workflow.Plan) error {
 				if resp != nil {
 					if reflect.TypeOf(resp).Kind() != reflect.Pointer {
 						if err := json.Unmarshal(respBytes, &resp); err != nil {
-							return fmt.Errorf("failed to unmarshal attempt resp: %w", err)
+							return errUndecodable(ctx, fmt.Sprintf("action(%s) attempt response", action.ID), err)
 						}
 					} else {
 						if err := json.Unmarshal(respBytes, resp); err != nil {
-							return fmt.Errorf("failed to unmarshal attempt resp: %w", err)
+							return errUndecodable(ctx, fmt.Sprintf("action(%s) attempt response", action.ID), err)
 						}
 					}
 					attempts[i].Resp = resp

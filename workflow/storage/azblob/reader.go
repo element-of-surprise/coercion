@@ -13,6 +13,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/gostdlib/base/concurrency/sync"
 	"github.com/gostdlib/base/context"
+	"github.com/gostdlib/base/values/chans"
 
 	"github.com/element-of-surprise/coercion/internal/private"
 	"github.com/element-of-surprise/coercion/plugins/registry"
@@ -35,6 +36,7 @@ type reader struct {
 	reg           *registry.Register
 	retentionDays int
 	nowf          func() time.Time
+	pools         fetchPools
 
 	testListPlansInContainer func(ctx context.Context, containerName string) ([]storage.ListResult, error)
 
@@ -127,12 +129,12 @@ func sharedFetch[V any](ctx context.Context, args sharedFetchArgs[V]) (V, error)
 		defer cancel()
 		return args.fetch(fetchCtx)
 	})
-	select {
-	case res := <-results:
-		return res.Val, res.Err
-	case <-ctx.Done():
+	// A result that is ready as ctx ends is still returned.
+	res, r := chans.Get(ctx, results)
+	if !r.OK() {
 		return zero, errors.E(ctx, errors.CatInternal, errors.TypeTimeout, fmt.Errorf("stopped waiting for %s: %w", args.key, context.Cause(ctx)))
 	}
+	return res.Val, res.Err
 }
 
 func (r reader) exists(ctx context.Context, id uuid.UUID) (bool, error) {
@@ -186,7 +188,9 @@ func (r reader) Search(ctx context.Context, filters storage.Filters) (chan stora
 
 	ch := make(chan storage.Stream[storage.ListResult], 1)
 
-	ok := context.Pool(ctx).Submit(
+	// The producer waits on the caller to read each result, so it goes on the default pool, never on a limited pool
+	// ctx may carry, where a stream the caller abandoned would hold a slot until ctx ends.
+	ok := context.Pool(ctx).Default().Submit(
 		ctx,
 		func() {
 			defer close(ch)
@@ -205,7 +209,8 @@ func (r reader) Search(ctx context.Context, filters storage.Filters) (chan stora
 func (r reader) List(ctx context.Context, limit int) (chan storage.Stream[storage.ListResult], error) {
 	ch := make(chan storage.Stream[storage.ListResult], 1)
 
-	ok := context.Pool(ctx).Submit(
+	// See Search for why this is the default pool.
+	ok := context.Pool(ctx).Default().Submit(
 		ctx,
 		func() {
 			defer close(ch)
@@ -233,10 +238,7 @@ func (r reader) search(ctx context.Context, filters storage.Filters, ch chan sto
 		containerResults, err := r.listPlansInContainer(ctx, containerName)
 		if err != nil {
 			if !blobops.IsNotFound(err) {
-				select {
-				case ch <- storage.Stream[storage.ListResult]{Err: err}:
-				case <-ctx.Done():
-				}
+				chans.Put(ctx, ch, storage.Stream[storage.ListResult]{Err: err})
 				return
 			}
 			continue
@@ -248,9 +250,7 @@ func (r reader) search(ctx context.Context, filters storage.Filters, ch chan sto
 	// Filter results based on filters
 	for _, result := range results {
 		if r.matchesFilters(result, filters) {
-			select {
-			case ch <- storage.Stream[storage.ListResult]{Result: result}:
-			case <-ctx.Done():
+			if !chans.Put(ctx, ch, storage.Stream[storage.ListResult]{Result: result}) {
 				return
 			}
 		}
@@ -298,10 +298,7 @@ func (r reader) list(ctx context.Context, limit int, ch chan storage.Stream[stor
 		containerResults, err := r.listPlansInContainer(ctx, containerName)
 		if err != nil {
 			if !blobops.IsNotFound(err) {
-				select {
-				case ch <- storage.Stream[storage.ListResult]{Err: err}:
-				case <-ctx.Done():
-				}
+				chans.Put(ctx, ch, storage.Stream[storage.ListResult]{Err: err})
 				return
 			}
 			continue
@@ -323,9 +320,7 @@ func (r reader) list(ctx context.Context, limit int, ch chan storage.Stream[stor
 
 	// Send results
 	for _, result := range results {
-		select {
-		case ch <- storage.Stream[storage.ListResult]{Result: result}:
-		case <-ctx.Done():
+		if !chans.Put(ctx, ch, storage.Stream[storage.ListResult]{Result: result}) {
 			return
 		}
 	}

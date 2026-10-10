@@ -1,10 +1,10 @@
 package sm
 
 import (
-	"errors"
 	"testing"
 
 	"github.com/element-of-surprise/coercion/workflow"
+	"github.com/element-of-surprise/coercion/workflow/errors"
 	"github.com/gostdlib/base/statemachine"
 )
 
@@ -20,6 +20,12 @@ func newBlockWithState(state *workflow.State) *workflow.Block {
 	return b
 }
 
+func failedDA() *workflow.DeferredActions {
+	d := &workflow.DeferredActions{}
+	d.State.Set(workflow.State{Status: workflow.Failed})
+	return d
+}
+
 func TestPlanChecks(t *testing.T) {
 	t.Parallel()
 
@@ -27,53 +33,197 @@ func TestPlanChecks(t *testing.T) {
 
 	tests := []struct {
 		name       string
-		checks     [3]*workflow.Checks
+		plan       func() *workflow.Plan
 		wantNext   statemachine.State[Data]
+		wantStatus workflow.Status
 		wantReason workflow.FailureReason
 		wantErr    bool
 	}{
 		{
-			name: "all checks pass",
-			checks: [3]*workflow.Checks{
-				newChecksWithState(&workflow.State{Status: workflow.Completed}),
-				newChecksWithState(&workflow.State{Status: workflow.Completed}),
-				newChecksWithState(&workflow.State{Status: workflow.Completed}),
+			name: "Success: all checks pass and the Plan moves on to its blocks",
+			plan: func() *workflow.Plan {
+				return &workflow.Plan{
+					PreChecks:  newChecksWithState(&workflow.State{Status: workflow.Completed}),
+					ContChecks: newChecksWithState(&workflow.State{Status: workflow.Completed}),
+					PostChecks: newChecksWithState(&workflow.State{Status: workflow.Completed}),
+				}
 			},
-			wantNext: finals.blocks,
+			wantNext:   finals.blocks,
+			wantStatus: workflow.Running,
 		},
 		{
-			name: "not all checks pass",
-			checks: [3]*workflow.Checks{
-				newChecksWithState(&workflow.State{Status: workflow.Failed}),
+			name: "Error: failed PreChecks fail the Plan with FRPreCheck",
+			plan: func() *workflow.Plan {
+				return &workflow.Plan{
+					PreChecks: newChecksWithState(&workflow.State{Status: workflow.Failed}),
+				}
 			},
-			wantErr:    true,
 			wantNext:   finals.end,
+			wantStatus: workflow.Failed,
 			wantReason: workflow.FRPreCheck,
+			wantErr:    true,
+		},
+		{
+			name: "Error: failed ContChecks fail the Plan with FRContCheck",
+			plan: func() *workflow.Plan {
+				return &workflow.Plan{
+					PreChecks:  newChecksWithState(&workflow.State{Status: workflow.Completed}),
+					ContChecks: newChecksWithState(&workflow.State{Status: workflow.Failed}),
+				}
+			},
+			wantNext:   finals.end,
+			wantStatus: workflow.Failed,
+			wantReason: workflow.FRContCheck,
+			wantErr:    true,
+		},
+		{
+			name: "Error: failed PostChecks fail the Plan with FRPostCheck",
+			plan: func() *workflow.Plan {
+				return &workflow.Plan{
+					PreChecks:  newChecksWithState(&workflow.State{Status: workflow.Completed}),
+					ContChecks: newChecksWithState(&workflow.State{Status: workflow.Completed}),
+					PostChecks: newChecksWithState(&workflow.State{Status: workflow.Failed}),
+				}
+			},
+			wantNext:   finals.end,
+			wantStatus: workflow.Failed,
+			wantReason: workflow.FRPostCheck,
+			wantErr:    true,
+		},
+		{
+			name: "Error: failed DeferredChecks fail the Plan with FRDeferredCheck",
+			plan: func() *workflow.Plan {
+				return &workflow.Plan{
+					PreChecks:      newChecksWithState(&workflow.State{Status: workflow.Completed}),
+					ContChecks:     newChecksWithState(&workflow.State{Status: workflow.Completed}),
+					PostChecks:     newChecksWithState(&workflow.State{Status: workflow.Completed}),
+					DeferredChecks: newChecksWithState(&workflow.State{Status: workflow.Failed}),
+				}
+			},
+			wantNext:   finals.end,
+			wantStatus: workflow.Failed,
+			wantReason: workflow.FRDeferredCheck,
+			wantErr:    true,
+		},
+		{
+			name: "Error: failed PreChecks and failed DeferredActions fail the Plan with FRDeferredAction",
+			plan: func() *workflow.Plan {
+				return &workflow.Plan{
+					PreChecks:       newChecksWithState(&workflow.State{Status: workflow.Failed}),
+					DeferredActions: failedDA(),
+				}
+			},
+			wantNext:   finals.end,
+			wantStatus: workflow.Failed,
+			wantReason: workflow.FRDeferredAction,
+			wantErr:    true,
+		},
+		{
+			name: "Error: failed ContChecks and failed DeferredActions fail the Plan with FRDeferredAction",
+			plan: func() *workflow.Plan {
+				return &workflow.Plan{
+					PreChecks:       newChecksWithState(&workflow.State{Status: workflow.Completed}),
+					ContChecks:      newChecksWithState(&workflow.State{Status: workflow.Failed}),
+					DeferredActions: failedDA(),
+				}
+			},
+			wantNext:   finals.end,
+			wantStatus: workflow.Failed,
+			wantReason: workflow.FRDeferredAction,
+			wantErr:    true,
+		},
+		{
+			name: "Error: failed PostChecks and failed DeferredActions fail the Plan with FRDeferredAction",
+			plan: func() *workflow.Plan {
+				return &workflow.Plan{
+					PreChecks:       newChecksWithState(&workflow.State{Status: workflow.Completed}),
+					PostChecks:      newChecksWithState(&workflow.State{Status: workflow.Failed}),
+					DeferredActions: failedDA(),
+				}
+			},
+			wantNext:   finals.end,
+			wantStatus: workflow.Failed,
+			wantReason: workflow.FRDeferredAction,
+			wantErr:    true,
+		},
+		{
+			name: "Error: failed DeferredChecks and failed DeferredActions fail the Plan with FRDeferredAction",
+			plan: func() *workflow.Plan {
+				return &workflow.Plan{
+					DeferredChecks:  newChecksWithState(&workflow.State{Status: workflow.Failed}),
+					DeferredActions: failedDA(),
+				}
+			},
+			wantNext:   finals.end,
+			wantStatus: workflow.Failed,
+			wantReason: workflow.FRDeferredAction,
+			wantErr:    true,
+		},
+		{
+			name: "Error: passing checks and failed DeferredActions fail the Plan with FRDeferredAction",
+			plan: func() *workflow.Plan {
+				return &workflow.Plan{
+					PreChecks:       newChecksWithState(&workflow.State{Status: workflow.Completed}),
+					DeferredActions: failedDA(),
+				}
+			},
+			wantNext:   finals.end,
+			wantStatus: workflow.Failed,
+			wantReason: workflow.FRDeferredAction,
+			wantErr:    true,
+		},
+		{
+			name: "Error: all four checks passing and failed DeferredActions fail the Plan with FRDeferredAction",
+			plan: func() *workflow.Plan {
+				return &workflow.Plan{
+					PreChecks:       newChecksWithState(&workflow.State{Status: workflow.Completed}),
+					ContChecks:      newChecksWithState(&workflow.State{Status: workflow.Completed}),
+					PostChecks:      newChecksWithState(&workflow.State{Status: workflow.Completed}),
+					DeferredChecks:  newChecksWithState(&workflow.State{Status: workflow.Completed}),
+					DeferredActions: failedDA(),
+				}
+			},
+			wantNext:   finals.end,
+			wantStatus: workflow.Failed,
+			wantReason: workflow.FRDeferredAction,
+			wantErr:    true,
 		},
 	}
 
 	for _, test := range tests {
-		plan := &workflow.Plan{
-			PreChecks:  test.checks[0],
-			ContChecks: test.checks[1],
-			PostChecks: test.checks[2],
-		}
+		plan := test.plan()
 		plan.State.Set(workflow.State{Status: workflow.Running})
 
-		req := finals.planChecks(statemachine.Request[Data]{Data: Data{Plan: plan}})
+		req := finals.planChecks(statemachine.Request[Data]{Ctx: t.Context(), Data: Data{Plan: plan}})
 		switch {
 		case req.Err == nil && test.wantErr:
 			t.Errorf("TestPlanChecks(%s): got err == nil, want err != nil", test.name)
 		case req.Err != nil && !test.wantErr:
-			t.Errorf("TestPlanChecks(%s): got err == %v, want err == nil", test.name, req.Err)
+			t.Errorf("TestPlanChecks(%s): got err == %s, want err == nil", test.name, req.Err)
 		}
 
 		if methodName(req.Next) != methodName(test.wantNext) {
 			t.Errorf("TestPlanChecks(%s): got next == %v, want next == %v", test.name, methodName(req.Next), methodName(test.wantNext))
 		}
-
+		if plan.State.Get().Status != test.wantStatus {
+			t.Errorf("TestPlanChecks(%s): got status == %v, want status == %v", test.name, plan.State.Get().Status, test.wantStatus)
+		}
 		if plan.Reason != test.wantReason {
 			t.Errorf("TestPlanChecks(%s): got reason == %v, want reason == %v", test.name, plan.Reason, test.wantReason)
+		}
+
+		// Regression: end set the status to Completed unconditionally, overwriting the Failed status planChecks set. end
+		// records a Plan still Running as Completed and must leave a Failed one Failed.
+		finals.end(req)
+		wantEnd := test.wantStatus
+		if wantEnd == workflow.Running {
+			wantEnd = workflow.Completed
+		}
+		if got := plan.State.Get().Status; got != wantEnd {
+			t.Errorf("TestPlanChecks(%s): after end, got status == %v, want status == %v", test.name, got, wantEnd)
+		}
+		if plan.Reason != test.wantReason {
+			t.Errorf("TestPlanChecks(%s): after end, got reason == %v, want reason == %v", test.name, plan.Reason, test.wantReason)
 		}
 	}
 }
@@ -84,27 +234,27 @@ func TestBlocks(t *testing.T) {
 	finals := finalStates{}
 
 	tests := []struct {
-		name        string
-		block       *workflow.Block
-		wantNext    statemachine.State[Data]
-		wantErr     bool
-		internalErr bool
+		name     string
+		block    *workflow.Block
+		wantNext statemachine.State[Data]
+		wantErr  bool
+		wantBug  bool
 	}{
 		{
-			name:     "block is completed",
+			name:     "Success: a completed block moves the Plan to end",
 			block:    newBlockWithState(&workflow.State{Status: workflow.Completed}),
 			wantNext: finals.end,
 		},
 		{
-			name:    "block is failed",
+			name:    "Error: a failed block fails the Plan",
 			block:   newBlockWithState(&workflow.State{Status: workflow.Failed}),
 			wantErr: true,
 		},
 		{
-			name:        "block is in an invalid state",
-			block:       newBlockWithState(&workflow.State{Status: workflow.Running}),
-			wantErr:     true,
-			internalErr: true,
+			name:    "Error: a block still Running is a bug",
+			block:   newBlockWithState(&workflow.State{Status: workflow.Running}),
+			wantErr: true,
+			wantBug: true,
 		},
 	}
 
@@ -114,15 +264,16 @@ func TestBlocks(t *testing.T) {
 		}
 		plan.State.Set(workflow.State{Status: workflow.Running})
 
-		req := finals.blocks(statemachine.Request[Data]{Data: Data{Plan: plan}})
+		req := finals.blocks(statemachine.Request[Data]{Ctx: t.Context(), Data: Data{Plan: plan}})
 		switch {
 		case req.Err == nil && test.wantErr:
 			t.Errorf("TestBlocks(%s): got err == nil, want err != nil", test.name)
 		case req.Err != nil && !test.wantErr:
-			t.Errorf("TestBlocks(%s): got err != %v, want err == nil", test.name, req.Err)
+			t.Errorf("TestBlocks(%s): got err == %s, want err == nil", test.name, req.Err)
 		case req.Err != nil:
-			if errors.Is(req.Err, ErrInternalFailure) != test.internalErr {
-				t.Errorf("TestBlocks(%s): got err == %v, want err == %v", test.name, req.Err, ErrInternalFailure)
+			// End logs the final state error only when it is a bug (errors.IsBug).
+			if errors.IsBug(req.Err) != test.wantBug {
+				t.Errorf("TestBlocks(%s): got errors.IsBug(err) == %v, want %v", test.name, errors.IsBug(req.Err), test.wantBug)
 			}
 		}
 		if test.wantNext != nil {
@@ -133,212 +284,43 @@ func TestBlocks(t *testing.T) {
 	}
 }
 
-func TestFinalsEnd(t *testing.T) {
-	t.Parallel()
-
-	plan := &workflow.Plan{}
-	plan.State.Set(workflow.State{Status: workflow.Running})
-	req := statemachine.Request[Data]{Data: Data{Plan: plan}}
-	f := finalStates{}
-	req = f.end(req)
-	if req.Data.Plan.State.Get().Status != workflow.Completed {
-		t.Errorf("TestEnd: expected plan to be completed, got %s", req.Data.Plan.State.Get().Status)
-	}
-}
-
-// TestPlanChecksFailurePreservesStatus tests that when planChecks fails,
-// the plan ends with Failed status after going through end().
-// This tests the fix for a bug where end() unconditionally set the status
-// to Completed, overwriting the Failed status set by planChecks.
-func TestPlanChecksFailurePreservesStatus(t *testing.T) {
+func TestExamineChecks(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
 		name       string
 		checks     [4]*workflow.Checks
-		wantStatus workflow.Status
 		wantReason workflow.FailureReason
+		wantUnrun  workflow.FailureReason
+		wantErr    bool
+		wantBug    bool
 	}{
 		{
-			name: "Success: Failed PreChecks results in Failed plan after end()",
+			// Regression: NotStarted checks were a bug here, but a failed block skips the Plan's PostChecks. Whether
+			// they are a bug is decided by finalStates.blocks.
+			name: "Success: PostChecks that never ran are reported as unrun, not a failure",
 			checks: [4]*workflow.Checks{
-				newChecksWithState(&workflow.State{Status: workflow.Failed}),
-				nil,
-				nil,
-				nil,
+				newChecksWithState(&workflow.State{Status: workflow.Completed}),
+				newChecksWithState(&workflow.State{Status: workflow.Completed}),
+				newChecksWithState(&workflow.State{Status: workflow.NotStarted}),
+				newChecksWithState(&workflow.State{Status: workflow.Completed}),
 			},
-			wantStatus: workflow.Failed,
-			wantReason: workflow.FRPreCheck,
+			wantUnrun: workflow.FRPostCheck,
 		},
 		{
-			name: "Success: Failed ContChecks results in Failed plan after end()",
-			checks: [4]*workflow.Checks{
-				newChecksWithState(&workflow.State{Status: workflow.Completed}),
-				newChecksWithState(&workflow.State{Status: workflow.Failed}),
-				nil,
-				nil,
-			},
-			wantStatus: workflow.Failed,
-			wantReason: workflow.FRContCheck,
-		},
-		{
-			name: "Success: Failed PostChecks results in Failed plan after end()",
+			name: "Error: a failed DeferredCheck after PostChecks that never ran returns FRDeferredCheck",
 			checks: [4]*workflow.Checks{
 				newChecksWithState(&workflow.State{Status: workflow.Completed}),
 				newChecksWithState(&workflow.State{Status: workflow.Completed}),
-				newChecksWithState(&workflow.State{Status: workflow.Failed}),
-				nil,
-			},
-			wantStatus: workflow.Failed,
-			wantReason: workflow.FRPostCheck,
-		},
-		{
-			name: "Success: Failed DeferredChecks results in Failed plan after end()",
-			checks: [4]*workflow.Checks{
-				newChecksWithState(&workflow.State{Status: workflow.Completed}),
-				newChecksWithState(&workflow.State{Status: workflow.Completed}),
-				newChecksWithState(&workflow.State{Status: workflow.Completed}),
+				newChecksWithState(&workflow.State{Status: workflow.NotStarted}),
 				newChecksWithState(&workflow.State{Status: workflow.Failed}),
 			},
-			wantStatus: workflow.Failed,
 			wantReason: workflow.FRDeferredCheck,
-		},
-	}
-
-	for _, test := range tests {
-		plan := &workflow.Plan{
-			PreChecks:      test.checks[0],
-			ContChecks:     test.checks[1],
-			PostChecks:     test.checks[2],
-			DeferredChecks: test.checks[3],
-		}
-		plan.State.Set(workflow.State{Status: workflow.Running})
-
-		finals := finalStates{}
-
-		// First run planChecks which should set Failed
-		req := finals.planChecks(statemachine.Request[Data]{Data: Data{Plan: plan}})
-
-		// Verify planChecks set the failure
-		if plan.State.Get().Status != workflow.Failed {
-			t.Errorf("TestPlanChecksFailurePreservesStatus(%s): after planChecks, got status = %v, want %v",
-				test.name, plan.State.Get().Status, workflow.Failed)
-		}
-
-		// Now run end() which should preserve the Failed status
-		req = finals.end(req)
-
-		// Verify end() did NOT overwrite the Failed status
-		if plan.State.Get().Status != test.wantStatus {
-			t.Errorf("TestPlanChecksFailurePreservesStatus(%s): after end(), got status = %v, want %v",
-				test.name, plan.State.Get().Status, test.wantStatus)
-		}
-
-		if plan.Reason != test.wantReason {
-			t.Errorf("TestPlanChecksFailurePreservesStatus(%s): got reason = %v, want %v",
-				test.name, plan.Reason, test.wantReason)
-		}
-	}
-}
-
-func TestPlanChecksDeferredActionsFailurePrecedence(t *testing.T) {
-	t.Parallel()
-
-	failedDA := func() *workflow.DeferredActions {
-		d := &workflow.DeferredActions{}
-		d.State.Set(workflow.State{Status: workflow.Failed})
-		return d
-	}
-
-	tests := []struct {
-		name       string
-		plan       *workflow.Plan
-		wantReason workflow.FailureReason
-	}{
-		{
-			name: "Success: PreChecks failed and DA failed - DA wins",
-			plan: &workflow.Plan{
-				PreChecks:       newChecksWithState(&workflow.State{Status: workflow.Failed}),
-				DeferredActions: failedDA(),
-			},
-			wantReason: workflow.FRDeferredAction,
+			wantUnrun:  workflow.FRPostCheck,
+			wantErr:    true,
 		},
 		{
-			name: "Success: ContChecks failed and DA failed - DA wins",
-			plan: &workflow.Plan{
-				PreChecks:       newChecksWithState(&workflow.State{Status: workflow.Completed}),
-				ContChecks:      newChecksWithState(&workflow.State{Status: workflow.Failed}),
-				DeferredActions: failedDA(),
-			},
-			wantReason: workflow.FRDeferredAction,
-		},
-		{
-			name: "Success: PostChecks failed and DA failed - DA wins",
-			plan: &workflow.Plan{
-				PreChecks:       newChecksWithState(&workflow.State{Status: workflow.Completed}),
-				PostChecks:      newChecksWithState(&workflow.State{Status: workflow.Failed}),
-				DeferredActions: failedDA(),
-			},
-			wantReason: workflow.FRDeferredAction,
-		},
-		{
-			name: "Success: DeferredChecks failed and DA failed - DA wins",
-			plan: &workflow.Plan{
-				DeferredChecks:  newChecksWithState(&workflow.State{Status: workflow.Failed}),
-				DeferredActions: failedDA(),
-			},
-			wantReason: workflow.FRDeferredAction,
-		},
-		{
-			name: "Success: checks pass and DA failed still surfaces FRDeferredAction",
-			plan: &workflow.Plan{
-				PreChecks:       newChecksWithState(&workflow.State{Status: workflow.Completed}),
-				DeferredActions: failedDA(),
-			},
-			wantReason: workflow.FRDeferredAction,
-		},
-		{
-			name: "Success: only PreChecks failed and no DA - FRPreCheck still wins",
-			plan: &workflow.Plan{
-				PreChecks: newChecksWithState(&workflow.State{Status: workflow.Failed}),
-			},
-			wantReason: workflow.FRPreCheck,
-		},
-	}
-
-	finals := finalStates{}
-	for _, test := range tests {
-		test.plan.State.Set(workflow.State{Status: workflow.Running})
-		req := finals.planChecks(statemachine.Request[Data]{Data: Data{Plan: test.plan}})
-
-		if req.Err == nil {
-			t.Errorf("TestPlanChecksDeferredActionsFailurePrecedence(%s): got req.Err == nil, want non-nil", test.name)
-			continue
-		}
-		if methodName(req.Next) != methodName(finals.end) {
-			t.Errorf("TestPlanChecksDeferredActionsFailurePrecedence(%s): got next = %v, want finalStates.end", test.name, methodName(req.Next))
-		}
-		if test.plan.State.Get().Status != workflow.Failed {
-			t.Errorf("TestPlanChecksDeferredActionsFailurePrecedence(%s): got status = %v, want %v", test.name, test.plan.State.Get().Status, workflow.Failed)
-		}
-		if test.plan.Reason != test.wantReason {
-			t.Errorf("TestPlanChecksDeferredActionsFailurePrecedence(%s): got reason = %v, want %v", test.name, test.plan.Reason, test.wantReason)
-		}
-	}
-}
-
-func TestExamineChecks(t *testing.T) {
-	t.Parallel()
-
-	tests := []struct {
-		name        string
-		checks      [4]*workflow.Checks
-		wantReason  workflow.FailureReason
-		wantErr     bool
-		internalErr bool
-	}{
-		{
-			name: "all checks pass",
+			name: "Success: all checks pass",
 			checks: [4]*workflow.Checks{
 				newChecksWithState(&workflow.State{Status: workflow.Completed}),
 				newChecksWithState(&workflow.State{Status: workflow.Completed}),
@@ -347,7 +329,7 @@ func TestExamineChecks(t *testing.T) {
 			},
 		},
 		{
-			name: "all checks pass, but we have a nil check",
+			name: "Success: all checks pass with a nil check",
 			checks: [4]*workflow.Checks{
 				newChecksWithState(&workflow.State{Status: workflow.Completed}),
 				nil,
@@ -356,7 +338,7 @@ func TestExamineChecks(t *testing.T) {
 			},
 		},
 		{
-			name: "pre-check fails",
+			name: "Error: a failed PreCheck returns FRPreCheck",
 			checks: [4]*workflow.Checks{
 				newChecksWithState(&workflow.State{Status: workflow.Failed}),
 				newChecksWithState(&workflow.State{Status: workflow.Completed}),
@@ -367,7 +349,7 @@ func TestExamineChecks(t *testing.T) {
 			wantErr:    true,
 		},
 		{
-			name: "cont-check fails",
+			name: "Error: a failed ContCheck returns FRContCheck",
 			checks: [4]*workflow.Checks{
 				newChecksWithState(&workflow.State{Status: workflow.Completed}),
 				newChecksWithState(&workflow.State{Status: workflow.Failed}),
@@ -378,7 +360,7 @@ func TestExamineChecks(t *testing.T) {
 			wantErr:    true,
 		},
 		{
-			name: "post-check fails",
+			name: "Error: a failed PostCheck returns FRPostCheck",
 			checks: [4]*workflow.Checks{
 				newChecksWithState(&workflow.State{Status: workflow.Completed}),
 				newChecksWithState(&workflow.State{Status: workflow.Completed}),
@@ -389,34 +371,118 @@ func TestExamineChecks(t *testing.T) {
 			wantErr:    true,
 		},
 		{
-			name: "check in an unexpected state",
+			name: "Error: a check still Running is a bug",
 			checks: [4]*workflow.Checks{
 				newChecksWithState(&workflow.State{Status: workflow.Completed}),
 				newChecksWithState(&workflow.State{Status: workflow.Completed}),
 				newChecksWithState(&workflow.State{Status: workflow.Running}),
 				newChecksWithState(&workflow.State{Status: workflow.Completed}),
 			},
-			wantReason:  workflow.FRPostCheck,
-			wantErr:     true,
-			internalErr: true,
+			wantReason: workflow.FRPostCheck,
+			wantErr:    true,
+			wantBug:    true,
 		},
 	}
 
 	for _, test := range tests {
 		f := finalStates{}
-		r, err := f.examineChecks(test.checks)
+		r, unrun, err := f.examineChecks(t.Context(), test.checks)
 		switch {
 		case err == nil && test.wantErr:
-			t.Errorf("TestExamineChecks(%s): got nil error, want error", test.name)
+			t.Errorf("TestExamineChecks(%s): got err == nil, want err != nil", test.name)
 		case err != nil && !test.wantErr:
-			t.Errorf("TestExamineChecks(%s): got error %v, want nil", test.name, err)
+			t.Errorf("TestExamineChecks(%s): got err == %s, want err == nil", test.name, err)
 		case err != nil:
-			if errors.Is(err, ErrInternalFailure) != test.internalErr {
-				t.Errorf("TestExamineChecks(%s): got error %v, want internal error", test.name, err)
+			// End logs the final state error only when it is a bug (errors.IsBug).
+			if errors.IsBug(err) != test.wantBug {
+				t.Errorf("TestExamineChecks(%s): got errors.IsBug(err) == %v, want %v", test.name, errors.IsBug(err), test.wantBug)
 			}
 		}
 		if r != test.wantReason {
 			t.Errorf("TestExamineChecks(%s): got reason %v, want %v", test.name, r, test.wantReason)
+		}
+		if unrun != test.wantUnrun {
+			t.Errorf("TestExamineChecks(%s): got unrun %v, want %v", test.name, unrun, test.wantUnrun)
+		}
+	}
+}
+
+// TestFinalStates runs the whole finalStates machine. It includes a regression test: a failed block sends the Plan
+// from BlockEnd to PlanDeferredActions, skipping PlanPostChecks, so the Plan's PostChecks stay NotStarted.
+// examineChecks called that a bug, so the Plan failed with FRPostCheck instead of FRBlock and End logged a bug.
+func TestFinalStates(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name       string
+		post       workflow.Status
+		block      workflow.Status
+		wantStatus workflow.Status
+		wantReason workflow.FailureReason
+		wantErr    bool
+		wantBug    bool
+	}{
+		{
+			name:       "Success: completed PostChecks and a completed block complete the Plan",
+			post:       workflow.Completed,
+			block:      workflow.Completed,
+			wantStatus: workflow.Completed,
+		},
+		{
+			name:       "Error: a failed block fails the Plan with FRBlock",
+			post:       workflow.Completed,
+			block:      workflow.Failed,
+			wantStatus: workflow.Failed,
+			wantReason: workflow.FRBlock,
+			wantErr:    true,
+		},
+		{
+			// The NotStarted PostChecks are not a second input: they follow from the failed block, which sends the Plan
+			// past PlanPostChecks. This row checks that pair is not taken for a bug.
+			name:       "Error: PostChecks skipped because a block failed fail the Plan with FRBlock, not a bug",
+			post:       workflow.NotStarted,
+			block:      workflow.Failed,
+			wantStatus: workflow.Failed,
+			wantReason: workflow.FRBlock,
+			wantErr:    true,
+		},
+		{
+			name:       "Error: PostChecks that never ran though every block completed are a bug",
+			post:       workflow.NotStarted,
+			block:      workflow.Completed,
+			wantStatus: workflow.Failed,
+			wantReason: workflow.FRPostCheck,
+			wantErr:    true,
+			wantBug:    true,
+		},
+	}
+
+	for _, test := range tests {
+		plan := &workflow.Plan{
+			PreChecks:  newChecksWithState(&workflow.State{Status: workflow.Completed}),
+			PostChecks: newChecksWithState(&workflow.State{Status: test.post}),
+			Blocks:     []*workflow.Block{newBlockWithState(&workflow.State{Status: test.block})},
+		}
+		plan.State.Set(workflow.State{Status: workflow.Running})
+
+		f := finalStates{}
+		_, err := statemachine.Run("finalStates", statemachine.Request[Data]{Ctx: t.Context(), Data: Data{Plan: plan}, Next: f.start})
+		switch {
+		case err == nil && test.wantErr:
+			t.Errorf("TestFinalStates(%s): got err == nil, want err != nil", test.name)
+		case err != nil && !test.wantErr:
+			t.Errorf("TestFinalStates(%s): got err == %s, want err == nil", test.name, err)
+		case err != nil:
+			// End logs the final state error only when it is a bug (errors.IsBug).
+			if errors.IsBug(err) != test.wantBug {
+				t.Errorf("TestFinalStates(%s): got errors.IsBug(err) == %v, want %v", test.name, errors.IsBug(err), test.wantBug)
+			}
+		}
+		if got := plan.State.Get().Status; got != test.wantStatus {
+			t.Errorf("TestFinalStates(%s): got status %v, want %v", test.name, got, test.wantStatus)
+		}
+		if plan.Reason != test.wantReason {
+			t.Errorf("TestFinalStates(%s): got reason %v, want %v", test.name, plan.Reason, test.wantReason)
 		}
 	}
 }

@@ -26,7 +26,8 @@ SELECT
 	state_start,
 	state_end,
 	submit_time,
-	reason
+	reason,
+	runtime_update
 FROM plans
 WHERE id = $id`
 

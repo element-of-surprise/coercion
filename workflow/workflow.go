@@ -9,6 +9,7 @@ import (
 	"github.com/element-of-surprise/coercion/workflow/errors"
 	"github.com/gostdlib/base/concurrency/sync"
 	"github.com/gostdlib/base/values/generics/sets"
+	"github.com/gostdlib/base/values/sizes"
 
 	"github.com/gostdlib/base/context"
 
@@ -228,6 +229,35 @@ func (p *Plan) Defaults() {
 	)
 }
 
+// validText checks that s is at most maxLen bytes of printable ASCII with no leading or trailing whitespace. If multiline
+// is set, newlines and tabs are allowed too. Storage can then keep it anywhere text is restricted, such as in HTTP
+// headers, which do not carry other characters and trim surrounding whitespace.
+func validText(s string, maxLen int, multiline bool) error {
+	if len(s) > maxLen {
+		return fmt.Errorf("is %d bytes, more than the %d allowed", len(s), maxLen)
+	}
+	if strings.TrimSpace(s) != s {
+		return errors.New("must not start or end with whitespace")
+	}
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		switch {
+		case c >= 0x20 && c <= 0x7e:
+		case multiline && (c == '\n' || c == '\t'):
+		default:
+			return fmt.Errorf("has character %q at byte %d; only printable ASCII is allowed", c, i)
+		}
+	}
+	return nil
+}
+
+// maxPlanNameLen and maxPlanDescrLen bound a Plan's Name and Descr, in bytes. Storage may keep them where space is
+// tight, such as blob metadata, which Azure caps at 8 KiB in total for a blob.
+const (
+	maxPlanNameLen  = 256
+	maxPlanDescrLen = 2 * sizes.KiB
+)
+
 func (p *Plan) validate(ctx context.Context) ([]validator, error) {
 	if p == nil {
 		return nil, errors.New("plan is nil")
@@ -242,8 +272,14 @@ func (p *Plan) validate(ctx context.Context) ([]validator, error) {
 	if strings.TrimSpace(p.Name) == "" {
 		return nil, fmt.Errorf("name is required")
 	}
+	if err := validText(p.Name, maxPlanNameLen, false); err != nil {
+		return nil, fmt.Errorf("name: %w", err)
+	}
 	if strings.TrimSpace(p.Descr) == "" {
 		return nil, errors.New("description is required")
+	}
+	if err := validText(p.Descr, maxPlanDescrLen, true); err != nil {
+		return nil, fmt.Errorf("description: %w", err)
 	}
 	if len(p.Blocks) == 0 {
 		return nil, errors.New("at least one block is required")

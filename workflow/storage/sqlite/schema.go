@@ -28,8 +28,24 @@ CREATE Table If Not Exists plans (
 	state_start INTEGER NOT NULL,
 	state_end INTEGER NOT NULL,
 	submit_time INTEGER NOT NULL,
-	reason INTEGER
+	reason INTEGER,
+	runtime_update INTEGER NOT NULL DEFAULT 0
 );`
+
+// column is a column added to a table after the table was first released. CREATE TABLE IF NOT EXISTS leaves a table
+// that already exists as it is, so createTables adds each one that a database is missing.
+type column struct {
+	table string
+	name  string
+	// def is the column definition ALTER TABLE ADD COLUMN takes. It needs a DEFAULT for rows that already exist.
+	def string
+}
+
+// addedColumns are the columns added to tables after they were first released, in the order they were added.
+var addedColumns = []column{
+	// runtime_update holds Plan.RuntimeUpdate, the heartbeat startup recovery ages a running Plan out by.
+	{table: "plans", name: "runtime_update", def: "INTEGER NOT NULL DEFAULT 0"},
+}
 
 var blocksSchema = `
 CREATE Table If Not Exists blocks (

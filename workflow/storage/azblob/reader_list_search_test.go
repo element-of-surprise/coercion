@@ -15,6 +15,7 @@ import (
 	testPlugins "github.com/element-of-surprise/coercion/workflow/storage/sqlite/testing/plugins"
 	"github.com/google/uuid"
 	"github.com/gostdlib/base/concurrency/sync"
+	"github.com/gostdlib/base/values/chans"
 )
 
 // createPlanIDForDate creates a UUID v7 that appears to have been created at the given time.
@@ -280,7 +281,7 @@ func TestSearchWithRetentionPeriod(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			ctx := context.Background()
+			ctx := t.Context()
 
 			plansByContainer := test.plansSetup(t, now)
 
@@ -292,6 +293,7 @@ func TestSearchWithRetentionPeriod(t *testing.T) {
 				mu:            planlocks.New(ctx),
 				readFlight:    &sync.Flight[string, *workflow.Plan]{},
 				existsFlight:  &sync.Flight[string, bool]{},
+				pools:         newFetchPools(ctx),
 				prefix:        "test",
 				client:        fakeClient,
 				reg:           reg,
@@ -327,9 +329,11 @@ func TestSearchWithRetentionPeriod(t *testing.T) {
 	}
 }
 
-// TestListSearchCanceledContext verifies that when the worker pool declines to enqueue the
-// streaming work (because ctx is already canceled), Search and List still close the returned
-// channel and return an error, rather than handing back a channel that never closes.
+// TestListSearchCanceledContext verifies that when the worker pool declines to enqueue the streaming work (because ctx
+// is already canceled), Search and List still close the returned channel and return an error, rather than handing back
+// a channel that never closes. It is also a regression test: the producers ran on the pool ctx carried, so with a
+// Limited pool whose slots were all held, Search and List could not start, and a stream the caller abandoned held a
+// slot for good. They must run on the default pool.
 func TestListSearchCanceledContext(t *testing.T) {
 	t.Parallel()
 
@@ -344,6 +348,7 @@ func TestListSearchCanceledContext(t *testing.T) {
 			mu:            planlocks.New(ctx),
 			readFlight:    &sync.Flight[string, *workflow.Plan]{},
 			existsFlight:  &sync.Flight[string, bool]{},
+			pools:         newFetchPools(ctx),
 			prefix:        "test",
 			client:        blobops.NewFake(),
 			reg:           reg,
@@ -356,10 +361,12 @@ func TestListSearchCanceledContext(t *testing.T) {
 	}
 
 	tests := []struct {
-		name    string
-		cancel  bool
-		call    func(ctx context.Context, r reader) (chan storage.Stream[storage.ListResult], error)
-		wantErr bool
+		name   string
+		cancel bool
+		// poolFull runs with a ctx whose pool is a Limited(1) pool with its only slot held.
+		poolFull bool
+		call     func(ctx context.Context, r reader) (chan storage.Stream[storage.ListResult], error)
+		wantErr  bool
 	}{
 		{
 			name:   "Success: Search with live context returns an open channel and no error",
@@ -376,6 +383,20 @@ func TestListSearchCanceledContext(t *testing.T) {
 				return r.List(ctx, 0)
 			},
 			wantErr: false,
+		},
+		{
+			name:     "Success: Search with a context whose Limited pool is full returns an open channel and no error",
+			poolFull: true,
+			call: func(ctx context.Context, r reader) (chan storage.Stream[storage.ListResult], error) {
+				return r.Search(ctx, storage.Filters{ByStatus: []workflow.Status{workflow.Running}})
+			},
+		},
+		{
+			name:     "Success: List with a context whose Limited pool is full returns an open channel and no error",
+			poolFull: true,
+			call: func(ctx context.Context, r reader) (chan storage.Stream[storage.ListResult], error) {
+				return r.List(ctx, 0)
+			},
 		},
 		{
 			name:   "Error: Search with a canceled context closes the channel and errors",
@@ -397,10 +418,22 @@ func TestListSearchCanceledContext(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			ctx, cancel := context.WithCancel(context.Background())
+			t.Parallel()
+
+			// The bound fails a row whose Submit waits for a Limited slot that never frees, instead of hanging.
+			ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 			defer cancel()
 			if test.cancel {
 				cancel()
+			}
+			if test.poolFull {
+				limited := context.Pool(ctx).Limited(ctx, "TestListSearchCanceledContext", 1)
+				hold := make(chan struct{})
+				defer close(hold)
+				if !limited.Submit(ctx, func() { <-hold }) {
+					t.Fatalf("TestListSearchCanceledContext(%s): could not take the Limited pool's only slot", test.name)
+				}
+				ctx = context.SetPool(ctx, limited)
 			}
 
 			r := newReader(ctx)
@@ -421,20 +454,17 @@ func TestListSearchCanceledContext(t *testing.T) {
 				return
 			}
 
-			ctx, cancel = context.WithTimeout(t.Context(), 10*time.Second)
+			wctx, wcancel := context.WithTimeout(t.Context(), 10*time.Second)
+			defer wcancel()
 			for {
-				var ok bool
-				select {
-				case <-ctx.Done():
-					t.Fatalf("test.call did not close the returned channel in a 10 second time span")
-				case _, ok = <-ch:
-					if ok {
-						continue
-					}
+				_, r := chans.Get(wctx, ch)
+				if r.Closed() {
+					break
 				}
-				break
+				if !r.OK() {
+					t.Fatalf("TestListSearchCanceledContext(%s): test.call did not close the returned channel in 10 seconds", test.name)
+				}
 			}
-			cancel()
 		})
 	}
 }
@@ -479,7 +509,7 @@ func TestSearchRecoveryScenario(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			ctx := context.Background()
+			ctx := t.Context()
 
 			plansByContainer := make(map[string][]storage.ListResult)
 			for _, daysAgo := range test.planAges {
@@ -501,6 +531,7 @@ func TestSearchRecoveryScenario(t *testing.T) {
 				mu:            planlocks.New(ctx),
 				readFlight:    &sync.Flight[string, *workflow.Plan]{},
 				existsFlight:  &sync.Flight[string, bool]{},
+				pools:         newFetchPools(ctx),
 				prefix:        "test",
 				client:        fakeClient,
 				reg:           reg,
@@ -615,7 +646,7 @@ func TestListWithRetentionPeriod(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			ctx := context.Background()
+			ctx := t.Context()
 
 			plansByContainer := test.plansSetup(t)
 
@@ -627,6 +658,7 @@ func TestListWithRetentionPeriod(t *testing.T) {
 				mu:            planlocks.New(ctx),
 				readFlight:    &sync.Flight[string, *workflow.Plan]{},
 				existsFlight:  &sync.Flight[string, bool]{},
+				pools:         newFetchPools(ctx),
 				prefix:        "test",
 				client:        fakeClient,
 				reg:           reg,

@@ -93,6 +93,8 @@ func TestPlanToEntry(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+
 			got, err := planToPlanEntry(test.plan)
 			switch {
 			case err == nil && test.wantErr:
@@ -117,10 +119,6 @@ func TestPlanToEntry(t *testing.T) {
 			}
 		})
 	}
-}
-
-func TestEntryToPlan(t *testing.T) {
-	t.Skip("entryToPlan function was removed - no longer needed with new architecture")
 }
 
 func TestBlockToEntry(t *testing.T) {
@@ -171,6 +169,8 @@ func TestBlockToEntry(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+
 			got, err := blockToEntry(test.block, test.pos)
 			switch {
 			case err == nil && test.wantErr:
@@ -222,6 +222,8 @@ func TestEntryToBlock(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+
 			got, err := entryToBlock(test.entry)
 			if err != nil {
 				t.Errorf("TestEntryToBlock(%s): got err == %s, want err == nil", test.name, err)
@@ -282,6 +284,8 @@ func TestChecksToEntry(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+
 			got, err := checksToEntry(test.checks)
 			switch {
 			case err == nil && test.wantErr:
@@ -342,6 +346,8 @@ func TestSequenceToEntry(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+
 			got, err := sequenceToEntry(test.sequence, test.pos)
 			switch {
 			case err == nil && test.wantErr:
@@ -403,6 +409,8 @@ func TestActionToEntry(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+
 			got, err := actionToEntry(test.action, test.pos)
 			switch {
 			case err == nil && test.wantErr:
@@ -426,6 +434,8 @@ func TestActionToEntry(t *testing.T) {
 }
 
 func TestDecodeAttempts(t *testing.T) {
+	t.Parallel()
+
 	reg := registry.New()
 	reg.Register(&testPlugins.HelloPlugin{})
 
@@ -707,6 +717,8 @@ func TestPlanMetadataConversion(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+
 			// Test planToMetadata
 			var metadata map[string]*string
 			if test.testPlanToMeta {

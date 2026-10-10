@@ -9,11 +9,13 @@ import (
 	"github.com/element-of-surprise/coercion/plugins/registry"
 	"github.com/element-of-surprise/coercion/workflow"
 	"github.com/element-of-surprise/coercion/workflow/context"
+	"github.com/element-of-surprise/coercion/workflow/errors"
 	"github.com/element-of-surprise/coercion/workflow/storage"
 
 	"github.com/gostdlib/base/retry/exponential"
 	"github.com/gostdlib/base/statemachine"
 	"github.com/gostdlib/base/telemetry/log"
+	"github.com/gostdlib/base/values/generics/result"
 )
 
 // Data is the data passed to the state machine.
@@ -57,7 +59,7 @@ func (r Runner) Start(req statemachine.Request[Data]) statemachine.Request[Data]
 		default:
 			// This is a bug. We should never be in this state. The most likely would be Stopped.
 			// But this workflow should have never gotten here.
-			req.Err = fmt.Errorf("action is in an unsupported state: %v", action.State.Get().Status)
+			req.Err = errors.E(req.Ctx, errors.CatInternal, errors.TypeBug, fmt.Errorf("action is in an unsupported state: %v", action.State.Get().Status))
 			req.Next = nil
 			return req
 		}
@@ -77,13 +79,6 @@ func (r Runner) Start(req statemachine.Request[Data]) statemachine.Request[Data]
 	return req
 }
 
-// pluginNotFoundErr returns an error for when a plugin is not found.
-// This allows tests to check for this specific error without worrying
-// about the text changing.
-func pluginNotFoundErr(name string) error {
-	return fmt.Errorf("plugin %s not found", name)
-}
-
 // GetPlugin gets the plugin from the registry and sets it in the Data object.
 func (r Runner) GetPlugin(req statemachine.Request[Data]) statemachine.Request[Data] {
 	action := req.Data.Action
@@ -91,7 +86,7 @@ func (r Runner) GetPlugin(req statemachine.Request[Data]) statemachine.Request[D
 	p := req.Data.Registry.Plugin(action.Plugin)
 	// This is defense in depth. The plugin should be checked when the Plan is created.
 	if p == nil {
-		req.Data.err = pluginNotFoundErr(action.Plugin)
+		req.Data.err = errors.E(req.Ctx, errors.CatInternal, errors.TypeBug, fmt.Errorf("plugin %s not found", action.Plugin))
 		req.Next = r.End
 		return req
 	}
@@ -154,10 +149,11 @@ func unexpectedTypeMsg(plugin plugins.Plugin, got, want any) string {
 }
 
 // exec runs the action once using the plugin and writes the result to the store, unless the action
-// has exceeded the maximum number of retries. In that case, it returns a permanent error.
+// has exceeded the maximum number of retries. In that case, it returns a permanent error that wraps the last
+// attempt's error.
 func (r Runner) exec(ctx context.Context, action *workflow.Action, plugin plugins.Plugin, updater storage.ActionUpdater) error {
-	if len(action.Attempts.Get()) > action.Retries {
-		return exponential.ErrPermanent
+	if attempts := action.Attempts.Get(); len(attempts) > action.Retries {
+		return errExhausted(ctx, action, attempts)
 	}
 
 	defer func() {
@@ -178,13 +174,14 @@ func (r Runner) exec(ctx context.Context, action *workflow.Action, plugin plugin
 	cancel()
 	attempt.End = r.now()
 
-	if plugResp.timeout {
+	switch {
+	case plugResp.timeout:
 		attempt.Err = &plugins.Error{
 			Message:   pluginTimeoutMsg,
 			Permanent: false,
 		}
 		return attempt.Err
-	} else {
+	default:
 		attempt.Resp = plugResp.Resp
 		attempt.Err = plugResp.Err
 	}
@@ -206,13 +203,24 @@ func (r Runner) exec(ctx context.Context, action *workflow.Action, plugin plugin
 		return nil
 	}
 	if attempt.Err.Permanent {
-		return errPermanent(attempt.Err)
+		return errPermanent(ctx, attempt.Err)
 	}
 	return attempt.Err
 }
 
-func errPermanent(err *plugins.Error) error {
-	return fmt.Errorf("%w: %w", exponential.ErrPermanent, err)
+// errExhausted returns the permanent error for an action whose attempts exceed its retries. It wraps the last
+// attempt's *plugins.Error, when there is one, so callers can reach the real failure with errors.As.
+func errExhausted(ctx context.Context, action *workflow.Action, attempts []workflow.Attempt) error {
+	if len(attempts) == 0 || attempts[len(attempts)-1].Err == nil {
+		return errors.ErrPlugin(ctx, fmt.Errorf("action(%s) exhausted %d retries: %w", action.Name, action.Retries, errors.ErrPermanent))
+	}
+	last := attempts[len(attempts)-1].Err
+	return errors.ErrPlugin(ctx, fmt.Errorf("action(%s) exhausted %d retries: %w: %w", action.Name, action.Retries, errors.ErrPermanent, last))
+}
+
+// errPermanent returns err marked permanent, so the retry of the action stops.
+func errPermanent(ctx context.Context, err *plugins.Error) error {
+	return errors.ErrPlugin(ctx, fmt.Errorf("%w: %w", errors.ErrPermanent, err))
 }
 
 func (r Runner) now() time.Time {
@@ -228,28 +236,34 @@ type plugResp struct {
 	timeout bool
 }
 
-// run executes the plugin in a goroutine and returns the response or an error if the context is done.
+// run executes the plugin on the default pool and returns its response, or a response with timeout set if ctx is done
+// first. The default pool refuses work only when ctx is already done, so that is a timeout too.
+//
+// The plugin runs on the default pool, never on a Limited pool ctx may carry: a Limited pool can be shared with (and
+// have its tokens held by) the parent sequence, which would starve the plugin until every attempt times out, and a
+// plugin that ignores ctx would hold a Limited slot forever.
 func run(ctx context.Context, plugin plugins.Plugin, req any) plugResp {
-	ch := make(chan plugResp, 1) // TODO(jdoak): Could be reused
-	context.Pool(ctx).Submit(
+	rv := result.New[plugResp]()
+	ok := context.Pool(ctx).Default().Submit(
 		ctx,
 		func() {
-			defer close(ch)
-
-			plugResp := plugResp{}
-			plugResp.Resp, plugResp.Err = plugin.Execute(ctx, req)
-			ch <- plugResp
+			resp := plugResp{}
+			resp.Resp, resp.Err = plugin.Execute(ctx, req)
+			rv.Set(resp, nil)
 		},
 	)
-
-	select {
-	case <-ctx.Done():
+	if !ok {
 		return plugResp{timeout: true}
-	case resp := <-ch:
-		return resp
 	}
+
+	// The worker always Sets a nil error, so an error here can only be the context ending first.
+	resp, err := rv.Wait(ctx)
+	if err != nil {
+		return plugResp{timeout: true}
+	}
+	return resp
 }
 
-func isType(a, b interface{}) bool {
+func isType(a, b any) bool {
 	return reflect.TypeOf(a) == reflect.TypeOf(b)
 }

@@ -626,6 +626,19 @@ func (f *fakeStorage) limitItemPager(query string, pk azcosmos.PartitionKey, o *
 	})
 }
 
+// replaceTargetExists returns the error Cosmos DB returns for a replace patch whose path is not in the document: a
+// replace only changes a field that exists, unlike a set, which adds it. Only top-level paths are supported.
+func replaceTargetExists(doc []byte, path string) error {
+	var fields map[string]any
+	if err := json.Unmarshal(doc, &fields); err != nil {
+		panic(fmt.Sprintf("could not decode stored document: %s", err))
+	}
+	if _, ok := fields[strings.TrimPrefix(path, "/")]; !ok {
+		return &azcore.ResponseError{StatusCode: http.StatusBadRequest}
+	}
+	return nil
+}
+
 type getIDer interface {
 	GetID() uuid.UUID
 }
@@ -635,9 +648,14 @@ func (f *fakeStorage) PatchItem(ctx context.Context, key azcosmos.PartitionKey, 
 	for _, op := range ops {
 		switch op.Op {
 		case "replace", "set":
-			_, planID, err := f.readItem(ctx, itemID)
+			doc, planID, err := f.readItem(ctx, itemID)
 			if err != nil {
 				return azcosmos.ItemResponse{}, err
+			}
+			if op.Op == "replace" {
+				if err := replaceTargetExists(doc, op.Path); err != nil {
+					return azcosmos.ItemResponse{}, err
+				}
 			}
 
 			b, _, err := f.readItem(ctx, planID)
@@ -730,6 +748,9 @@ func (f *fakeStorage) patchObject(op pathOps, o stateObject) {
 				panic(err)
 			}
 			action.Attempts.Set(attempts)
+		case "/runtimeUpdate":
+			plan := o.(*workflow.Plan)
+			plan.RuntimeUpdate.Set(op.Value.(time.Time))
 		default:
 			panic(fmt.Sprintf("unsupported op Path(%s) on set op", op.Path))
 		}

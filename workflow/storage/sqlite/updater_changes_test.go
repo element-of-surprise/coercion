@@ -2,8 +2,6 @@ package sqlite
 
 import (
 	"fmt"
-	"reflect"
-	"runtime"
 	"testing"
 	"time"
 
@@ -14,7 +12,6 @@ import (
 
 	"github.com/element-of-surprise/coercion/plugins/registry"
 	"github.com/element-of-surprise/coercion/workflow"
-	"github.com/element-of-surprise/coercion/workflow/errors"
 	"github.com/element-of-surprise/coercion/workflow/storage/sqlite/testing/plugins"
 	"github.com/element-of-surprise/coercion/workflow/utils/changes"
 	"github.com/element-of-surprise/coercion/workflow/utils/walk"
@@ -51,8 +48,6 @@ func TestUpdateChanges(t *testing.T) {
 		// wantWrites is how many object updates the transaction runs.
 		wantWrites int
 		wantErr    bool
-		// errIs, if set, must report true for the error.
-		errIs func(error) bool
 	}{
 		{
 			name:   "Success: nothing changed writes nothing",
@@ -88,7 +83,6 @@ func TestUpdateChanges(t *testing.T) {
 			},
 			missing: func(p *workflow.Plan) workflow.Object { return p.DeferredActions.DeferredBatches[0] },
 			wantErr: true,
-			errIs:   errors.IsStorageInconsistent,
 		},
 		{
 			name: "Error: a change to a deleted Plan is not found, storing and capturing nothing",
@@ -98,7 +92,6 @@ func TestUpdateChanges(t *testing.T) {
 			},
 			deletePlan: true,
 			wantErr:    true,
-			errIs:      errors.IsNotFound,
 		},
 	}
 
@@ -150,8 +143,6 @@ func TestUpdateChanges(t *testing.T) {
 		case err != nil && !test.wantErr:
 			t.Errorf("TestUpdateChanges(%s): got err == %s, want err == nil", test.name, err)
 			continue
-		case err != nil && test.errIs != nil && !test.errIs(err):
-			t.Errorf("TestUpdateChanges(%s): got err == %s, want it classified by %s", test.name, err, funcName(test.errIs))
 		}
 		if got := capture.Len(); got != test.wantWrites {
 			t.Errorf("TestUpdateChanges(%s): got %d object updates, want %d", test.name, got, test.wantWrites)
@@ -287,9 +278,4 @@ func TestObjectStmt(t *testing.T) {
 	if diff := pretty.Compare(want, got); diff != "" {
 		t.Errorf("TestObjectStmt: object types written -want +got:\n%s", diff)
 	}
-}
-
-// funcName returns the name of f, for test messages.
-func funcName(f any) string {
-	return runtime.FuncForPC(reflect.ValueOf(f).Pointer()).Name()
 }

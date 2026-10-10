@@ -569,7 +569,7 @@ func entryToAction(ctx context.Context, reg *registry.Register, response []byte)
 	var err error
 	var resp actionsEntry
 	if err = json.Unmarshal(response, &resp); err != nil {
-		return nil, errors.E(ctx, errors.CatInternal, errors.TypeStorageGet, fmt.Errorf("failed to unmarshal action: %w", err))
+		return nil, errUndecodable(ctx, "failed to unmarshal action", err)
 	}
 
 	a := &workflow.Action{
@@ -598,11 +598,11 @@ func entryToAction(ctx context.Context, reg *registry.Register, response []byte)
 		if req != nil {
 			if reflect.TypeOf(req).Kind() != reflect.Pointer {
 				if err := json.Unmarshal(b, &req); err != nil {
-					return nil, fmt.Errorf("couldn't unmarshal request: %w", err)
+					return nil, errUndecodable(ctx, fmt.Sprintf("action(%s) request", a.ID), err)
 				}
 			} else {
 				if err := json.Unmarshal(b, req); err != nil {
-					return nil, fmt.Errorf("couldn't unmarshal request: %w", err)
+					return nil, errUndecodable(ctx, fmt.Sprintf("action(%s) request", a.ID), err)
 				}
 			}
 			a.Req = req
@@ -631,7 +631,7 @@ func decodeAttempts(ctx context.Context, rawAttempts []byte, plug plugins.Plugin
 
 	dec := jsontext.NewDecoder(bytes.NewReader(rawAttempts))
 	if dec.PeekKind() != jsontext.BeginArray.Kind() {
-		return nil, errors.E(ctx, errors.CatInternal, errors.TypeStorageGet, fmt.Errorf("invalid attempts format"))
+		return nil, errUndecodable(ctx, "invalid attempts format", fmt.Errorf("attempts are not a JSON array"))
 	}
 	dec.ReadToken()
 
@@ -643,7 +643,7 @@ func decodeAttempts(ctx context.Context, rawAttempts []byte, plug plugins.Plugin
 
 		var a = workflow.Attempt{Resp: plug.Response()}
 		if err := json.UnmarshalDecode(dec, &a); err != nil {
-			return nil, errors.E(ctx, errors.CatInternal, errors.TypeStorageGet, fmt.Errorf("failed to unmarshal attempt: %w", err))
+			return nil, errUndecodable(ctx, "failed to unmarshal attempt", err)
 		}
 		attempts = append(attempts, a)
 	}

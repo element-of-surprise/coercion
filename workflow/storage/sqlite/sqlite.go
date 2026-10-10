@@ -102,7 +102,7 @@ func New(ctx context.Context, root string, reg *registry.Register, options ...Op
 		var err error
 		pool, err = sqlitex.NewPool(dsn, sqlitex.PoolOptions{PoolSize: 1000})
 		if err != nil {
-			return nil, errors.E(ctx, nil, nil, fmt.Errorf("failed to create connection pool: %w", err))
+			return nil, errors.E(ctx, errors.CatInternal, errors.TypeStorageCreate, fmt.Errorf("failed to create connection pool: %w", err))
 		}
 	} else {
 		path := filepath.Join(root, "workstream.db")
@@ -166,10 +166,51 @@ func createTables(ctx context.Context, conn *sqlite.Conn) error {
 			return fmt.Errorf("couldn't create table: %w", err)
 		}
 	}
+	if err := addColumns(conn); err != nil {
+		return err
+	}
 	for _, index := range indexes {
 		if err := sqlitex.ExecuteTransient(conn, index, &sqlitex.ExecOptions{}); err != nil {
 			return fmt.Errorf("couldn't create index: %w", err)
 		}
 	}
 	return nil
+}
+
+// addColumns adds each of addedColumns that a table made before it was added is missing.
+func addColumns(conn *sqlite.Conn) error {
+	for _, c := range addedColumns {
+		has, err := hasColumn(conn, c.table, c.name)
+		if err != nil {
+			return err
+		}
+		if has {
+			continue
+		}
+		q := fmt.Sprintf("ALTER TABLE %s ADD COLUMN %s %s;", c.table, c.name, c.def)
+		if err := sqlitex.ExecuteTransient(conn, q, &sqlitex.ExecOptions{}); err != nil {
+			return fmt.Errorf("couldn't add column %s to table %s: %w", c.name, c.table, err)
+		}
+	}
+	return nil
+}
+
+// hasColumn reports whether table has a column named column.
+func hasColumn(conn *sqlite.Conn, table, column string) (bool, error) {
+	found := false
+	err := sqlitex.Execute(
+		conn,
+		`SELECT 1 FROM pragma_table_info($table) WHERE name = $column;`,
+		&sqlitex.ExecOptions{
+			Named: map[string]any{"$table": table, "$column": column},
+			ResultFunc: func(stmt *sqlite.Stmt) error {
+				found = true
+				return nil
+			},
+		},
+	)
+	if err != nil {
+		return false, fmt.Errorf("couldn't read the columns of table %s: %w", table, err)
+	}
+	return found, nil
 }

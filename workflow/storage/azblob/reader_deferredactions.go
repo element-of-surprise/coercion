@@ -25,14 +25,14 @@ func (r reader) fetchDeferredActions(ctx context.Context, containerName string, 
 
 	var entry deferredActionsEntry
 	if err := json.Unmarshal(data, &entry); err != nil {
-		return nil, errors.E(ctx, errors.CatInternal, errors.TypeStorageGet, fmt.Errorf("failed to unmarshal DeferredActions: %w", err))
+		return nil, errUndecodable(ctx, "failed to unmarshal DeferredActions", err)
 	}
 
 	da := entryToDeferredActions(entry)
 	da.SetPlanID(planID)
 
 	da.DeferredBatches = make([]*workflow.DeferBatch, len(entry.DeferredBatches))
-	g := context.Pool(ctx).Default().Limited(ctx, "azBlobReaderDeferred", fetchConcurrency).Group()
+	g := r.pools.block.Group()
 	for i, id := range entry.DeferredBatches {
 		g.Go(ctx, func(ctx context.Context) error {
 			batch, err := r.fetchDeferBatch(ctx, containerName, planID, id)
@@ -62,14 +62,14 @@ func (r reader) fetchDeferBatch(ctx context.Context, containerName string, planI
 
 	var entry deferBatchesEntry
 	if err := json.Unmarshal(data, &entry); err != nil {
-		return nil, errors.E(ctx, errors.CatInternal, errors.TypeStorageGet, fmt.Errorf("failed to unmarshal DeferBatch: %w", err))
+		return nil, errUndecodable(ctx, "failed to unmarshal DeferBatch", err)
 	}
 
 	b := entryToDeferBatch(entry)
 	b.SetPlanID(planID)
 
 	b.Actions = make([]*workflow.Action, len(entry.Actions))
-	g := context.Pool(ctx).Default().Limited(ctx, "azBlobReaderDeferBatch", fetchConcurrency).Group()
+	g := r.pools.leaf.Group()
 	for i, aid := range entry.Actions {
 		g.Go(ctx, func(ctx context.Context) error {
 			action, err := r.fetchAction(ctx, containerName, planID, aid)

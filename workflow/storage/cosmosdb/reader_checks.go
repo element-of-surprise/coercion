@@ -8,7 +8,6 @@ import (
 
 	"github.com/Azure/azure-sdk-for-go/sdk/data/azcosmos"
 	"github.com/element-of-surprise/coercion/workflow"
-	"github.com/go-json-experiment/json"
 	"github.com/google/uuid"
 )
 
@@ -40,7 +39,7 @@ func (p reader) fetchChecksByID(ctx context.Context, planID azcosmos.PartitionKe
 func (p reader) docToChecks(ctx context.Context, planID azcosmos.PartitionKey, response *azcosmos.ItemResponse) (*workflow.Checks, error) {
 	var err error
 	var resp checksEntry
-	if err = json.Unmarshal(response.Value, &resp); err != nil {
+	if err = unmarshalDoc(response.Value, &resp); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal check: %w", err)
 	}
 

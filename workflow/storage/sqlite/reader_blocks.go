@@ -14,7 +14,7 @@ import (
 
 // fieldToBlocks converts the "$blocks" field in a sqlite row to a list of workflow.Blocks.
 func (p reader) fieldToBlocks(ctx context.Context, conn *sqlite.Conn, stmt *sqlite.Stmt) ([]*workflow.Block, error) {
-	ids, err := fieldToIDs("blocks", stmt)
+	ids, err := fieldToIDs(ctx, "blocks", stmt)
 	if err != nil {
 		return nil, fmt.Errorf("couldn't read plan block ids: %w", err)
 	}
@@ -70,12 +70,12 @@ func (p reader) blockRowToBlock(ctx context.Context, conn *sqlite.Conn, stmt *sq
 	var err error
 	b := &workflow.Block{}
 
-	b.ID, err = fieldToID("id", stmt)
+	b.ID, err = fieldToID(ctx, "id", stmt)
 	if err != nil {
 		return nil, fmt.Errorf("couldn't read block id: %w", err)
 	}
 
-	planID, err := uuid.Parse(stmt.GetText("plan_id"))
+	planID, err := fieldToID(ctx, "plan_id", stmt)
 	if err != nil {
 		return nil, fmt.Errorf("couldn't parse action id: %w", err)
 	}
@@ -83,7 +83,7 @@ func (p reader) blockRowToBlock(ctx context.Context, conn *sqlite.Conn, stmt *sq
 
 	k := stmt.GetText("key")
 	if k != "" {
-		b.Key, err = uuid.Parse(k)
+		b.Key, err = fieldToID(ctx, "key", stmt)
 		if err != nil {
 			return nil, fmt.Errorf("couldn't parse block key: %w", err)
 		}

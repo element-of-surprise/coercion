@@ -10,6 +10,7 @@ import (
 	"github.com/gostdlib/base/concurrency/sync"
 
 	"github.com/gostdlib/base/context"
+	"github.com/gostdlib/base/values/chans"
 
 	"github.com/element-of-surprise/coercion/plugins/registry"
 	"github.com/element-of-surprise/coercion/workflow"
@@ -118,7 +119,7 @@ func planStored(ctx context.Context, conn *sqlite.Conn, id uuid.UUID) (bool, err
 
 // errMissingRow returns the error for a stored Plan that names an object with no row: its storage is damaged.
 func errMissingRow(ctx context.Context, kind string, id uuid.UUID) error {
-	return errors.E(ctx, errors.CatInternal, errors.TypeStorageInconsistent, fmt.Errorf("stored plan names %s(%s), which has no row", kind, id))
+	return errors.ErrStorageInconsistent(ctx, fmt.Errorf("stored plan names %s(%s), which has no row", kind, id))
 }
 
 // Read returns a Plan from the storage.
@@ -264,7 +265,7 @@ func (r reader) readListPage(ctx context.Context, query string, args []any, name
 		Args:  args,
 		Named: named,
 		ResultFunc: func(stmt *sqlite.Stmt) error {
-			result, err := r.listResultsFunc(stmt)
+			result, err := r.listResultsFunc(ctx, stmt)
 			if err != nil {
 				return err
 			}
@@ -326,22 +327,19 @@ func (s *listSender) sendErr(ctx context.Context, err error) {
 	if !s.failed && s.send(ctx, item) == nil {
 		return
 	}
-	select {
-	case <-s.results:
-	default:
-	}
+	chans.TryGet(s.results)
 	s.results <- item
 }
 
 // listResultsFunc is a helper function to convert a SQLite statement into a ListResult.
-func (r reader) listResultsFunc(stmt *sqlite.Stmt) (storage.ListResult, error) {
+func (r reader) listResultsFunc(ctx context.Context, stmt *sqlite.Stmt) (storage.ListResult, error) {
 	result := storage.ListResult{}
 	var err error
-	result.ID, err = fieldToID("id", stmt)
+	result.ID, err = fieldToID(ctx, "id", stmt)
 	if err != nil {
 		return storage.ListResult{}, fmt.Errorf("couldn't get ID: %w", err)
 	}
-	result.GroupID, err = fieldToID("group_id", stmt)
+	result.GroupID, err = fieldToID(ctx, "group_id", stmt)
 	if err != nil {
 		return storage.ListResult{}, fmt.Errorf("couldn't get group ID: %w", err)
 	}
@@ -360,27 +358,39 @@ func (r reader) private() {
 	return
 }
 
-// fieldToID returns a uuid.UUID from a field "field" in the Stmt that must be a TEXT field.
-func fieldToID(field string, stmt *sqlite.Stmt) (uuid.UUID, error) {
-	return uuid.Parse(stmt.GetText(field))
+// errUndecodable returns the error for a stored row whose field holds a value that does not decode. The stored bytes
+// stay the same however often they are read, so retrying or restarting cannot fix it: the storage is damaged, so it is
+// a TypeStorageInconsistent error, and it wraps errors.ErrPermanent so retries stop.
+func errUndecodable(ctx context.Context, field string, err error) error {
+	return errors.ErrStorageInconsistent(ctx, fmt.Errorf("stored field %q does not decode: %w", field, err))
 }
 
-// fieldToIDs returns the IDs from the statement field. Field must the a blob
-// encoded as a JSON array that has string UUIDs in v7 format.
-func fieldToIDs(field string, stmt *sqlite.Stmt) ([]uuid.UUID, error) {
+// fieldToID returns a uuid.UUID from a field "field" in the Stmt that must be a TEXT field. A field that does not
+// parse is a TypeStorageInconsistent error.
+func fieldToID(ctx context.Context, field string, stmt *sqlite.Stmt) (uuid.UUID, error) {
+	id, err := uuid.Parse(stmt.GetText(field))
+	if err != nil {
+		return uuid.Nil, errUndecodable(ctx, field, err)
+	}
+	return id, nil
+}
+
+// fieldToIDs returns the IDs from the statement field. Field must the a blob encoded as a JSON array that has string
+// UUIDs in v7 format. A field that is empty or does not decode is a TypeStorageInconsistent error.
+func fieldToIDs(ctx context.Context, field string, stmt *sqlite.Stmt) ([]uuid.UUID, error) {
 	contents := fieldToBytes(field, stmt)
 	if contents == nil {
-		return nil, fmt.Errorf("actions IDs are nil")
+		return nil, errUndecodable(ctx, field, fmt.Errorf("IDs are nil"))
 	}
 	strIDs := []string{}
 	if err := json.Unmarshal(contents, &strIDs); err != nil {
-		return nil, fmt.Errorf("couldn't unmarshal action ids: %w", err)
+		return nil, errUndecodable(ctx, field, fmt.Errorf("couldn't unmarshal ids: %w", err))
 	}
 	ids := make([]uuid.UUID, 0, len(strIDs))
 	for _, id := range strIDs {
 		u, err := uuid.Parse(id)
 		if err != nil {
-			return nil, fmt.Errorf("couldn't parse id(%s): %w", id, err)
+			return nil, errUndecodable(ctx, field, fmt.Errorf("couldn't parse id(%s): %w", id, err))
 		}
 		ids = append(ids, u)
 	}

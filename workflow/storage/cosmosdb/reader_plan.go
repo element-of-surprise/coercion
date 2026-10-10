@@ -8,7 +8,6 @@ import (
 	"github.com/Azure/azure-sdk-for-go/sdk/data/azcosmos"
 	"github.com/element-of-surprise/coercion/workflow"
 	"github.com/element-of-surprise/coercion/workflow/errors"
-	"github.com/go-json-experiment/json"
 	"github.com/google/uuid"
 )
 
@@ -31,7 +30,7 @@ func (p reader) fetchPlan(ctx context.Context, id uuid.UUID) (*workflow.Plan, er
 func (p reader) docToPlan(ctx context.Context, response *azcosmos.ItemResponse) (*workflow.Plan, error) {
 	var err error
 	var resp plansEntry
-	if err = json.Unmarshal(response.Value, &resp); err != nil {
+	if err = unmarshalDoc(response.Value, &resp); err != nil {
 		return nil, err
 	}
 
@@ -49,6 +48,9 @@ func (p reader) docToPlan(ctx context.Context, response *azcosmos.ItemResponse) 
 		End:    resp.StateEnd,
 		ETag:   string(resp.ETag),
 	})
+	if !resp.RuntimeUpdate.IsZero() {
+		plan.RuntimeUpdate.Set(resp.RuntimeUpdate)
+	}
 	k := key(resp.PlanID)
 	plan.BypassChecks, err = p.idToCheck(ctx, k, resp.BypassChecks)
 	if err != nil {

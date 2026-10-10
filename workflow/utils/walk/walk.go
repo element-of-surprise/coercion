@@ -172,10 +172,20 @@ type Stateful interface {
 // and returns the objects it changed with each one after all of its descendants: the order to write them in, so that a
 // parent stored as finished never sits on top of a child that is not.
 func SettleRunning(p *workflow.Plan, status workflow.Status, end time.Time) []Item {
+	return SettleRunningItems(Plan(p, WithSkipPlan()), status, end)
+}
+
+// SettleRunningItems settles only the Running objects yielded by items. items must yield parents before descendants;
+// the returned changes are in the opposite order for persistence. Existing end times are preserved. Call only when
+// no execution is still changing the selected objects.
+func SettleRunningItems(items iter.Seq[Item], status workflow.Status, end time.Time) []Item {
 	var changed []Item
-	for item := range RunningObjects(p) {
+	for item := range items {
 		obj := item.Value.(Stateful)
 		state := obj.GetState()
+		if state.Status != workflow.Running {
+			continue
+		}
 		state.Status = status
 		if state.End.IsZero() {
 			state.End = end

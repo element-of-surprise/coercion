@@ -126,7 +126,7 @@ func (r recovery) repairObject(ctx context.Context, sp scannedPlan) error {
 	// A Completed Plan with Running objects cannot be settled from what is stored. Leave the tear rather than save the
 	// contradiction: the entry and object would then agree, and reads would stop rebuilding and flagging it.
 	if plan.State.Get().Status == workflow.Completed && hasRunningObjects(plan) {
-		return errors.E(ctx, errors.CatInternal, errors.TypeStorageInconsistent, fmt.Errorf("plan(%s) is Completed but has Running objects, not repairing its object", sp.id))
+		return errors.ErrStorageInconsistent(ctx, fmt.Errorf("plan(%s) is Completed but has Running objects, not repairing its object", sp.id))
 	}
 	md, err := planToMetadata(ctx, plan)
 	if err != nil {

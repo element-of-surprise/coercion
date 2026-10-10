@@ -57,6 +57,9 @@ const (
 	TypeNotOwned Type = Type(6) // NotOwned
 	// TypeNotFound represents a Plan or object that does not exist in storage.
 	TypeNotFound Type = Type(7) // NotFound
+	// TypePlugin represents a plugin that failed: its Init failed, or an action it ran returned an error, timed out or
+	// returned a response of the wrong type.
+	TypePlugin Type = Type(8) // Plugin
 
 	// TypeStorageCreate represents an error with creating storage tables, containers, etc.
 	TypeStorageCreate Type = Type(1000) // StorageCreate
@@ -141,6 +144,18 @@ func ErrNotOwned(ctx context.Context, msg error) Error {
 	return E(ctx, CatInternal, TypeNotOwned, msg, WithCallNum(3))
 }
 
+// ErrStorageInconsistent returns the canonical error for stored data that disagrees with itself (see
+// TypeStorageInconsistent). The stored data stays the same however often it is read, so retrying cannot fix it: the
+// error wraps ErrPermanent so retries stop.
+func ErrStorageInconsistent(ctx context.Context, msg error) Error {
+	return E(ctx, CatInternal, TypeStorageInconsistent, fmt.Errorf("%w: %w", msg, ErrPermanent), WithCallNum(3))
+}
+
+// ErrPlugin returns the canonical error for a plugin that failed (see TypePlugin).
+func ErrPlugin(ctx context.Context, msg error) Error {
+	return E(ctx, CatInternal, TypePlugin, msg, WithCallNum(3))
+}
+
 // IsNotFound reports whether any error in err's chain is a not-found error: NotFound, or a TypeNotFound Error.
 func IsNotFound(err error) bool {
 	return Is(err, NotFound) || Is(err, Error{Category: CatUser, Type: TypeNotFound})
@@ -150,6 +165,11 @@ func IsNotFound(err error) bool {
 // that disagrees with itself. Retrying or restarting does not fix it; the storage needs repair.
 func IsStorageInconsistent(err error) bool {
 	return Is(err, Error{Category: CatInternal, Type: TypeStorageInconsistent})
+}
+
+// IsBug reports whether any error in err's chain is a TypeBug error: a state the code should never reach.
+func IsBug(err error) bool {
+	return Is(err, Error{Category: CatInternal, Type: TypeBug})
 }
 
 // IsNotOwned reports whether any error in err's chain is a not-owned error (TypeNotOwned).

@@ -144,7 +144,7 @@ func missingRowErr(ctx context.Context, conn *sqlite.Conn, item walk.Item, n int
 		p, ok := item.Value.(planIDer)
 		if !ok || p.GetPlanID() == uuid.Nil {
 			// Without its Plan's ID the Plan can't be looked up, so this can't be told apart from damage.
-			return errors.E(ctx, errors.CatInternal, errors.TypeStorageInconsistent, err)
+			return errors.ErrStorageInconsistent(ctx, err)
 		}
 		planID = p.GetPlanID()
 	}
@@ -155,7 +155,7 @@ func missingRowErr(ctx context.Context, conn *sqlite.Conn, item walk.Item, n int
 	case !stored:
 		return errors.ErrNotFound(ctx, err)
 	}
-	return errors.E(ctx, errors.CatInternal, errors.TypeStorageInconsistent, err)
+	return errors.ErrStorageInconsistent(ctx, err)
 }
 
 // objectStmt returns the statement that updates one object below a Plan. It returns an error for an Item with no

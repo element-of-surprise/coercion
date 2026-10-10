@@ -35,6 +35,7 @@ import (
 	"github.com/element-of-surprise/coercion/plugins/registry"
 	"github.com/element-of-surprise/coercion/workflow"
 	"github.com/element-of-surprise/coercion/workflow/context"
+	"github.com/element-of-surprise/coercion/workflow/errors"
 	"github.com/element-of-surprise/coercion/workflow/storage/sqlite"
 	"github.com/google/uuid"
 )
@@ -132,7 +133,7 @@ func recoveryTestStage(ctx context.Context, stage int, reg *registry.Register, c
 
 		// Insert all data up to the current stage.
 		for _, insert := range capture.Inserts() {
-			sStmt, err := insert.Prepare(conn)
+			sStmt, err := insert.Prepare(ctx, conn, errors.TypeStorageCreate)
 			if err != nil {
 				panic(err)
 			}
@@ -145,7 +146,7 @@ func recoveryTestStage(ctx context.Context, stage int, reg *registry.Register, c
 		// Replay all stages up to the current stage.
 		for x := 0; x <= stage; x++ {
 			stmt := capture.Stmt(x)
-			sStmt, err := stmt.Prepare(conn)
+			sStmt, err := stmt.Prepare(ctx, conn, errors.TypeStorageCreate)
 			if err != nil {
 				panic(err)
 			}

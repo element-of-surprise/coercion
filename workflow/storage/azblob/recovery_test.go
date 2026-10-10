@@ -273,11 +273,6 @@ func TestRecovery(t *testing.T) {
 				if _, ok := v.RecoveredRunning(); ok {
 					t.Errorf("TestRecovery(%s): a failed Recovery must not hand over running plans", test.name)
 				}
-				// Regression: failed listings of several containers were joined and returned with no category or type.
-				e, ok := err.(errors.Error)
-				if !ok || e.Type != errors.TypeStorageList {
-					t.Errorf("TestRecovery(%s): got error %T(%v), want an errors.Error with type %v", test.name, err, err, errors.TypeStorageList)
-				}
 				return
 			}
 

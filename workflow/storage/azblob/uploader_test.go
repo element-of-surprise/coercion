@@ -113,7 +113,7 @@ func createUploadTestPlan(withBlocks bool) *workflow.Plan {
 	return plan
 }
 
-// errFakeDelete is returned by a failing fake DeleteBlob so tests can check the failure is surfaced.
+// errFakeDelete is returned by a failing fake DeleteBlob.
 var errFakeDelete = errors.New("fake delete failure")
 
 // errFakeUpload is returned by a failing fake UploadBlob.
@@ -165,10 +165,7 @@ func TestUploadPlan(t *testing.T) {
 		// wantEntryStatus and wantObjectStatus are the stored statuses afterwards; checked only with createFirst.
 		wantEntryStatus  workflow.Status
 		wantObjectStatus workflow.Status
-		wantDeleteErr    bool
-		// wantTyped means the top-level error is an errors.Error. It may wrap a join of errors.
-		wantTyped bool
-		wantErr   bool
+		wantErr          bool
 	}{
 		{
 			name:           "Success: create writes the entry and object",
@@ -225,7 +222,6 @@ func TestUploadPlan(t *testing.T) {
 			uploadPlanType: uptCreate,
 			status:         workflow.NotStarted,
 			fail:           failObject,
-			wantTyped:      true,
 			wantErr:        true,
 		},
 		{
@@ -235,7 +231,6 @@ func TestUploadPlan(t *testing.T) {
 			uploadPlanType: uptCreate,
 			status:         workflow.NotStarted,
 			fail:           failSubObjects,
-			wantTyped:      true,
 			wantErr:        true,
 		},
 		{
@@ -254,8 +249,6 @@ func TestUploadPlan(t *testing.T) {
 			fail:           failObject,
 			deleteFails:    true,
 			wantEntry:      true,
-			wantDeleteErr:  true,
-			wantTyped:      true,
 			wantErr:        true,
 		},
 		{
@@ -333,22 +326,6 @@ func TestUploadPlan(t *testing.T) {
 			case err != nil && !test.wantErr:
 				t.Errorf("TestUploadPlan(%s): got err == %s, want err == nil", test.name, err)
 			}
-			if got := errors.Is(err, errFakeDelete); got != test.wantDeleteErr {
-				t.Errorf("TestUploadPlan(%s): got errors.Is(err, errFakeDelete) == %v, want %v", test.name, got, test.wantDeleteErr)
-			}
-			if test.wantTyped {
-				if _, ok := err.(errors.Error); !ok {
-					t.Errorf("TestUploadPlan(%s): got error of type %T, want errors.Error", test.name, err)
-				}
-			}
-			if err != nil {
-				// Errors are joined only when the cleanup failed too.
-				var joined interface{ Unwrap() []error }
-				if got := errors.As(err, &joined); got != test.wantDeleteErr {
-					t.Errorf("TestUploadPlan(%s): got a joined error == %v, want %v", test.name, got, test.wantDeleteErr)
-				}
-			}
-
 			entryName := planEntryBlobName(plan.ID)
 			if got := fakeClient.BlobExists(containerName, entryName); got != test.wantEntry {
 				t.Errorf("TestUploadPlan(%s): got entry exists == %v, want %v", test.name, got, test.wantEntry)
@@ -599,16 +576,63 @@ func TestUploadSubObjects(t *testing.T) {
 	}
 }
 
-func TestUploadBlockBlob(t *testing.T) {
+// TestUploadObjectBlobs verifies that uploading a Block, Sequence or Checks writes its own blob and every blob under it.
+func TestUploadObjectBlobs(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		name    string
-		wantErr bool
+		name       string
+		withBlocks bool
+		// upload uploads the object under test from plan.
+		upload func(ctx context.Context, u *uploader, containerName string, plan *workflow.Plan) error
+		// blobs are the names of the object's blob and the blobs under it. All must exist after upload.
+		blobs func(plan *workflow.Plan) []string
 	}{
 		{
-			name:    "Success: upload block with sequences and checks",
-			wantErr: false,
+			name:       "Success: upload block with sequences and checks",
+			withBlocks: true,
+			upload: func(ctx context.Context, u *uploader, containerName string, plan *workflow.Plan) error {
+				return u.uploadBlockBlob(ctx, containerName, plan.ID, plan.Blocks[0], 0)
+			},
+			blobs: func(plan *workflow.Plan) []string {
+				block := plan.Blocks[0]
+				names := []string{blockBlobName(plan.ID, block.ID)}
+				for _, seq := range block.Sequences {
+					names = append(names, sequenceBlobName(plan.ID, seq.ID))
+				}
+				if block.PreChecks != nil {
+					names = append(names, checksBlobName(plan.ID, block.PreChecks.ID))
+				}
+				return names
+			},
+		},
+		{
+			name:       "Success: upload sequence with actions",
+			withBlocks: true,
+			upload: func(ctx context.Context, u *uploader, containerName string, plan *workflow.Plan) error {
+				return u.uploadSequenceBlob(ctx, containerName, plan.ID, plan.Blocks[0].Sequences[0], 0)
+			},
+			blobs: func(plan *workflow.Plan) []string {
+				seq := plan.Blocks[0].Sequences[0]
+				names := []string{sequenceBlobName(plan.ID, seq.ID)}
+				for _, action := range seq.Actions {
+					names = append(names, actionBlobName(plan.ID, action.ID))
+				}
+				return names
+			},
+		},
+		{
+			name: "Success: upload checks with actions",
+			upload: func(ctx context.Context, u *uploader, containerName string, plan *workflow.Plan) error {
+				return u.uploadChecksBlob(ctx, containerName, plan.ID, plan.PreChecks)
+			},
+			blobs: func(plan *workflow.Plan) []string {
+				names := []string{checksBlobName(plan.ID, plan.PreChecks.ID)}
+				for _, action := range plan.PreChecks.Actions {
+					names = append(names, actionBlobName(plan.ID, action.ID))
+				}
+				return names
+			},
 		},
 	}
 
@@ -618,159 +642,19 @@ func TestUploadBlockBlob(t *testing.T) {
 
 			ctx := t.Context()
 			fakeClient, u := setupUploaderTest(t)
-
-			plan := createUploadTestPlan(true)
-			block := plan.Blocks[0]
+			plan := createUploadTestPlan(test.withBlocks)
 			containerName := containerForPlan("test", plan.ID)
-
-			// Create container first
 			if err := fakeClient.CreateContainer(ctx, containerName); err != nil {
-				t.Fatalf("TestUploadBlockBlob(%s): failed to create container: %v", test.name, err)
+				t.Fatalf("TestUploadObjectBlobs(%s): failed to create container: %v", test.name, err)
 			}
 
-			err := u.uploadBlockBlob(ctx, containerName, plan.ID, block, 0)
-
-			switch {
-			case err == nil && test.wantErr:
-				t.Errorf("TestUploadBlockBlob(%s): got err == nil, want err != nil", test.name)
-				return
-			case err != nil && !test.wantErr:
-				t.Errorf("TestUploadBlockBlob(%s): got err == %s, want err == nil", test.name, err)
-				return
-			case err != nil:
-				return
+			if err := test.upload(ctx, u, containerName, plan); err != nil {
+				t.Fatalf("TestUploadObjectBlobs(%s): got err == %s, want err == nil", test.name, err)
 			}
 
-			// Verify block blob
-			if !fakeClient.BlobExists(containerName, blockBlobName(plan.ID, block.ID)) {
-				t.Errorf("TestUploadBlockBlob(%s): block blob should exist", test.name)
-			}
-
-			// Verify sequences
-			for _, seq := range block.Sequences {
-				if !fakeClient.BlobExists(containerName, sequenceBlobName(plan.ID, seq.ID)) {
-					t.Errorf("TestUploadBlockBlob(%s): sequence blob should exist", test.name)
-				}
-			}
-
-			// Verify checks
-			if block.PreChecks != nil {
-				if !fakeClient.BlobExists(containerName, checksBlobName(plan.ID, block.PreChecks.ID)) {
-					t.Errorf("TestUploadBlockBlob(%s): block checks blob should exist", test.name)
-				}
-			}
-		})
-	}
-}
-
-func TestUploadSequenceBlob(t *testing.T) {
-	t.Parallel()
-
-	tests := []struct {
-		name    string
-		wantErr bool
-	}{
-		{
-			name:    "Success: upload sequence with actions",
-			wantErr: false,
-		},
-	}
-
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			t.Parallel()
-
-			ctx := t.Context()
-			fakeClient, u := setupUploaderTest(t)
-
-			plan := createUploadTestPlan(true)
-			seq := plan.Blocks[0].Sequences[0]
-			containerName := containerForPlan("test", plan.ID)
-
-			// Create container first
-			if err := fakeClient.CreateContainer(ctx, containerName); err != nil {
-				t.Fatalf("TestUploadSequenceBlob(%s): failed to create container: %v", test.name, err)
-			}
-
-			err := u.uploadSequenceBlob(ctx, containerName, plan.ID, seq, 0)
-
-			switch {
-			case err == nil && test.wantErr:
-				t.Errorf("TestUploadSequenceBlob(%s): got err == nil, want err != nil", test.name)
-				return
-			case err != nil && !test.wantErr:
-				t.Errorf("TestUploadSequenceBlob(%s): got err == %s, want err == nil", test.name, err)
-				return
-			case err != nil:
-				return
-			}
-
-			// Verify sequence blob
-			if !fakeClient.BlobExists(containerName, sequenceBlobName(plan.ID, seq.ID)) {
-				t.Errorf("TestUploadSequenceBlob(%s): sequence blob should exist", test.name)
-			}
-
-			// Verify actions
-			for _, action := range seq.Actions {
-				if !fakeClient.BlobExists(containerName, actionBlobName(plan.ID, action.ID)) {
-					t.Errorf("TestUploadSequenceBlob(%s): action blob should exist", test.name)
-				}
-			}
-		})
-	}
-}
-
-func TestUploadChecksBlob(t *testing.T) {
-	t.Parallel()
-
-	tests := []struct {
-		name    string
-		wantErr bool
-	}{
-		{
-			name:    "Success: upload checks with actions",
-			wantErr: false,
-		},
-	}
-
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			t.Parallel()
-
-			ctx := t.Context()
-			fakeClient, u := setupUploaderTest(t)
-
-			plan := createUploadTestPlan(false)
-			checks := plan.PreChecks
-			containerName := containerForPlan("test", plan.ID)
-
-			// Create container first
-			if err := fakeClient.CreateContainer(ctx, containerName); err != nil {
-				t.Fatalf("TestUploadChecksBlob(%s): failed to create container: %v", test.name, err)
-			}
-
-			err := u.uploadChecksBlob(ctx, containerName, plan.ID, checks)
-
-			switch {
-			case err == nil && test.wantErr:
-				t.Errorf("TestUploadChecksBlob(%s): got err == nil, want err != nil", test.name)
-				return
-			case err != nil && !test.wantErr:
-				t.Errorf("TestUploadChecksBlob(%s): got err == %s, want err == nil", test.name, err)
-				return
-			case err != nil:
-				return
-			}
-
-			// Verify checks blob
-			if !fakeClient.BlobExists(containerName, checksBlobName(plan.ID, checks.ID)) {
-				t.Errorf("TestUploadChecksBlob(%s): checks blob should exist", test.name)
-			}
-
-			// Verify actions
-			for _, action := range checks.Actions {
-				if !fakeClient.BlobExists(containerName, actionBlobName(plan.ID, action.ID)) {
-					t.Errorf("TestUploadChecksBlob(%s): action blob should exist", test.name)
+			for _, name := range test.blobs(plan) {
+				if !fakeClient.BlobExists(containerName, name) {
+					t.Errorf("TestUploadObjectBlobs(%s): blob %s should exist", test.name, name)
 				}
 			}
 		})

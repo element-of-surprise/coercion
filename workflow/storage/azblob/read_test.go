@@ -8,8 +8,10 @@ import (
 	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob/bloberror"
 
 	"github.com/go-json-experiment/json"
+	"github.com/google/uuid"
 	"github.com/gostdlib/base/concurrency/sync"
 	"github.com/gostdlib/base/context"
+	"github.com/gostdlib/base/values/chans"
 
 	"github.com/element-of-surprise/coercion/plugins/registry"
 	"github.com/element-of-surprise/coercion/workflow"
@@ -106,6 +108,119 @@ func stripRuntimeUpdate(t *testing.T, fake *blobops.Fake, plan *workflow.Plan) {
 	}
 }
 
+// undecodable is stored bytes that are not complete JSON.
+var undecodable = []byte(`["trunc`)
+
+// rewriteBlob replaces the bytes of a blob in plan's container with data, keeping its metadata.
+func rewriteBlob(t *testing.T, fake *blobops.Fake, planID uuid.UUID, blobName string, data []byte) {
+	t.Helper()
+
+	ctx := t.Context()
+	containerName := containerForPlan("test", planID)
+	md, err := fake.GetMetadata(ctx, containerName, blobName)
+	if err != nil {
+		t.Fatalf("rewriteBlob(%s): GetMetadata: %s", blobName, err)
+	}
+	if err := fake.UploadBlob(ctx, containerName, blobName, md, data); err != nil {
+		t.Fatalf("rewriteBlob(%s): UploadBlob: %s", blobName, err)
+	}
+}
+
+// truncateBlob replaces the bytes of a blob in plan's container with bytes that do not decode, keeping its metadata.
+func truncateBlob(t *testing.T, fake *blobops.Fake, planID uuid.UUID, blobName string) {
+	t.Helper()
+	rewriteBlob(t, fake, planID, blobName, undecodable)
+}
+
+// deleteBlockBlob removes the blob of plan's first block, so the plan cannot be rebuilt from its entry.
+func deleteBlockBlob(t *testing.T, fake *blobops.Fake, plan *workflow.Plan) {
+	t.Helper()
+
+	if err := fake.DeleteBlob(t.Context(), containerForPlan("test", plan.ID), blockBlobName(plan.ID, plan.Blocks[0].ID)); err != nil {
+		t.Fatalf("deleteBlockBlob: DeleteBlob: %s", err)
+	}
+}
+
+// corruptEntryState replaces the state in the metadata of plan's entry blob with a value that does not decode.
+func corruptEntryState(t *testing.T, fake *blobops.Fake, plan *workflow.Plan) {
+	t.Helper()
+
+	ctx := t.Context()
+	containerName := containerForPlan("test", plan.ID)
+	blobName := planEntryBlobName(plan.ID)
+	data, err := fake.GetBlob(ctx, containerName, blobName)
+	if err != nil {
+		t.Fatalf("corruptEntryState: GetBlob: %s", err)
+	}
+	md, err := fake.GetMetadata(ctx, containerName, blobName)
+	if err != nil {
+		t.Fatalf("corruptEntryState: GetMetadata: %s", err)
+	}
+	if _, ok := md[mdKeyState]; !ok {
+		t.Fatalf("corruptEntryState: entry metadata has no %q key", mdKeyState)
+	}
+	md[mdKeyState] = toPtr(string(undecodable))
+	if err := fake.UploadBlob(ctx, containerName, blobName, md, data); err != nil {
+		t.Fatalf("corruptEntryState: UploadBlob: %s", err)
+	}
+}
+
+// corruptActionEntry rewrites the blob of plan's first sequence action after change is applied to its entry.
+func corruptActionEntry(t *testing.T, fake *blobops.Fake, plan *workflow.Plan, change func(e *actionsEntry)) {
+	t.Helper()
+
+	blobName := actionBlobName(plan.ID, plan.Blocks[0].Sequences[0].Actions[0].ID)
+	data, err := fake.GetBlob(t.Context(), containerForPlan("test", plan.ID), blobName)
+	if err != nil {
+		t.Fatalf("corruptActionEntry: GetBlob: %s", err)
+	}
+	var entry actionsEntry
+	if err := json.Unmarshal(data, &entry); err != nil {
+		t.Fatalf("corruptActionEntry: Unmarshal: %s", err)
+	}
+	change(&entry)
+	if data, err = json.Marshal(entry); err != nil {
+		t.Fatalf("corruptActionEntry: Marshal: %s", err)
+	}
+	rewriteBlob(t, fake, plan.ID, blobName, data)
+}
+
+// corruptObjectReq rewrites plan's object blob so its first sequence action's request is a JSON array, which does not
+// decode into the plugin's request type.
+func corruptObjectReq(t *testing.T, fake *blobops.Fake, plan *workflow.Plan) {
+	t.Helper()
+
+	blobName := planObjectBlobName(plan.ID)
+	data, err := fake.GetBlob(t.Context(), containerForPlan("test", plan.ID), blobName)
+	if err != nil {
+		t.Fatalf("corruptObjectReq: GetBlob: %s", err)
+	}
+	var obj map[string]any
+	if err := json.Unmarshal(data, &obj); err != nil {
+		t.Fatalf("corruptObjectReq: Unmarshal: %s", err)
+	}
+	child := func(m map[string]any, key string) map[string]any {
+		list, ok := m[key].([]any)
+		if !ok || len(list) == 0 {
+			t.Fatalf("corruptObjectReq: object blob has no %s", key)
+		}
+		c, ok := list[0].(map[string]any)
+		if !ok {
+			t.Fatalf("corruptObjectReq: object blob's first %s is %T", key, list[0])
+		}
+		return c
+	}
+	action := child(child(child(obj, "Blocks"), "Sequences"), "Actions")
+	if _, ok := action["Req"]; !ok {
+		t.Fatalf("corruptObjectReq: object blob's action has no Req")
+	}
+	action["Req"] = []any{1}
+	if data, err = json.Marshal(obj); err != nil {
+		t.Fatalf("corruptObjectReq: Marshal: %s", err)
+	}
+	rewriteBlob(t, fake, plan.ID, blobName, data)
+}
+
 // searchRunning returns the IDs Search reports as Running.
 func searchRunning(t *testing.T, v *Vault) []string {
 	t.Helper()
@@ -137,8 +252,6 @@ func TestRead(t *testing.T) {
 		final workflow.Status
 		// failObject makes the object blob upload of that final write fail, leaving the object stale.
 		failObject bool
-		// deleteBlock removes the block blob after the final write, so the plan cannot be rebuilt from the entry.
-		deleteBlock bool
 		// failBlockRead makes reading the block blob fail, as a throttled read does.
 		failBlockRead bool
 		// entryGone makes the entry blob's download report not found after its metadata was read, as when something
@@ -150,6 +263,9 @@ func TestRead(t *testing.T) {
 		// oldEntry strips runtimeUpdate from the entry blob after the final write, as a plan stored before the field
 		// existed has it.
 		oldEntry bool
+		// damage, when set, changes the plan's stored blobs after the final write: it removes one, or rewrites one so it
+		// does not decode.
+		damage func(t *testing.T, fake *blobops.Fake, plan *workflow.Plan)
 
 		wantStatus workflow.Status
 		// wantActionStatus, when set, is the action status Read must return.
@@ -213,7 +329,7 @@ func TestRead(t *testing.T) {
 			// as permanent and gave up on a plan whose entry still said Running.
 			name:             "Error: a running plan with a missing block blob is damaged storage, not a missing plan",
 			final:            workflow.Running,
-			deleteBlock:      true,
+			damage:           deleteBlockBlob,
 			wantSearchHit:    true,
 			wantInconsistent: true,
 			wantErr:          true,
@@ -241,7 +357,92 @@ func TestRead(t *testing.T) {
 			name:             "Error: a torn completion whose block blob is missing cannot be rebuilt",
 			final:            workflow.Completed,
 			failObject:       true,
-			deleteBlock:      true,
+			damage:           deleteBlockBlob,
+			wantInconsistent: true,
+			wantErr:          true,
+		},
+		{
+			// Regression: a stored blob that did not decode was a TypeStorageGet error, so recovery retried the
+			// running plan until its restart time and then exited the process, on every restart.
+			name:  "Error: a running plan whose entry blob does not decode is damaged storage",
+			final: workflow.Running,
+			damage: func(t *testing.T, fake *blobops.Fake, plan *workflow.Plan) {
+				truncateBlob(t, fake, plan.ID, planEntryBlobName(plan.ID))
+			},
+			wantSearchHit:    true,
+			wantInconsistent: true,
+			wantErr:          true,
+		},
+		{
+			name:             "Error: a running plan whose entry metadata does not decode is damaged storage",
+			final:            workflow.Running,
+			damage:           corruptEntryState,
+			wantInconsistent: true,
+			wantErr:          true,
+		},
+		{
+			name:  "Error: a running plan whose block blob does not decode is damaged storage",
+			final: workflow.Running,
+			damage: func(t *testing.T, fake *blobops.Fake, plan *workflow.Plan) {
+				truncateBlob(t, fake, plan.ID, blockBlobName(plan.ID, plan.Blocks[0].ID))
+			},
+			wantSearchHit:    true,
+			wantInconsistent: true,
+			wantErr:          true,
+		},
+		{
+			name:  "Error: a running plan whose sequence blob does not decode is damaged storage",
+			final: workflow.Running,
+			damage: func(t *testing.T, fake *blobops.Fake, plan *workflow.Plan) {
+				truncateBlob(t, fake, plan.ID, sequenceBlobName(plan.ID, plan.Blocks[0].Sequences[0].ID))
+			},
+			wantSearchHit:    true,
+			wantInconsistent: true,
+			wantErr:          true,
+		},
+		{
+			name:  "Error: a running plan whose action blob does not decode is damaged storage",
+			final: workflow.Running,
+			damage: func(t *testing.T, fake *blobops.Fake, plan *workflow.Plan) {
+				truncateBlob(t, fake, plan.ID, actionBlobName(plan.ID, plan.Blocks[0].Sequences[0].Actions[0].ID))
+			},
+			wantSearchHit:    true,
+			wantInconsistent: true,
+			wantErr:          true,
+		},
+		{
+			name:  "Error: a running plan whose action request does not decode is damaged storage",
+			final: workflow.Running,
+			damage: func(t *testing.T, fake *blobops.Fake, plan *workflow.Plan) {
+				corruptActionEntry(t, fake, plan, func(e *actionsEntry) { e.Req = undecodable })
+			},
+			wantSearchHit:    true,
+			wantInconsistent: true,
+			wantErr:          true,
+		},
+		{
+			name:  "Error: a running plan whose action attempts do not decode is damaged storage",
+			final: workflow.Running,
+			damage: func(t *testing.T, fake *blobops.Fake, plan *workflow.Plan) {
+				corruptActionEntry(t, fake, plan, func(e *actionsEntry) { e.Attempts = undecodable })
+			},
+			wantSearchHit:    true,
+			wantInconsistent: true,
+			wantErr:          true,
+		},
+		{
+			name:  "Error: a completed plan whose object blob does not decode is damaged storage",
+			final: workflow.Completed,
+			damage: func(t *testing.T, fake *blobops.Fake, plan *workflow.Plan) {
+				truncateBlob(t, fake, plan.ID, planObjectBlobName(plan.ID))
+			},
+			wantInconsistent: true,
+			wantErr:          true,
+		},
+		{
+			name:             "Error: a completed plan whose object blob holds an action request that does not decode is damaged storage",
+			final:            workflow.Completed,
+			damage:           corruptObjectReq,
 			wantInconsistent: true,
 			wantErr:          true,
 		},
@@ -254,7 +455,6 @@ func TestRead(t *testing.T) {
 			ctx := t.Context()
 			v, fake := newFakeVault(t)
 			plan := newRunningPlan(t, v)
-			containerName := containerForPlan("test", plan.ID)
 
 			action := plan.Blocks[0].Sequences[0].Actions[0]
 			if test.runningAction {
@@ -277,10 +477,8 @@ func TestRead(t *testing.T) {
 			if test.oldEntry {
 				stripRuntimeUpdate(t, fake, plan)
 			}
-			if test.deleteBlock {
-				if err := fake.DeleteBlob(ctx, containerName, blockBlobName(plan.ID, plan.Blocks[0].ID)); err != nil {
-					t.Fatalf("TestRead(%s): deleting block blob: %s", test.name, err)
-				}
+			if test.damage != nil {
+				test.damage(t, fake, plan)
 			}
 
 			if test.entryGone {
@@ -322,9 +520,16 @@ func TestRead(t *testing.T) {
 				return
 			case err != nil:
 				// internal/execute (recovery.go and retry.go) skips a plan that IsStorageInconsistent and treats one that
-				// IsNotFound as gone, so both classifications are part of Read's contract.
+				// IsNotFound as gone, so both classifications are part of Read's contract: recover.fetchPlans and
+				// Plans.resumeOrExit/Plans.stranded skip on errors.IsStorageInconsistent, and retry anything else until
+				// the process exits.
 				if got := errors.IsStorageInconsistent(err); got != test.wantInconsistent {
 					t.Errorf("TestRead(%s): got IsStorageInconsistent(err) == %v, want %v", test.name, got, test.wantInconsistent)
+				}
+				// Workstream.Wait (coercion.go) promises callers that an error retrying cannot fix wraps
+				// errors.ErrPermanent, and exponential backoff stops retrying on it. Damaged storage is such an error.
+				if test.wantInconsistent && !errors.Is(err, errors.ErrPermanent) {
+					t.Errorf("TestRead(%s): got err == %s, want it to wrap errors.ErrPermanent", test.name, err)
 				}
 				if got := errors.IsNotFound(err); got != test.wantNotFound {
 					t.Errorf("TestRead(%s): got IsNotFound(err) == %v, want %v", test.name, got, test.wantNotFound)
@@ -535,13 +740,14 @@ func TestSharedFetch(t *testing.T) {
 				// than start its own and get 2.
 				probe := f.DoChan(t.Context(), "key", func() (int, error) { return 2, nil })
 				close(release)
-				select {
-				case res := <-probe:
-					if res.Val != 2 {
-						t.Errorf("TestSharedFetch(%s): got %d from a later caller, want 2 (no fetch left in flight)", test.name, res.Val)
-					}
-				case <-time.After(5 * time.Second):
+				probeCtx, probeCancel := context.WithTimeout(t.Context(), 5*time.Second)
+				res, r := chans.Get(probeCtx, probe)
+				probeCancel()
+				if !r.OK() {
 					t.Fatalf("TestSharedFetch(%s): a later caller did not get a result", test.name)
+				}
+				if res.Val != 2 {
+					t.Errorf("TestSharedFetch(%s): got %d from a later caller, want 2 (no fetch left in flight)", test.name, res.Val)
 				}
 				if err == nil {
 					t.Errorf("TestSharedFetch(%s): got err == nil, want err != nil", test.name)
@@ -553,24 +759,26 @@ func TestSharedFetch(t *testing.T) {
 				close(release)
 			}
 
-			select {
-			case fetchErr := <-fetchCtxErr:
-				if (fetchErr != nil) != test.wantFetchCtxErr {
-					t.Errorf("TestSharedFetch(%s): got fetch context error %v, want ended == %v", test.name, fetchErr, test.wantFetchCtxErr)
-				}
-			case <-time.After(5 * time.Second):
+			fetchCtx, fetchCancel := context.WithTimeout(t.Context(), 5*time.Second)
+			fetchErr, r := chans.Get(fetchCtx, fetchCtxErr)
+			fetchCancel()
+			if !r.OK() {
 				t.Fatalf("TestSharedFetch(%s): the fetch did not finish", test.name)
+			}
+			if (fetchErr != nil) != test.wantFetchCtxErr {
+				t.Errorf("TestSharedFetch(%s): got fetch context error %v, want ended == %v", test.name, fetchErr, test.wantFetchCtxErr)
 			}
 
 			// Regression: the fetch stayed shared until after its lock was released, so a caller arriving after a
 			// writer took the lock could join it and get what was read before the write.
-			select {
-			case results := <-later:
-				if res := <-results; res.Val != 2 {
-					t.Errorf("TestSharedFetch(%s): a caller arriving as the lock was released got %d, want a new fetch (2)", test.name, res.Val)
-				}
-			case <-time.After(5 * time.Second):
+			laterCtx, laterCancel := context.WithTimeout(t.Context(), 5*time.Second)
+			results, r := chans.Get(laterCtx, later)
+			laterCancel()
+			if !r.OK() {
 				t.Fatalf("TestSharedFetch(%s): the lock was not released", test.name)
+			}
+			if res := <-results; res.Val != 2 {
+				t.Errorf("TestSharedFetch(%s): a caller arriving as the lock was released got %d, want a new fetch (2)", test.name, res.Val)
 			}
 
 			switch {

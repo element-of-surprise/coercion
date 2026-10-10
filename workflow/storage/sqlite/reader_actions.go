@@ -17,7 +17,7 @@ import (
 
 // fieldToActions converts the "actions" field in a sqlite row to a list of workflow.Actions.
 func (r reader) fieldToActions(ctx context.Context, conn *sqlite.Conn, stmt *sqlite.Stmt) ([]*workflow.Action, error) {
-	ids, err := fieldToIDs("actions", stmt)
+	ids, err := fieldToIDs(ctx, "actions", stmt)
 	if err != nil {
 		return nil, fmt.Errorf("couldn't read action ids: %w", err)
 	}
@@ -69,7 +69,7 @@ func (r reader) fetchActionsByIDs(ctx context.Context, conn *sqlite.Conn, ids []
 				return nil, errMissingRow(ctx, "Action", id)
 			}
 			if listed[id] {
-				return nil, errors.E(ctx, errors.CatInternal, errors.TypeStorageInconsistent, fmt.Errorf("stored plan lists Action(%s) more than once", id))
+				return nil, errors.ErrStorageInconsistent(ctx, fmt.Errorf("stored plan lists Action(%s) more than once", id))
 			}
 			listed[id] = true
 		}
@@ -77,19 +77,17 @@ func (r reader) fetchActionsByIDs(ctx context.Context, conn *sqlite.Conn, ids []
 	return actions, nil
 }
 
-var emptyAttemptsJSON = []byte(`[]`)
-
 // actionRowToAction converts a sqlite row to a workflow.Action.
 func (r reader) actionRowToAction(ctx context.Context, stmt *sqlite.Stmt) (*workflow.Action, error) {
 	var err error
 	a := &workflow.Action{}
 
-	a.ID, err = uuid.Parse(stmt.GetText("id"))
+	a.ID, err = fieldToID(ctx, "id", stmt)
 	if err != nil {
 		return nil, fmt.Errorf("couldn't parse action id: %w", err)
 	}
 
-	planID, err := uuid.Parse(stmt.GetText("plan_id"))
+	planID, err := fieldToID(ctx, "plan_id", stmt)
 	if err != nil {
 		return nil, fmt.Errorf("couldn't parse action id: %w", err)
 	}
@@ -97,7 +95,7 @@ func (r reader) actionRowToAction(ctx context.Context, stmt *sqlite.Stmt) (*work
 
 	k := stmt.GetText("key")
 	if k != "" {
-		a.Key, err = uuid.Parse(k)
+		a.Key, err = fieldToID(ctx, "key", stmt)
 		if err != nil {
 			return nil, fmt.Errorf("couldn't parse action key: %w", err)
 		}
@@ -124,11 +122,11 @@ func (r reader) actionRowToAction(ctx context.Context, stmt *sqlite.Stmt) (*work
 		if req != nil {
 			if reflect.TypeOf(req).Kind() != reflect.Pointer {
 				if err := json.Unmarshal(b, &req); err != nil {
-					return nil, fmt.Errorf("couldn't unmarshal request: %w", err)
+					return nil, errUndecodable(ctx, "req", err)
 				}
 			} else {
 				if err := json.Unmarshal(b, req); err != nil {
-					return nil, fmt.Errorf("couldn't unmarshal request: %w", err)
+					return nil, errUndecodable(ctx, "req", err)
 				}
 			}
 			a.Req = req
@@ -138,7 +136,7 @@ func (r reader) actionRowToAction(ctx context.Context, stmt *sqlite.Stmt) (*work
 	if len(b) > 0 {
 		attempts, err := decodeAttempts(b, plug)
 		if err != nil {
-			return nil, fmt.Errorf("couldn't decode attempts: %w", err)
+			return nil, errUndecodable(ctx, "attempts", err)
 		}
 		a.Attempts.Set(attempts)
 	}

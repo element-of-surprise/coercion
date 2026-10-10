@@ -33,6 +33,9 @@ type plansEntry struct {
 	StateEnd        time.Time              `json:"stateEnd,omitempty"`
 	SubmitTime      time.Time              `json:"submitTime,omitempty"`
 	Reason          workflow.FailureReason `json:"reason,omitempty"`
+	// RuntimeUpdate is Plan.RuntimeUpdate, the heartbeat startup recovery ages a running Plan out by. Plan documents
+	// written before it existed do not have it.
+	RuntimeUpdate time.Time `json:"runtimeUpdate,omitempty"`
 
 	ETag azcore.ETag `json:"_etag,omitempty"`
 }

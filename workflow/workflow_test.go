@@ -2,6 +2,7 @@ package workflow
 
 import (
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/gostdlib/base/context"
@@ -42,6 +43,21 @@ func TestPlanValidate(t *testing.T) {
 	}
 	for _, v := range goodPlan().Blocks {
 		expectVals = append(expectVals, v)
+	}
+	// withName and withDescr return a good plan with only its Name or Descr replaced.
+	withName := func(name string) func() *Plan {
+		return func() *Plan {
+			p := goodPlan()
+			p.Name = name
+			return p
+		}
+	}
+	withDescr := func(descr string) func() *Plan {
+		return func() *Plan {
+			p := goodPlan()
+			p.Descr = descr
+			return p
+		}
 	}
 
 	tests := []struct {
@@ -105,8 +121,31 @@ func TestPlanValidate(t *testing.T) {
 			plan:       goodPlan,
 			validators: expectVals,
 		},
+		// Regression: storage that keeps Name and Descr in HTTP headers (azblob metadata) failed plans that validation
+		// had accepted, on a newline, a non-ASCII byte or a long description. Each row breaks one rule on one field.
+		{name: "Error: Name over the size limit", plan: withName(strings.Repeat("n", maxPlanNameLen+1)), err: true},
+		{name: "Error: Name with a newline", plan: withName("line one\nline two"), err: true},
+		{name: "Error: Name with a tab", plan: withName("a\tb"), err: true},
+		{name: "Error: Name with a non-ASCII character", plan: withName("caf\u00e9"), err: true},
+		{name: "Error: Name with leading whitespace", plan: withName(" name"), err: true},
+		{name: "Error: Name with trailing whitespace", plan: withName("name "), err: true},
+		{name: "Error: Descr over the size limit", plan: withDescr(strings.Repeat("d", maxPlanDescrLen+1)), err: true},
+		{name: "Error: Descr with a carriage return", plan: withDescr("line one\r\nline two"), err: true},
+		{name: "Error: Descr with a control character", plan: withDescr("a\x00b"), err: true},
+		{name: "Error: Descr with a non-ASCII character", plan: withDescr("caf\u00e9"), err: true},
+		{name: "Error: Descr with leading whitespace", plan: withDescr("\ndescr"), err: true},
+		{name: "Error: Descr with trailing whitespace", plan: withDescr("descr\n"), err: true},
+		{
+			name: "Success: a name and a multiline description at their size limits",
+			plan: func() *Plan {
+				p := goodPlan()
+				p.Name = strings.Repeat("n", maxPlanNameLen)
+				p.Descr = "line one\n\tline two" + strings.Repeat("d", maxPlanDescrLen-len("line one\n\tline two"))
+				return p
+			},
+			validators: expectVals,
+		},
 	}
-
 	for _, test := range tests {
 		ctx := context.Background()
 

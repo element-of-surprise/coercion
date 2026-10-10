@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/gostdlib/base/context"
+	"github.com/gostdlib/base/values/chans"
 
 	"github.com/element-of-surprise/coercion/plugins/registry"
 )
@@ -25,12 +26,14 @@ func TestClose(t *testing.T) {
 		t.Fatalf("TestClose: couldn't submit Close")
 	}
 
-	select {
-	case err := <-closed:
+	// The wait running out is the pass: Close is still waiting for the write.
+	wctx, cancel := context.WithTimeout(t.Context(), 100*time.Millisecond)
+	err, r := chans.Get(wctx, closed)
+	cancel()
+	if r != chans.ResultCtxDone {
 		t.Errorf("TestClose: Close returned (err == %v) while a write held the lock, want it to wait for the write", err)
 		v.mu.Unlock()
 		return
-	case <-time.After(100 * time.Millisecond):
 	}
 
 	v.mu.Unlock()

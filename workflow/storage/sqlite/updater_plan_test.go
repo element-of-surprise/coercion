@@ -15,6 +15,10 @@ func TestUpdatePlan(t *testing.T) {
 	t.Parallel()
 
 	done := workflow.State{Status: workflow.Completed, Start: time.Unix(100, 0).UTC(), End: time.Unix(200, 0).UTC()}
+	// created and heartbeat are the Plan's RuntimeUpdate when it is stored and when it is updated. Startup recovery ages
+	// a Plan out by its last update, so a heartbeat that is not stored lets a restart fail a Plan that is still live.
+	created := time.Unix(150, 0).UTC()
+	heartbeat := time.Unix(300, 0).UTC()
 
 	tests := []struct {
 		name string
@@ -23,7 +27,7 @@ func TestUpdatePlan(t *testing.T) {
 		wantErr bool
 	}{
 		{
-			name:   "Success: a stored Plan's state is updated.",
+			name:   "Success: a stored Plan's state and RuntimeUpdate are updated.",
 			stored: true,
 		},
 		{
@@ -44,6 +48,7 @@ func TestUpdatePlan(t *testing.T) {
 		t.Cleanup(func() { pool.Close() })
 
 		p := createTestPlan(t, time.Now().UTC())
+		p.RuntimeUpdate.Set(created)
 		if test.stored {
 			conn, err := pool.Take(t.Context())
 			if err != nil {
@@ -54,8 +59,17 @@ func TestUpdatePlan(t *testing.T) {
 			if err != nil {
 				t.Fatalf("TestUpdatePlan(%s): commitPlan: %s", test.name, err)
 			}
+			rdr := reader{mu: &sync.RWMutex{}, pool: pool, reg: reg}
+			got, err := rdr.Read(t.Context(), p.ID)
+			if err != nil {
+				t.Fatalf("TestUpdatePlan(%s): Read after commitPlan: %s", test.name, err)
+			}
+			if !got.RuntimeUpdate.Get().Equal(created) {
+				t.Errorf("TestUpdatePlan(%s): after commitPlan got RuntimeUpdate %v, want %v", test.name, got.RuntimeUpdate.Get(), created)
+			}
 		}
 		p.State.Set(done)
+		p.RuntimeUpdate.Set(heartbeat)
 
 		capture := &CaptureStmts{}
 		u := objectUpdater{mu: &sync.RWMutex{}, pool: pool, capture: capture}
@@ -81,6 +95,9 @@ func TestUpdatePlan(t *testing.T) {
 		}
 		if got.State.Get().Status != done.Status {
 			t.Errorf("TestUpdatePlan(%s): got status %v, want %v", test.name, got.State.Get().Status, done.Status)
+		}
+		if !got.RuntimeUpdate.Get().Equal(heartbeat) {
+			t.Errorf("TestUpdatePlan(%s): got RuntimeUpdate %v, want %v", test.name, got.RuntimeUpdate.Get(), heartbeat)
 		}
 	}
 }

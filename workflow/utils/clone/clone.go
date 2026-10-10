@@ -93,6 +93,9 @@ func Plan(ctx context.Context, p *workflow.Plan, options ...Option) *workflow.Pl
 		np.ID = p.ID
 		np.Reason = p.Reason
 		cloneStateAtomic(&np.State, &p.State)
+		if p.RuntimeUpdate.IsSet() {
+			np.RuntimeUpdate.Set(p.RuntimeUpdate.Get())
+		}
 		np.SubmitTime = p.SubmitTime
 	}
 
@@ -172,6 +175,7 @@ func Checks(ctx context.Context, c *workflow.Checks, options ...Option) *workflo
 	opts.callNum++
 
 	clone := &workflow.Checks{
+		Key:     c.Key,
 		Delay:   c.Delay,
 		Actions: make([]*workflow.Action, len(c.Actions)),
 	}
@@ -205,6 +209,7 @@ func Block(ctx context.Context, b *workflow.Block, options ...Option) *workflow.
 	opts.callNum++
 
 	n := &workflow.Block{
+		Key:               b.Key,
 		Name:              b.Name,
 		Descr:             b.Descr,
 		EntranceDelay:     b.EntranceDelay,
@@ -298,6 +303,7 @@ func Sequence(ctx context.Context, s *workflow.Sequence, options ...Option) *wor
 	opts.callNum++
 
 	ns := &workflow.Sequence{
+		Key:     s.Key,
 		Name:    s.Name,
 		Descr:   s.Descr,
 		Actions: make([]*workflow.Action, len(s.Actions)),
@@ -424,6 +430,7 @@ func Action(ctx context.Context, a *workflow.Action, options ...Option) *workflo
 	}
 
 	na := &workflow.Action{
+		Key:     a.Key,
 		Name:    a.Name,
 		Descr:   a.Descr,
 		Plugin:  a.Plugin,
@@ -449,17 +456,14 @@ func Action(ctx context.Context, a *workflow.Action, options ...Option) *workflo
 }
 
 // cloneStateAtomic clones the state from src AtomicValue[State] into dst AtomicValue[State].
-// dst is set only if src is, so an unset state stays unset and a zero one stays set.
+// dst is set only if src is, so an unset state stays unset and a zero one stays set. Every field is copied, including
+// the storage ETag, so a clone of a Plan read from storage can still be written back. State holds no references, so
+// the copy Get returns is independent of src.
 func cloneStateAtomic(dst, src *workflow.AtomicValue[workflow.State]) {
 	if !src.IsSet() {
 		return
 	}
-	state := src.Get()
-	dst.Set(workflow.State{
-		Status: state.Status,
-		Start:  state.Start,
-		End:    state.End,
-	})
+	dst.Set(src.Get())
 }
 
 // cloneAttempts clones a []workflow.Attempt.

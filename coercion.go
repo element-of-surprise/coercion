@@ -21,6 +21,7 @@ import (
 	"github.com/element-of-surprise/coercion/workflow/utils/walk"
 	"github.com/google/uuid"
 	"github.com/gostdlib/base/context"
+	"github.com/gostdlib/base/values/chans"
 )
 
 // This makes UUID generation much faster.
@@ -50,7 +51,8 @@ type Workstream struct {
 type Option func(*Workstream) error
 
 // WithMaxLastUpdate sets the maximum amount of time that can pass between updates to a Plan.
-// If a Plan has not been updated in this amount of time, it is considered stale and cannot be recovered.
+// If a Plan has not been updated in this amount of time, it is considered stale and cannot be recovered or resumed:
+// startup recovery and Resume mark it Failed with FRExceedRecovery instead of running it.
 // If this is not set, the default is 30 minutes.
 func WithMaxLastUpdate(d time.Duration) Option {
 	return func(w *Workstream) error {
@@ -180,47 +182,62 @@ func (w *Workstream) Start(ctx context.Context, id uuid.UUID) error {
 	return w.exec.Start(ctx, id)
 }
 
+// Resume takes over a Plan that storage records as Running but that has no run in flight in this Workstream, and
+// continues it from where it left off, as startup recovery does. Use it when Wait returns an error of type
+// errors.TypeNotOwned. It returns once the run is set up. If the Plan is already running here or has finished, Resume
+// does nothing. A Plan that has not been started returns a permanent error; use Start.
+//
+// Like startup recovery, Resume assumes this is the only Workstream executing Plans from this storage, and a Plan not
+// updated within the WithMaxLastUpdate limit is marked Failed instead of run; Resume then returns nil.
+func (w *Workstream) Resume(ctx context.Context, id uuid.UUID) error {
+	return w.exec.Resume(ctx, id)
+}
+
 // Plan returns the plan with the given id. If the plan does not exist, an error is returned.
 func (w *Workstream) Plan(ctx context.Context, id uuid.UUID) (*workflow.Plan, error) {
 	return w.store.Read(ctx, id)
 }
 
-// Wait waits for the plan with the given id to complete and returns the Plan's final state.
-// If the plan does not exist, an error is returned. If the context is canceled, the error
-// will be context.Canceled.
+// Wait waits for the plan with the given id to complete and returns the Plan's final state. If the plan does not
+// exist, an error is returned. If the context is canceled, the error wraps the context's cause (errors.Is(err,
+// context.Canceled) holds). If storage records the Plan as Running but no run for it is in flight in this Workstream,
+// errors.IsNotOwned(err) is true; call Resume and Wait again. Errors that retrying cannot fix wrap errors.ErrPermanent,
+// as do storage errors after the store has already run out of retries.
 func (w *Workstream) Wait(ctx context.Context, id uuid.UUID) (*workflow.Plan, error) {
-	if err := w.exec.Wait(ctx, id); err != nil {
-		return nil, err
-	}
-	return w.store.Read(ctx, id)
+	return w.exec.Wait(ctx, id)
 }
+
+// DefaultStatusInterval is the interval Status uses between updates when it is given one that is not positive.
+const DefaultStatusInterval = 10 * time.Second
 
 // Status returns an iterator that will receive updates on the status of the plan with the given id. The interval
 // is the time between updates. Iteration will terminate when the plan is complete or an error occurs.
 // If the Context is canceled, this will stop iteration. It is not necessary to cancel the iterator, but it will
 // be running in the background until the interval expires. Regardless of the final status of the Plan,
-// the last Result will have Err set to nil.
+// the last Result will have Err set to nil. An interval that is not positive uses DefaultStatusInterval.
 func (w *Workstream) Status(ctx context.Context, id uuid.UUID, interval time.Duration) iter.Seq[Result[*workflow.Plan]] {
+	if interval <= 0 {
+		interval = DefaultStatusInterval
+	}
 	return func(yield func(Result[*workflow.Plan]) bool) {
 		t := time.NewTicker(interval)
 		defer t.Stop()
 
 		for {
-			select {
-			case <-ctx.Done():
+			// Stop on a tick that arrives after ctx is done (ResultOKCanceled) too, so no read starts once ctx is done.
+			if _, r := chans.Get(ctx, t.C); r != chans.ResultOK {
 				return
-			case <-t.C:
-				plan, err := w.store.Read(ctx, id)
-				if err != nil {
-					yield(Result[*workflow.Plan]{Data: nil, Err: err})
-					return
-				}
-				if !yield(Result[*workflow.Plan]{Data: plan, Err: nil}) {
-					return
-				}
-				if plan.State.Get().Status != workflow.Running {
-					return
-				}
+			}
+			plan, err := w.store.Read(ctx, id)
+			if err != nil {
+				yield(Result[*workflow.Plan]{Data: nil, Err: err})
+				return
+			}
+			if !yield(Result[*workflow.Plan]{Data: plan, Err: nil}) {
+				return
+			}
+			if plan.State.Get().Status != workflow.Running {
+				return
 			}
 		}
 	}

@@ -169,6 +169,7 @@ func (v *Vault) wire(ctx context.Context, args Args, ops blobops.Ops) {
 		client:        ops,
 		reg:           args.Reg,
 		retentionDays: args.RetentionDays,
+		pools:         newFetchPools(ctx),
 	}
 	v.creator = creator{
 		mu:       v.mu,

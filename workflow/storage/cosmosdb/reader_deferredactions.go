@@ -7,7 +7,6 @@ import (
 
 	"github.com/Azure/azure-sdk-for-go/sdk/data/azcosmos"
 	"github.com/element-of-surprise/coercion/workflow"
-	"github.com/go-json-experiment/json"
 	"github.com/google/uuid"
 )
 
@@ -21,7 +20,7 @@ func (p reader) idToDeferredActions(ctx context.Context, planID azcosmos.Partiti
 	}
 
 	var resp deferredActionsEntry
-	if err := json.Unmarshal(res.Value, &resp); err != nil {
+	if err := unmarshalDoc(res.Value, &resp); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal DeferredActions: %w", err)
 	}
 
@@ -65,7 +64,7 @@ func (p reader) fetchDeferBatchByID(ctx context.Context, planID azcosmos.Partiti
 	}
 
 	var resp deferBatchesEntry
-	if err := json.Unmarshal(res.Value, &resp); err != nil {
+	if err := unmarshalDoc(res.Value, &resp); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal DeferBatch: %w", err)
 	}
 

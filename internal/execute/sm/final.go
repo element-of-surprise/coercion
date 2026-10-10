@@ -4,12 +4,19 @@ import (
 	"fmt"
 
 	"github.com/element-of-surprise/coercion/workflow"
+	"github.com/element-of-surprise/coercion/workflow/context"
+	"github.com/element-of-surprise/coercion/workflow/errors"
 
 	"github.com/gostdlib/base/statemachine"
 )
 
 // finalStates is used to set the finalStates states on the Plan by examining the Plan's object states.
-type finalStates struct{}
+type finalStates struct {
+	// unrun is the failure reason for the first Plan checks that never ran (still NotStarted). That is expected when
+	// a block failed, which sends the Plan past PlanPostChecks, so blocks only reports it as a bug when no block
+	// failed. FRUnknown when every check ran.
+	unrun workflow.FailureReason
+}
 
 // start is simply the starting place for the statemachine. It does nothing.
 func (f finalStates) start(req statemachine.Request[Data]) statemachine.Request[Data] {
@@ -43,8 +50,8 @@ func (f finalStates) bypassChecks(req statemachine.Request[Data]) statemachine.R
 func (f finalStates) planChecks(req statemachine.Request[Data]) statemachine.Request[Data] {
 	plan := req.Data.Plan
 
-	checksReason, checksErr := f.examineChecks([4]*workflow.Checks{plan.PreChecks, plan.ContChecks, plan.PostChecks, plan.DeferredChecks})
-	daReason, daErr := f.examineDeferredActions(plan.DeferredActions)
+	checksReason, unrun, checksErr := f.examineChecks(req.Ctx, [4]*workflow.Checks{plan.PreChecks, plan.ContChecks, plan.PostChecks, plan.DeferredChecks})
+	daReason, daErr := f.examineDeferredActions(req.Ctx, plan.DeferredActions)
 
 	if daErr != nil {
 		state := plan.State.Get()
@@ -64,6 +71,7 @@ func (f finalStates) planChecks(req statemachine.Request[Data]) statemachine.Req
 		req.Next = f.end
 		return req
 	}
+	f.unrun = unrun
 	req.Next = f.blocks
 	return req
 }
@@ -71,18 +79,18 @@ func (f finalStates) planChecks(req statemachine.Request[Data]) statemachine.Req
 // examineDeferredActions returns FRDeferredAction and an error if the DeferredActions
 // container is in a Failed state (set by PlanDeferredActions when a batch with
 // FailElement=true failed). Nil or non-Failed is a pass.
-func (f finalStates) examineDeferredActions(da *workflow.DeferredActions) (workflow.FailureReason, error) {
+func (f finalStates) examineDeferredActions(ctx context.Context, da *workflow.DeferredActions) (workflow.FailureReason, error) {
 	if da == nil {
 		return workflow.FRUnknown, nil
 	}
 	if da.State.Get().Status == workflow.Failed {
-		return workflow.FRDeferredAction, fmt.Errorf("DeferredActions failure")
+		return workflow.FRDeferredAction, errors.ErrPlugin(ctx, fmt.Errorf("DeferredActions failure"))
 	}
 	return workflow.FRUnknown, nil
 }
 
 // blocks checks the state of the block and fails the Plan if any of the blocks failed. If a block is not in a
-// state we should be in, it generates an ErrInternalFailure.
+// state we should be in, or every block completed but some Plan checks never ran, it generates a TypeBug error.
 func (f finalStates) blocks(req statemachine.Request[Data]) statemachine.Request[Data] {
 	plan := req.Data.Plan
 	for _, block := range req.Data.Plan.Blocks {
@@ -93,16 +101,24 @@ func (f finalStates) blocks(req statemachine.Request[Data]) statemachine.Request
 			state.Status = workflow.Failed
 			plan.State.Set(state)
 			plan.Reason = workflow.FRBlock
-			req.Err = fmt.Errorf("block failure")
+			req.Err = errors.ErrPlugin(req.Ctx, fmt.Errorf("block(%s) failure", block.Name))
 			return req
 		default:
 			state := plan.State.Get()
 			state.Status = workflow.Failed
 			plan.State.Set(state)
 			plan.Reason = workflow.FRBlock
-			req.Err = fmt.Errorf("block End state reached in %s state, which is invalid: %w", block.State.Get().Status, ErrInternalFailure)
+			req.Err = errors.E(req.Ctx, errors.CatInternal, errors.TypeBug, fmt.Errorf("block(%s) End state reached in %s state, which is invalid", block.Name, block.State.Get().Status))
 			return req
 		}
+	}
+	if f.unrun != workflow.FRUnknown {
+		state := plan.State.Get()
+		state.Status = workflow.Failed
+		plan.State.Set(state)
+		plan.Reason = f.unrun
+		req.Err = errors.E(req.Ctx, errors.CatInternal, errors.TypeBug, fmt.Errorf("plan End state reached with %v checks that never ran, though nothing failed", f.unrun))
+		return req
 	}
 	req.Next = f.end
 	return req
@@ -132,8 +148,10 @@ func (f finalStates) examineBypasses(gates *workflow.Checks) bool {
 }
 
 // examineChecks Pre/Cont/Post/Deferred checks passed and returns a failure reason and an error if one of them failed.
-// If nothing failed (or checks are nil) this returns workflow.FRUnknown and a nil error.
-func (f finalStates) examineChecks(checks [4]*workflow.Checks) (workflow.FailureReason, error) {
+// Checks still NotStarted are not a failure here: a failed block or earlier phase skips the Plan's PostChecks, so
+// whether they are a bug depends on the blocks. The reason for the first of them is returned as unrun for blocks to
+// decide. If nothing failed (or checks are nil) this returns workflow.FRUnknown as reason and a nil error.
+func (f finalStates) examineChecks(ctx context.Context, checks [4]*workflow.Checks) (reason, unrun workflow.FailureReason, err error) {
 	for i, check := range checks {
 		if check == nil {
 			continue
@@ -159,12 +177,16 @@ func (f finalStates) examineChecks(checks [4]*workflow.Checks) (workflow.Failure
 		switch check.State.Get().Status {
 		case workflow.Completed:
 			continue
+		case workflow.NotStarted:
+			if unrun == workflow.FRUnknown {
+				unrun = r
+			}
+			continue
 		case workflow.Failed:
-			return r, fmt.Errorf("%s failure", t)
+			return r, unrun, errors.ErrPlugin(ctx, fmt.Errorf("%s failure", t))
 		default:
-			err := fmt.Errorf("plan End state reached with a %s in %s state, which is invalid: %w", t, check.State.Get().Status, ErrInternalFailure)
-			return r, err
+			return r, unrun, errors.E(ctx, errors.CatInternal, errors.TypeBug, fmt.Errorf("plan End state reached with a %s in %s state, which is invalid", t, check.State.Get().Status))
 		}
 	}
-	return workflow.FRUnknown, nil
+	return workflow.FRUnknown, unrun, nil
 }

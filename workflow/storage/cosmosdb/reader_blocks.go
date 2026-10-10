@@ -7,7 +7,6 @@ import (
 
 	"github.com/Azure/azure-sdk-for-go/sdk/data/azcosmos"
 	"github.com/element-of-surprise/coercion/workflow"
-	"github.com/go-json-experiment/json"
 	"github.com/google/uuid"
 )
 
@@ -38,7 +37,7 @@ func (p reader) fetchBlockByID(ctx context.Context, planID azcosmos.PartitionKey
 func (p reader) docToBlock(ctx context.Context, response *azcosmos.ItemResponse) (*workflow.Block, error) {
 	var err error
 	var resp blocksEntry
-	if err = json.Unmarshal(response.Value, &resp); err != nil {
+	if err = unmarshalDoc(response.Value, &resp); err != nil {
 		return nil, err
 	}
 

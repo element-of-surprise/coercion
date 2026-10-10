@@ -34,9 +34,10 @@ const insertPlan = `
 		state_start,
 		state_end,
 		submit_time,
-		reason
+		reason,
+		runtime_update
 	) VALUES ($id, $group_id, $name, $descr, $meta, $bypasschecks, $prechecks, $postchecks, $contchecks, $deferredchecks,
-	$deferredactions, $blocks, $state_status, $state_start, $state_end, $submit_time, $reason)`
+	$deferredactions, $blocks, $state_status, $state_start, $state_end, $submit_time, $reason, $runtime_update)`
 
 var zeroTime = time.Unix(0, 0)
 
@@ -87,6 +88,7 @@ func commitPlan(ctx context.Context, conn *sqlite.Conn, p *workflow.Plan, captur
 		stmt.SetInt64("$submit_time", p.SubmitTime.UnixNano())
 	}
 	stmt.SetInt64("$reason", int64(p.Reason))
+	stmt.SetInt64("$runtime_update", runtimeUpdateNanos(p))
 
 	sStmt, err := stmt.Prepare(ctx, conn, errors.TypeStorageCreate)
 	if err != nil {

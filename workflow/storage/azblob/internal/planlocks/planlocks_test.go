@@ -7,6 +7,7 @@ import (
 
 	"github.com/element-of-surprise/coercion/workflow/context"
 	"github.com/google/uuid"
+	"github.com/gostdlib/base/values/chans"
 )
 
 // mode is one way to hold a plan's lock: as a writer or as a reader.
@@ -217,11 +218,12 @@ func TestConcurrentReadLocks(t *testing.T) {
 		})
 	}
 
-	select {
-	case <-all:
-	case <-time.After(5 * time.Second):
+	// all is only closed.
+	allCtx, allCancel := context.WithTimeout(t.Context(), 5*time.Second)
+	if _, r := chans.Get(allCtx, all); !r.Closed() {
 		t.Errorf("TestConcurrentReadLocks: got %d readers holding the lock at once, want %d", holding.Load(), readers)
 	}
+	allCancel()
 	close(release)
 	if err := work.Wait(ctx); err != nil {
 		t.Errorf("TestConcurrentReadLocks: got err == %s, want err == nil", err)
@@ -271,25 +273,29 @@ func TestLockExclusion(t *testing.T) {
 			)
 
 			if test.wantBlocked {
-				// This wait can only miss a lock that fails to block, never fail one that works.
-				select {
-				case <-acquired:
+				// This wait can only miss a lock that fails to block, never fail one that works. acquired is only
+				// closed, and the wait running out is the pass.
+				blockCtx, blockCancel := context.WithTimeout(t.Context(), 100*time.Millisecond)
+				_, r := chans.Get(blockCtx, acquired)
+				blockCancel()
+				if r != chans.ResultCtxDone {
 					t.Errorf("TestLockExclusion(%s): got the %s lock while the %s lock is held, want it blocked", test.name, test.try.name, test.hold.name)
-				case <-time.After(100 * time.Millisecond):
 				}
 			}
 			if !test.wantBlocked {
-				select {
-				case <-acquired:
-				case <-time.After(5 * time.Second):
+				takeCtx, takeCancel := context.WithTimeout(t.Context(), 5*time.Second)
+				_, r := chans.Get(takeCtx, acquired)
+				takeCancel()
+				if !r.Closed() {
 					t.Errorf("TestLockExclusion(%s): got the %s lock blocked by the %s lock, want it taken", test.name, test.try.name, test.hold.name)
 				}
 			}
 
 			test.hold.unlock(g, held)
-			select {
-			case <-acquired:
-			case <-time.After(5 * time.Second):
+			releaseCtx, releaseCancel := context.WithTimeout(t.Context(), 5*time.Second)
+			_, r := chans.Get(releaseCtx, acquired)
+			releaseCancel()
+			if !r.Closed() {
 				t.Errorf("TestLockExclusion(%s): got the %s lock still blocked after the %s lock was released", test.name, test.try.name, test.hold.name)
 			}
 		})
@@ -475,9 +481,11 @@ func TestClean(t *testing.T) {
 			g.Lock(held)
 			test.stop(g, cancel)
 
-			select {
-			case <-g.cleaned:
-			case <-time.After(5 * time.Second):
+			// cleaned is only closed.
+			cleanCtx, cleanCancel := context.WithTimeout(t.Context(), 5*time.Second)
+			_, r := chans.Get(cleanCtx, g.cleaned)
+			cleanCancel()
+			if !r.Closed() {
 				t.Fatalf("TestClean(%s): the cleanup loop did not stop", test.name)
 			}
 

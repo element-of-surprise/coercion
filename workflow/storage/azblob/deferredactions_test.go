@@ -1,11 +1,11 @@
 package azblob
 
 import (
+	"github.com/kylelemons/godebug/pretty"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/gostdlib/base/context"
 
 	"github.com/element-of-surprise/coercion/plugins/registry"
 	"github.com/element-of-surprise/coercion/workflow"
@@ -28,7 +28,7 @@ import (
 func TestDeferredActionsRoundTrip(t *testing.T) {
 	t.Parallel()
 
-	ctx := context.Background()
+	ctx := t.Context()
 	fakeClient := blobops.NewFake()
 	prefix := "test"
 
@@ -47,6 +47,7 @@ func TestDeferredActionsRoundTrip(t *testing.T) {
 		mu:            planMu,
 		readFlight:    &sync.Flight[string, *workflow.Plan]{},
 		existsFlight:  &sync.Flight[string, bool]{},
+		pools:         newFetchPools(ctx),
 		prefix:        prefix,
 		client:        fakeClient,
 		reg:           reg,
@@ -67,35 +68,25 @@ func TestDeferredActionsRoundTrip(t *testing.T) {
 	if got.GetPlanID() != plan.ID {
 		t.Errorf("TestDeferredActionsRoundTrip: DA planID = %v, want %v", got.GetPlanID(), plan.ID)
 	}
-	if n := len(got.DeferredBatches); n != 2 {
-		t.Fatalf("TestDeferredActionsRoundTrip: DeferredBatches count = %d, want 2", n)
+	// batch is the part of a DeferBatch this round trip must keep.
+	type batch struct {
+		Name        string
+		When        workflow.WhenDeferred
+		FailElement bool
+		Actions     int
+	}
+	want := []batch{
+		{Name: "fail-batch", When: workflow.OnFailure, FailElement: true, Actions: 1},
+		{Name: "success-batch", When: workflow.OnSuccess, Actions: 1},
+	}
+	var gotBatches []batch
+	for _, b := range got.DeferredBatches {
+		gotBatches = append(gotBatches, batch{Name: b.Name, When: b.When, FailElement: b.FailElement, Actions: len(b.Actions)})
+	}
+	if diff := pretty.Compare(want, gotBatches); diff != "" {
+		t.Fatalf("TestDeferredActionsRoundTrip: DeferredBatches mismatch, -want/+got:\n%s", diff)
 	}
 	failBatch := got.DeferredBatches[0]
-	successBatch := got.DeferredBatches[1]
-	if failBatch.When != workflow.OnFailure {
-		t.Errorf("TestDeferredActionsRoundTrip: DeferredBatches[0].When = %s, want OnFailure", failBatch.When)
-	}
-	if successBatch.When != workflow.OnSuccess {
-		t.Errorf("TestDeferredActionsRoundTrip: DeferredBatches[1].When = %s, want OnSuccess", successBatch.When)
-	}
-	if !failBatch.FailElement {
-		t.Errorf("TestDeferredActionsRoundTrip: DeferredBatches[0].FailElement = false, want true")
-	}
-	if successBatch.FailElement {
-		t.Errorf("TestDeferredActionsRoundTrip: DeferredBatches[1].FailElement = true, want false")
-	}
-	if failBatch.Name != "fail-batch" {
-		t.Errorf("TestDeferredActionsRoundTrip: DeferredBatches[0].Name = %q, want %q", failBatch.Name, "fail-batch")
-	}
-	if successBatch.Name != "success-batch" {
-		t.Errorf("TestDeferredActionsRoundTrip: DeferredBatches[1].Name = %q, want %q", successBatch.Name, "success-batch")
-	}
-	if len(failBatch.Actions) != 1 {
-		t.Errorf("TestDeferredActionsRoundTrip: DeferredBatches[0].Actions count = %d, want 1", len(failBatch.Actions))
-	}
-	if len(successBatch.Actions) != 1 {
-		t.Errorf("TestDeferredActionsRoundTrip: DeferredBatches[1].Actions count = %d, want 1", len(successBatch.Actions))
-	}
 
 	// 2. Mutate DeferredActions state and one DeferBatch state via the updaters.
 	daU := deferredActionsUpdater{mu: planMu, prefix: prefix, client: fakeClient}
@@ -155,7 +146,7 @@ func TestDeferredActionsRoundTrip(t *testing.T) {
 func TestDeferredActionsFetchMissing(t *testing.T) {
 	t.Parallel()
 
-	ctx := context.Background()
+	ctx := t.Context()
 	fakeClient := blobops.NewFake()
 	prefix := "test"
 
@@ -166,6 +157,7 @@ func TestDeferredActionsFetchMissing(t *testing.T) {
 		mu:            planlocks.New(ctx),
 		readFlight:    &sync.Flight[string, *workflow.Plan]{},
 		existsFlight:  &sync.Flight[string, bool]{},
+		pools:         newFetchPools(ctx),
 		prefix:        prefix,
 		client:        fakeClient,
 		reg:           reg,

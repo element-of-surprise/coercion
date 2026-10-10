@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/gostdlib/base/concurrency/sync"
+	"github.com/gostdlib/base/values/chans"
 
 	"github.com/element-of-surprise/coercion/workflow/context"
 	"github.com/google/uuid"
@@ -74,12 +75,10 @@ func (g *Group) clean(ctx context.Context, every time.Duration) {
 	t := time.NewTicker(every)
 	defer t.Stop()
 	for {
-		select {
-		case <-ctx.Done():
+		if _, r := chans.Get(ctx, t.C); r != chans.ResultOK {
 			return
-		case <-t.C:
-			g.sweep()
 		}
+		g.sweep()
 	}
 }
 
