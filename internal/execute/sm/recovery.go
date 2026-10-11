@@ -507,8 +507,10 @@ func (s *States) fixBlock(b *workflow.Block) {
 		}
 	}
 	// Settle each Checks from its actions before asking whether it failed, as fixPlan does: Checks still Running over
-	// a Failed action have failed, and missing that would leave the block Running to re-run them on resume.
-	for _, c := range []*workflow.Checks{b.PreChecks, b.ContChecks, b.PostChecks} {
+	// a Failed action have failed, and missing that would leave the block Running to re-run them on resume. That
+	// includes the DeferredChecks: a run writes them Failed before it writes the block Failed, and on resume
+	// BlockDeferredChecks resets and re-runs any that are not Completed, so a pass would complete a failed block.
+	for _, c := range []*workflow.Checks{b.PreChecks, b.ContChecks, b.PostChecks, b.DeferredChecks} {
 		fixChecks(c)
 		if checksFailed(c) {
 			state := b.State.Get()

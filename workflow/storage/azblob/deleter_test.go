@@ -5,48 +5,25 @@ import (
 	"testing"
 	"time"
 
-	"github.com/element-of-surprise/coercion/plugins/registry"
 	"github.com/element-of-surprise/coercion/workflow"
 	"github.com/element-of-surprise/coercion/workflow/context"
+	"github.com/element-of-surprise/coercion/workflow/errors"
+	"github.com/element-of-surprise/coercion/workflow/storage"
 	"github.com/element-of-surprise/coercion/workflow/storage/azblob/internal/blobops"
 	"github.com/element-of-surprise/coercion/workflow/storage/azblob/internal/planlocks"
 	testPlugins "github.com/element-of-surprise/coercion/workflow/storage/sqlite/testing/plugins"
 	"github.com/go-json-experiment/json"
-	"github.com/gostdlib/base/concurrency/sync"
 )
 
 // setupDeleterTest creates a test environment with fake client and deleter struct
 func setupDeleterTest(t *testing.T) (*blobops.Fake, deleter) {
 	t.Helper()
 
-	ctx := t.Context()
 	fakeClient := blobops.NewFake()
-	prefix := "test"
-
-	// Create plugin registry
-	reg := registry.New()
-	reg.Register(&testPlugins.HelloPlugin{})
-
-	planMu := planlocks.New(ctx)
-
-	// Create reader
-	r := reader{
-		mu:            planMu,
-		readFlight:    &sync.Flight[string, *workflow.Plan]{},
-		existsFlight:  &sync.Flight[string, bool]{},
-		pools:         newFetchPools(ctx),
-		prefix:        prefix,
-		client:        fakeClient,
-		reg:           reg,
-		retentionDays: 30,
-	}
-
-	// Create deleter
 	del := deleter{
-		mu:     planMu,
-		prefix: prefix,
+		mu:     planlocks.New(t.Context()),
+		prefix: "test",
 		client: fakeClient,
-		reader: r,
 	}
 
 	return fakeClient, del
@@ -237,21 +214,12 @@ func TestDelete(t *testing.T) {
 	tests := []struct {
 		name       string
 		withBlocks bool
-		// readInFlight starts a shared read of the plan that does not finish until the test ends.
-		readInFlight bool
-		wantErr      bool
+		wantErr    bool
 	}{
 		{
 			name:       "Success: delete plan with blocks and sequences",
 			withBlocks: true,
 			wantErr:    false,
-		},
-		{
-			// Regression: Delete joined the plan's shared read while holding the plan's write lock. A Read whose shared
-			// fetch was waiting for that lock never finished, so Delete waited on it forever and never unlocked.
-			name:         "Success: delete does not wait on a read of the plan already in flight",
-			withBlocks:   true,
-			readInFlight: true,
 		},
 		{
 			name:       "Success: delete plan without blocks",
@@ -274,16 +242,6 @@ func TestDelete(t *testing.T) {
 			// Verify blobs exist before deletion
 			if !fakeClient.BlobExists(containerName, planEntryBlobName(plan.ID)) {
 				t.Fatalf("TestDelete(%s): plan entry blob should exist before deletion", test.name)
-			}
-
-			if test.readInFlight {
-				// Stands in for a Read whose shared fetch is blocked waiting for the plan lock Delete holds.
-				block := make(chan struct{})
-				t.Cleanup(func() { close(block) })
-				del.reader.readFlight.DoChan(ctx, plan.ID.String(), func() (*workflow.Plan, error) {
-					<-block
-					return nil, nil
-				})
 			}
 
 			// Delete the plan
@@ -603,6 +561,96 @@ func TestDeleteActionBlob(t *testing.T) {
 			// Verify action blob is deleted
 			if fakeClient.BlobExists(containerName, actionBlobName(plan.ID, action.ID)) {
 				t.Errorf("TestDeleteActionBlob(%s): action blob should be deleted", test.name)
+			}
+		})
+	}
+}
+
+// TestDeleteRetry is a regression test: Delete removed the planEntry blob first, so a Delete that failed on a later blob
+// could not be retried. The retry's read needs the entry, so it failed with not found, and recovery skips plans with no
+// entry, so the rest of the plan's blobs stayed until the container aged out. A retried Delete must finish the job.
+// That includes a Running plan, which a read rebuilds from its child blobs: once a failed Delete has removed some of
+// them, the retry's read failed as inconsistent storage.
+func TestDeleteRetry(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		// running stores a Running plan, which a read rebuilds from its child blobs, instead of a NotStarted one.
+		running bool
+		// failBlob names the blob whose delete fails in the first Delete.
+		failBlob func(plan *workflow.Plan) string
+	}{
+		{
+			name:     "Success: a Delete retried after a block blob failed to delete removes the rest",
+			failBlob: func(plan *workflow.Plan) string { return blockBlobName(plan.ID, plan.Blocks[0].ID) },
+		},
+		{
+			name:     "Success: a Delete retried after the plan object blob failed to delete removes the rest",
+			failBlob: func(plan *workflow.Plan) string { return planObjectBlobName(plan.ID) },
+		},
+		{
+			// Only the entry is left, so the retry deletes just the entry.
+			name:     "Success: a Delete retried after the planEntry blob failed to delete removes it",
+			failBlob: func(plan *workflow.Plan) string { return planEntryBlobName(plan.ID) },
+		},
+		{
+			// Regression: the block blob is deleted before its sequences, so the retry's read could not rebuild the
+			// Running plan.
+			name:     "Success: a Delete of a Running plan retried after a sequence blob failed to delete removes the rest",
+			running:  true,
+			failBlob: func(plan *workflow.Plan) string { return sequenceBlobName(plan.ID, plan.Blocks[0].Sequences[0].ID) },
+		},
+		{
+			// Regression: as above, with the sequence blob gone too.
+			name:    "Success: a Delete of a Running plan retried after an action blob failed to delete removes the rest",
+			running: true,
+			failBlob: func(plan *workflow.Plan) string {
+				return actionBlobName(plan.ID, plan.Blocks[0].Sequences[0].Actions[0].ID)
+			},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+
+			ctx := t.Context()
+			var (
+				fakeClient *blobops.Fake
+				del        storage.Deleter
+				plan       *workflow.Plan
+			)
+			if test.running {
+				var v *Vault
+				v, fakeClient = newFakeVault(t)
+				plan = newRunningPlan(t, v)
+				del = v
+			} else {
+				var d deleter
+				fakeClient, d = setupDeleterTest(t)
+				plan = createAndUploadTestPlan(ctx, t, fakeClient, "test", true)
+				del = d
+			}
+			containerName := containerForPlan("test", plan.ID)
+
+			failBlob := test.failBlob(plan)
+			fakeClient.DeleteBlobErr = func(_, blob string) error {
+				if blob == failBlob {
+					return errors.New("throttled")
+				}
+				return nil
+			}
+			if err := del.Delete(ctx, plan.ID); err == nil {
+				t.Fatalf("TestDeleteRetry(%s): first Delete: got err == nil, want err != nil", test.name)
+			}
+
+			fakeClient.DeleteBlobErr = nil
+			if err := del.Delete(ctx, plan.ID); err != nil {
+				t.Errorf("TestDeleteRetry(%s): retried Delete: got err == %s, want err == nil", test.name, err)
+			}
+			if left := len(fakeClient.GetContainer(containerName)); left != 0 {
+				t.Errorf("TestDeleteRetry(%s): got %d blobs left after the retried Delete, want 0", test.name, left)
 			}
 		})
 	}

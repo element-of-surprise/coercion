@@ -183,7 +183,6 @@ func (v *Vault) wire(ctx context.Context, args Args, ops blobops.Ops) {
 		mu:     v.mu,
 		prefix: args.Prefix,
 		client: ops,
-		reader: v.reader,
 	}
 	v.closer = closer{mu: v.mu}
 	v.recovery = recovery{

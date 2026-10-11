@@ -349,6 +349,15 @@ func TestStart(t *testing.T) {
 				t.Errorf("TestStart(%s): Next method in Request is not the expected Start method", test.name)
 			}
 
+			// ran closes inside the runner, before launch releases the claim, so wait for the release first.
+			if waiter, ok := p.running.wait(test.id); ok {
+				wctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
+				_, r := chans.Get(wctx, waiter)
+				cancel()
+				if !r.Closed() {
+					t.Errorf("TestStart(%s): the run never released its claim", test.name)
+				}
+			}
 			if p.running.claims.Len() > 0 {
 				t.Errorf("TestStart(%s): did not delete the claim entry", test.name)
 			}
@@ -533,6 +542,8 @@ func TestWait(t *testing.T) {
 		cancelCtx bool
 		// recoveryFails makes a resumed run fail to write the Plan and end, as sm.Recovery does under throttling.
 		recoveryFails bool
+		// noRecovery builds the Plans as WithNoRecovery does.
+		noRecovery bool
 
 		// wantRuns is how many runs Wait resumes. A resumed run records the Plan Completed.
 		wantRuns int
@@ -621,6 +632,16 @@ func TestWait(t *testing.T) {
 			wantErr:       true,
 		},
 		{
+			// Regression: Wait resumed the Plan although WithNoRecovery disables recovery.
+			name:          "Error: a Running plan with no run here is not resumed when recovery is disabled",
+			stored:        true,
+			state:         workflow.State{Status: workflow.Running, Start: time.Now()},
+			noRecovery:    true,
+			wantReads:     1,
+			wantPermanent: true,
+			wantErr:       true,
+		},
+		{
 			name:          "Error: a Running plan with no run here whose resume fails returns the failure",
 			stored:        true,
 			state:         workflow.State{Status: workflow.Running, Start: time.Now()},
@@ -655,6 +676,7 @@ func TestWait(t *testing.T) {
 			states:        &sm.States{},
 			running:       newRunning(),
 			maxLastUpdate: 30 * time.Minute,
+			recovery:      !test.noRecovery,
 		}
 
 		ctx := t.Context()
@@ -807,6 +829,71 @@ func TestWaitConcurrent(t *testing.T) {
 	}
 }
 
+// TestWaitNoRecovery is a regression test: with recovery disabled, Wait looked for a run, then read storage, and
+// returned its permanent "recovery is disabled" error when the read said Running. A Start that claimed the Plan and
+// wrote it Running between the two made Wait reject a Plan running in this process. Wait must wait on that run.
+func TestWaitNoRecovery(t *testing.T) {
+	t.Parallel()
+
+	id := NewV7()
+	store := &slowReadStore{
+		status:    workflow.Running,
+		id:        id,
+		claimed:   func() bool { return false },
+		firstRead: make(chan struct{}),
+		gate:      make(chan struct{}),
+	}
+	e := &Plans{store: store, running: newRunning(), maxLastUpdate: 30 * time.Minute}
+
+	type waitResult struct {
+		plan *workflow.Plan
+		err  error
+	}
+	done := result.New[waitResult]()
+	context.Pool(t.Context()).Submit(t.Context(), func() {
+		plan, err := e.Wait(t.Context(), id)
+		done.Set(waitResult{plan: plan, err: err}, nil)
+	})
+	// Wait found no run and is reading storage.
+	if _, r := chans.Get(t.Context(), store.firstRead); !r.Closed() {
+		t.Fatalf("TestWaitNoRecovery: Wait never read the Plan")
+	}
+
+	// As Start does: claim the Plan and launch a run while Wait's read is open, then let the read return Running.
+	c, won := e.running.claim(id, func() {})
+	if !won {
+		t.Fatalf("TestWaitNoRecovery: setup claim did not win")
+	}
+	c.launched(nil)
+	close(store.gate)
+
+	// Wait must be waiting on the run, not have returned.
+	waitCtx, cancel := context.WithTimeout(t.Context(), 200*time.Millisecond)
+	_, r := chans.Get(waitCtx, done.Done())
+	cancel()
+	if r.Closed() {
+		got, _ := done.Wait(t.Context())
+		t.Fatalf("TestWaitNoRecovery: Wait returned (err == %v) while a run was in flight, want it to wait on the run", got.err)
+	}
+
+	// The run finishes.
+	store.setStatus(workflow.Completed)
+	c.release()
+
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	if _, r := chans.Get(ctx, done.Done()); !r.Closed() {
+		t.Fatalf("TestWaitNoRecovery: Wait never returned after the run ended")
+	}
+	got, _ := done.Wait(t.Context())
+	if got.err != nil {
+		t.Fatalf("TestWaitNoRecovery: got err == %s, want err == nil", got.err)
+	}
+	if got.plan.State.Get().Status != workflow.Completed {
+		t.Errorf("TestWaitNoRecovery: got status %v, want %v", got.plan.State.Get().Status, workflow.Completed)
+	}
+}
+
 // TestWaitAfterRun is a regression test: Waits on one Plan share a storage read, and a Wait that began after a run
 // ended could join a read that started before the run wrote its final state. That Wait got the stale snapshot, such
 // as a permanent "not started" error for a Plan that had finished. Resume aging a Plan out had the same gap: a Wait
@@ -883,6 +970,8 @@ func TestWaitAfterRun(t *testing.T) {
 			states:        &sm.States{},
 			running:       newRunning(),
 			maxLastUpdate: 30 * time.Minute,
+			// As New sets it: the early Wait resumes the Running Plan it read.
+			recovery: true,
 		}
 
 		// A Wait before the Plan's final state is written reads its stored status and holds that read open.

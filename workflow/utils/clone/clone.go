@@ -47,9 +47,9 @@ func WithRemoveCompletedSequences() Option {
 	}
 }
 
-// WithKeepState keeps all the state for all objects. This includes IDs,
-// output, etc. This is only useful if going to out to display or writing
-// to disk. You cannot submit an object cloned this way.
+// WithKeepState keeps all the state for all objects. This includes IDs, the ID of the Plan each object belongs to,
+// output, etc. This is only useful if going to out to display or writing to disk: storage locks and names an object's
+// records by its Plan ID, so a clone can be written back. You cannot submit an object cloned this way.
 func WithKeepState() Option {
 	return func(c cloneOptions) cloneOptions {
 		c.keepState = true
@@ -182,6 +182,7 @@ func Checks(ctx context.Context, c *workflow.Checks, options ...Option) *workflo
 
 	if opts.keepState {
 		clone.ID = c.ID
+		clone.SetPlanID(c.GetPlanID())
 		cloneStateAtomic(&clone.State, &c.State)
 	}
 
@@ -220,6 +221,7 @@ func Block(ctx context.Context, b *workflow.Block, options ...Option) *workflow.
 
 	if opts.keepState {
 		n.ID = b.ID
+		n.SetPlanID(b.GetPlanID())
 		cloneStateAtomic(&n.State, &b.State)
 	}
 
@@ -311,6 +313,7 @@ func Sequence(ctx context.Context, s *workflow.Sequence, options ...Option) *wor
 
 	if opts.keepState {
 		ns.ID = s.ID
+		ns.SetPlanID(s.GetPlanID())
 		cloneStateAtomic(&ns.State, &s.State)
 	}
 
@@ -349,6 +352,7 @@ func DeferredActions(ctx context.Context, da *workflow.DeferredActions, options 
 
 	if opts.keepState {
 		n.ID = da.ID
+		n.SetPlanID(da.GetPlanID())
 		cloneStateAtomic(&n.State, &da.State)
 	}
 
@@ -394,6 +398,7 @@ func DeferBatch(ctx context.Context, b *workflow.DeferBatch, options ...Option) 
 
 	if opts.keepState {
 		n.ID = b.ID
+		n.SetPlanID(b.GetPlanID())
 		cloneStateAtomic(&n.State, &b.State)
 	}
 
@@ -441,6 +446,7 @@ func Action(ctx context.Context, a *workflow.Action, options ...Option) *workflo
 
 	if opts.keepState {
 		na.ID = a.ID
+		na.SetPlanID(a.GetPlanID())
 		cloneStateAtomic(&na.State, &a.State)
 		// Attempts is set only if the source's is, so the clone matches its source whether or not it ran.
 		if a.Attempts.IsSet() {

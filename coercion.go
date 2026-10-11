@@ -71,8 +71,8 @@ func WithMaxSubmit(d time.Duration) Option {
 	}
 }
 
-// WithNoRecovery disables the recovery of plans. This does not prevent future turnups without this flag
-// from recovering plans. This is useful for testing and debugging.
+// WithNoRecovery disables the recovery of plans, both at startup and by Wait. This does not prevent future turnups
+// without this flag from recovering plans. This is useful for testing and debugging.
 func WithNoRecovery() Option {
 	return func(w *Workstream) error {
 		w.execOptions = append(w.execOptions, execute.WithNoRecovery())
@@ -192,8 +192,9 @@ func (w *Workstream) Plan(ctx context.Context, id uuid.UUID) (*workflow.Plan, er
 // context.Canceled) holds). If storage records the Plan as Running but no run for it is in flight in this Workstream,
 // Wait resumes it from where it left off, as startup recovery does, and waits for it; like startup recovery, this
 // assumes this is the only Workstream executing Plans from this storage. A Plan not updated within the
-// WithMaxLastUpdate limit is marked Failed instead of resumed and returned. Errors that retrying cannot fix wrap
-// errors.ErrPermanent, as do storage errors after the store has already run out of retries.
+// WithMaxLastUpdate limit is marked Failed instead of resumed and returned. With WithNoRecovery, Wait does not resume
+// the Plan and returns a permanent error instead. Errors that retrying cannot fix wrap errors.ErrPermanent, as do
+// storage errors after the store has already run out of retries.
 func (w *Workstream) Wait(ctx context.Context, id uuid.UUID) (*workflow.Plan, error) {
 	return w.exec.Wait(ctx, id)
 }

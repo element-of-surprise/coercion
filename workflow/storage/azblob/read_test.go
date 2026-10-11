@@ -1,6 +1,7 @@
 package azblob
 
 import (
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -12,6 +13,8 @@ import (
 	"github.com/gostdlib/base/concurrency/sync"
 	"github.com/gostdlib/base/context"
 	"github.com/gostdlib/base/values/chans"
+	"github.com/gostdlib/base/values/generics/result"
+	"github.com/kylelemons/godebug/pretty"
 
 	"github.com/element-of-surprise/coercion/plugins/registry"
 	"github.com/element-of-surprise/coercion/workflow"
@@ -795,5 +798,90 @@ func TestSharedFetch(t *testing.T) {
 				t.Errorf("TestSharedFetch(%s): got %d, want %d", test.name, got, test.want)
 			}
 		})
+	}
+}
+
+// TestReadShared is a regression test: Reads of one plan share a fetch, and every caller got the fetch's *workflow.Plan
+// itself. A Start or Resume runs the Plan it reads, so a Status or Wait read that joined its fetch shared the run's
+// working object: it saw changes not yet written, and the run's writes raced with its reads. Each caller must get its
+// own copy, with the fetch still shared and every object still naming its plan, which the updaters lock and name blobs
+// by.
+func TestReadShared(t *testing.T) {
+	t.Parallel()
+
+	ctx := t.Context()
+	v, fake := newFakeVault(t)
+	stored := newRunningPlan(t, v)
+
+	// Hold the shared fetch at its first storage read until both Reads have called.
+	var fetches atomic.Int32
+	entered := make(chan struct{}, 1)
+	gate := make(chan struct{})
+	fake.GetMetadataErr = func(_, blob string) error {
+		if blob != planEntryBlobName(stored.ID) {
+			return nil
+		}
+		fetches.Add(1)
+		chans.TryPut(entered, struct{}{})
+		// gate is only closed.
+		chans.Get(ctx, gate)
+		return nil
+	}
+
+	read := func() *result.Value[*workflow.Plan] {
+		res := result.New[*workflow.Plan]()
+		context.Pool(ctx).Submit(ctx, func() {
+			p, err := v.Read(ctx, stored.ID)
+			res.Set(p, err)
+		})
+		return res
+	}
+	first := read()
+	if _, r := chans.Get(ctx, entered); !r.OK() {
+		t.Fatalf("TestReadShared: the first Read never fetched")
+	}
+	second := read()
+	// Give the second Read time to join the fetch the first one holds open; the wait running out is expected.
+	joinCtx, cancel := context.WithTimeout(ctx, 100*time.Millisecond)
+	chans.Get(joinCtx, second.Done())
+	cancel()
+	close(gate)
+
+	a, err := first.Wait(ctx)
+	if err != nil {
+		t.Fatalf("TestReadShared: first Read: got err == %s, want err == nil", err)
+	}
+	b, err := second.Wait(ctx)
+	if err != nil {
+		t.Fatalf("TestReadShared: second Read: got err == %s, want err == nil", err)
+	}
+
+	if got := fetches.Load(); got != 1 {
+		t.Errorf("TestReadShared: got %d fetches, want 1 shared by both Reads", got)
+	}
+	if a == b || a.Blocks[0] == b.Blocks[0] || a.Blocks[0].Sequences[0].Actions[0] == b.Blocks[0].Sequences[0].Actions[0] {
+		t.Errorf("TestReadShared: the two Reads share Plan objects, want each to get its own copy")
+	}
+	if diff := pretty.Compare(a, b); diff != "" {
+		t.Errorf("TestReadShared: the two Reads got different Plans, -first +second:\n%s", diff)
+	}
+	// A copy must keep everything a fetch returns.
+	fake.GetMetadataErr = nil
+	direct, err := v.reader.ReadDirect(ctx, stored.ID)
+	if err != nil {
+		t.Fatalf("TestReadShared: ReadDirect: got err == %s, want err == nil", err)
+	}
+	if diff := pretty.Compare(direct, a); diff != "" {
+		t.Errorf("TestReadShared: a Read's copy differs from the fetched Plan, -fetched +read:\n%s", diff)
+	}
+	for _, p := range []*workflow.Plan{a, b} {
+		for item := range walk.Plan(p) {
+			if item.Value.Type() == workflow.OTPlan {
+				continue
+			}
+			if got := item.Value.(interface{ GetPlanID() uuid.UUID }).GetPlanID(); got != stored.ID {
+				t.Errorf("TestReadShared: got %v object with plan ID %s, want %s", item.Value.Type(), got, stored.ID)
+			}
+		}
 	}
 }

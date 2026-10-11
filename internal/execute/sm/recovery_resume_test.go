@@ -520,6 +520,38 @@ func TestRecoveryFailedBlockDeferredChecks(t *testing.T) {
 			wantReason:   workflow.FRBlock,
 			wantErr:      true,
 		},
+		{
+			// Regression: a run writes a block's DeferredChecks Failed before the block. After a crash between the two,
+			// recovery left the block Running, and BlockDeferredChecks reset and re-ran the failed checks, so a pass
+			// completed the block and the Plan.
+			name: "Error: a Running block whose DeferredChecks failed fails without running them again",
+			plan: func() *workflow.Plan {
+				return runningPlan(block(workflow.Running, workflow.Completed, false, workflow.Failed))
+			},
+			wantRan:      map[string]int{},
+			wantDeferred: workflow.Failed,
+			wantBlock:    workflow.Failed,
+			wantStatus:   workflow.Failed,
+			wantReason:   workflow.FRBlock,
+			wantErr:      true,
+		},
+		{
+			// Regression: as above, in a Plan whose ContChecks had failed. Recovery takes that block through
+			// fixCutBlock and FinishCutBlock, not fixBlock, and BlockDeferredChecks re-ran the failed checks, so a pass
+			// stored the block Completed.
+			name: "Error: a cut block whose DeferredChecks failed fails without running them again",
+			plan: func() *workflow.Plan {
+				p := runningPlan(block(workflow.Running, workflow.Completed, false, workflow.Failed))
+				p.ContChecks = recoveryChecks(workflow.Failed, settlementAction("plan cont check", workflow.Failed, start))
+				return p
+			},
+			wantRan:      map[string]int{},
+			wantDeferred: workflow.Failed,
+			wantBlock:    workflow.Failed,
+			wantStatus:   workflow.Failed,
+			wantReason:   workflow.FRContCheck,
+			wantErr:      true,
+		},
 	}
 
 	for _, test := range tests {

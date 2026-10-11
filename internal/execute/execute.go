@@ -100,7 +100,7 @@ func WithMaxSubmit(d time.Duration) Option {
 	}
 }
 
-// WithNoRecovery disables recovery of Plans that are in a Running state.
+// WithNoRecovery disables recovery of Plans that are in a Running state, both at startup and by Wait.
 func WithNoRecovery() Option {
 	return func(p *Plans) error {
 		p.recovery = false
@@ -485,7 +485,8 @@ func (e *Plans) now() time.Time {
 // takes it over with Resume and waits on that run; like startup recovery, this assumes this process is the only one
 // executing Plans from this storage. Wait returns:
 //   - the Plan and nil if the Plan has finished.
-//   - a permanent error (errors.ErrPermanent) if the Plan does not exist or has not been started.
+//   - a permanent error (errors.ErrPermanent) if the Plan does not exist or has not been started, or if it is Running
+//     with no run here and WithNoRecovery disabled recovery.
 //   - the error from Resume if the Plan could not be resumed.
 //   - a storage error if storage could not be read. It wraps errors.ErrPermanent if the store already ran out of
 //     retries.
@@ -504,6 +505,12 @@ func (e *Plans) Wait(ctx context.Context, id uuid.UUID) (*workflow.Plan, error) 
 		if plan.GetState().Status != workflow.Running {
 			return plan, nil
 		}
+		if !e.recovery {
+			if err := e.unowned(ctx, id); err != nil {
+				return nil, err
+			}
+			continue
+		}
 		// Storage records the Plan as Running, but no run for it is in flight here: a run ended without recording a
 		// final state, or startup recovery did not see the Plan. Take it over, then wait on the run Resume started, or
 		// read the outcome again if Resume found it finished or aged it out.
@@ -511,6 +518,27 @@ func (e *Plans) Wait(ctx context.Context, id uuid.UUID) (*workflow.Plan, error) 
 			return nil, err
 		}
 	}
+}
+
+// unowned is Wait's check, with recovery disabled, of a Plan it read as Running with no run here. A Start can claim
+// and run the Plan between Wait looking for a run and reading storage, so the read alone does not show the Plan is
+// abandoned. unowned takes the claim, as Resume does, and decides under it: it returns nil if a run is in flight or the
+// Plan is no longer Running, so Wait looks again, and a permanent error if the Plan is still Running with no run here.
+func (e *Plans) unowned(ctx context.Context, id uuid.UUID) error {
+	_, c, won, err := e.claimDecided(ctx, id)
+	if err != nil || !won {
+		return err
+	}
+	defer c.release()
+
+	plan, err := e.readStored(ctx, id)
+	if err != nil {
+		return err
+	}
+	if plan.GetState().Status == workflow.Running {
+		return errors.E(ctx, errors.CatUser, errors.TypeParameter, fmt.Errorf("plan(%s) is Running in storage but recovery is disabled: %w", id, errors.ErrPermanent))
+	}
+	return nil
 }
 
 // storedOutcome reads what storage says about a Plan that has no run in flight in this process. A Plan that has not

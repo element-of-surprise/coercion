@@ -719,6 +719,14 @@ func (s *States) BlockDeferredChecks(req statemachine.Request[Data]) statemachin
 	if checksCompleted(h.block.DeferredChecks) {
 		return req
 	}
+	// Only a recovered block reaches here with its DeferredChecks already Failed: a run writes them Failed before it
+	// writes the block. runChecksOnce resets the checks it runs, so running them again could turn the failure into a
+	// pass. Keep the failure and fail the block with it.
+	if checksFailed(h.block.DeferredChecks) {
+		s.failBlock(h.block)
+		req.Data.err = checksErr(req.Ctx, h.block.DeferredChecks)
+		return req
+	}
 
 	err := s.runChecksOnce(req.Ctx, h.block.DeferredChecks)
 	if err != nil {
@@ -728,6 +736,25 @@ func (s *States) BlockDeferredChecks(req statemachine.Request[Data]) statemachin
 	}
 
 	return req
+}
+
+// checksErr returns the error that failed checks: the last attempt's error of the first failed action that recorded
+// one, or a plugin error naming the checks if none did, as for an action recovery settled Failed when a crash cut it.
+func checksErr(ctx context.Context, checks *workflow.Checks) error {
+	for _, a := range checks.Actions {
+		if a.State.Get().Status != workflow.Failed {
+			continue
+		}
+		attempts := a.Attempts.Get()
+		if len(attempts) == 0 {
+			continue
+		}
+		// Err is a *plugins.Error: only a non-nil one may become an error, or the error would be non-nil but empty.
+		if err := attempts[len(attempts)-1].Err; err != nil {
+			return err
+		}
+	}
+	return errors.ErrPlugin(ctx, fmt.Errorf("checks(%s) failed before a restart, and no action recorded an error", checks.ID))
 }
 
 // BlockEnd ends the current block and moves to the next block.

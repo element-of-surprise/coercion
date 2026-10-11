@@ -310,6 +310,12 @@ func TestFixSeq(t *testing.T) {
 	}
 }
 
+// withDeferredChecks sets b's DeferredChecks to c and returns b.
+func withDeferredChecks(b *workflow.Block, c *workflow.Checks) *workflow.Block {
+	b.DeferredChecks = c
+	return b
+}
+
 func TestFixBlock(t *testing.T) {
 	t.Parallel()
 
@@ -359,6 +365,40 @@ func TestFixBlock(t *testing.T) {
 			name: "Success: a running block whose PreChecks are running over a failed action fails",
 			b:    newBlockWithStateSeqsChecks(&workflow.State{Status: workflow.Running}, nil, nil, newChecksWithStateAndActionsRecov(&workflow.State{Status: workflow.Running}, []*workflow.Action{newActionWithStateAndAttempts(&workflow.State{Status: workflow.Failed}, nil)}), nil, nil),
 			want: newBlockWithStateSeqsChecks(&workflow.State{Status: workflow.Failed}, nil, nil, nil, nil, nil),
+		},
+		{
+			// Regression: fixBlock never looked at a running block's DeferredChecks. A run that wrote them Failed and
+			// crashed before writing the block Failed left the block Running, BlockDeferredChecks reset and re-ran
+			// them on resume, and a pass completed the block and the Plan.
+			name: "Success: a running block whose DeferredChecks failed fails",
+			b: withDeferredChecks(
+				newBlockWithStateSeqsChecks(&workflow.State{Status: workflow.Running}, []*workflow.Sequence{
+					newSequenceWithStateAndActionsRecov(&workflow.State{Status: workflow.Completed}, nil),
+				}, nil, nil, nil, newChecksWithStateAndActionsRecov(&workflow.State{Status: workflow.Completed}, nil)),
+				newChecksWithStateAndActionsRecov(&workflow.State{Status: workflow.Failed}, nil),
+			),
+			want: newBlockWithStateSeqsChecks(&workflow.State{Status: workflow.Failed}, nil, nil, nil, nil, nil),
+		},
+		{
+			// Regression: as above, for a crash after an action was written Failed but before the DeferredChecks were.
+			name: "Success: a running block whose DeferredChecks are running over a failed action fails",
+			b: withDeferredChecks(
+				newBlockWithStateSeqsChecks(&workflow.State{Status: workflow.Running}, []*workflow.Sequence{
+					newSequenceWithStateAndActionsRecov(&workflow.State{Status: workflow.Completed}, nil),
+				}, nil, nil, nil, newChecksWithStateAndActionsRecov(&workflow.State{Status: workflow.Completed}, nil)),
+				newChecksWithStateAndActionsRecov(&workflow.State{Status: workflow.Running}, []*workflow.Action{newActionWithStateAndAttempts(&workflow.State{Status: workflow.Failed}, nil)}),
+			),
+			want: newBlockWithStateSeqsChecks(&workflow.State{Status: workflow.Failed}, nil, nil, nil, nil, nil),
+		},
+		{
+			name: "Success: a running block whose DeferredChecks completed stays running",
+			b: withDeferredChecks(
+				newBlockWithStateSeqsChecks(&workflow.State{Status: workflow.Running}, []*workflow.Sequence{
+					newSequenceWithStateAndActionsRecov(&workflow.State{Status: workflow.Completed}, nil),
+				}, nil, nil, nil, newChecksWithStateAndActionsRecov(&workflow.State{Status: workflow.Completed}, nil)),
+				newChecksWithStateAndActionsRecov(&workflow.State{Status: workflow.Completed}, nil),
+			),
+			want: newBlockWithStateSeqsChecks(&workflow.State{Status: workflow.Running}, nil, nil, nil, nil, nil),
 		},
 		{
 			name: "Success: a running block with completed sequences and no PostChecks stays running",

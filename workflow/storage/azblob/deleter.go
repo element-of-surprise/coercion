@@ -3,6 +3,8 @@ package azblob
 import (
 	"fmt"
 
+	"github.com/go-json-experiment/json"
+
 	"github.com/google/uuid"
 	"github.com/gostdlib/base/context"
 
@@ -21,7 +23,6 @@ type deleter struct {
 	mu     *planlocks.Group
 	prefix string
 	client blobops.Ops
-	reader reader
 
 	private.Storage
 }
@@ -32,9 +33,7 @@ func (d deleter) Delete(ctx context.Context, id uuid.UUID) error {
 	d.mu.Lock(id)
 	defer d.mu.Unlock(id)
 
-	// Read the plan to get its full hierarchy. fetchPlan, not the shared read: a Read's shared fetch waits for the plan
-	// lock held here, so joining it would wait forever. Under the write lock there is nothing to share anyway.
-	plan, err := d.reader.fetchPlan(ctx, id)
+	plan, err := d.deletionPlan(ctx, id)
 	if err != nil {
 		return errors.E(ctx, errors.CatInternal, errors.TypeStorageGet, fmt.Errorf("failed to read plan for deletion: %w", err))
 	}
@@ -51,8 +50,43 @@ func (d deleter) Delete(ctx context.Context, id uuid.UUID) error {
 	return nil
 }
 
+// deletionPlan returns the plan to delete, holding the ID of every object whose blob Delete removes. It decodes only the
+// plan object blob, which holds the whole hierarchy and whose objects' IDs never change, and reads no child blob. A
+// read rebuilds a Running plan, or one whose final write tore, from its child blobs, so after a Delete that failed
+// having removed some of them a read fails, and a retried Delete must not depend on it. If the object is gone but the
+// entry is not, only the entry is left to delete. If neither exists, the plan is not found. It does not use the shared
+// read either: a Read's shared fetch waits for the plan lock Delete holds, so joining it would wait forever.
+func (d deleter) deletionPlan(ctx context.Context, id uuid.UUID) (*workflow.Plan, error) {
+	containerName := containerForPlan(d.prefix, id)
+
+	data, err := d.client.GetBlob(ctx, containerName, planObjectBlobName(id))
+	switch {
+	case err == nil:
+		plan := &workflow.Plan{}
+		if err := json.Unmarshal(data, plan); err != nil {
+			return nil, errUndecodable(ctx, fmt.Sprintf("plan(%s) object blob", id), err)
+		}
+		plan.ID = id
+		return plan, nil
+	case !blobops.IsNotFound(err):
+		return nil, errors.E(ctx, errors.CatInternal, errors.TypeStorageGet, fmt.Errorf("failed to download plan(%s) object blob: %w", id, err))
+	}
+
+	if _, err := d.client.GetMetadata(ctx, containerName, planEntryBlobName(id)); err != nil {
+		if blobops.IsNotFound(err) {
+			return nil, errors.ErrNotFound(ctx, fmt.Errorf("plan(%s) not found: %w", id, err))
+		}
+		return nil, errors.E(ctx, errors.CatInternal, errors.TypeStorageGet, fmt.Errorf("failed to read plan(%s) entry: %w", id, err))
+	}
+	return &workflow.Plan{ID: id}, nil
+}
+
 // deletePlanInContainer deletes all blobs for a plan in a specific container.
-// This includes both the planEntry blob and the workflow.Plan object blob, plus all sub-objects.
+// This includes both the planEntry blob and the workflow.Plan object blob, plus all sub-objects. The planEntry goes last,
+// with the object just before it: a read needs the entry, so a Delete that fails partway leaves a plan a retried Delete
+// can still finish. If only the entry is left, a retried Delete removes it. Until then a read of a plan that was not
+// Running removes it as an entry with no object, while a read of a Running plan, which rebuilds the plan from its
+// deleted child blobs, reports inconsistent storage.
 func (d deleter) deletePlanInContainer(ctx context.Context, containerName string, plan *workflow.Plan) error {
 	// Check if container exists
 	exists, err := d.client.ContainerExists(ctx, containerName)
@@ -61,14 +95,6 @@ func (d deleter) deletePlanInContainer(ctx context.Context, containerName string
 	}
 	if !exists {
 		return nil // Container doesn't exist, nothing to delete
-	}
-
-	// Delete planEntry blob (lightweight, with metadata)
-	entryBlob := planEntryBlobName(plan.ID)
-	if err := d.deleteBlob(ctx, containerName, entryBlob); err != nil {
-		if !blobops.IsNotFound(err) {
-			return fmt.Errorf("failed to delete planEntry blob: %w", err)
-		}
 	}
 
 	// Delete all checks blobs
@@ -105,6 +131,14 @@ func (d deleter) deletePlanInContainer(ctx context.Context, containerName string
 	if err := d.deleteBlob(ctx, containerName, objectBlob); err != nil {
 		if !blobops.IsNotFound(err) {
 			return fmt.Errorf("failed to delete plan object blob: %w", err)
+		}
+	}
+
+	// Delete planEntry blob (lightweight, with metadata)
+	entryBlob := planEntryBlobName(plan.ID)
+	if err := d.deleteBlob(ctx, containerName, entryBlob); err != nil {
+		if !blobops.IsNotFound(err) {
+			return fmt.Errorf("failed to delete planEntry blob: %w", err)
 		}
 	}
 

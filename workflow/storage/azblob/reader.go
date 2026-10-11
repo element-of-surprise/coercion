@@ -22,6 +22,7 @@ import (
 	"github.com/element-of-surprise/coercion/workflow/storage"
 	"github.com/element-of-surprise/coercion/workflow/storage/azblob/internal/blobops"
 	"github.com/element-of-surprise/coercion/workflow/storage/azblob/internal/planlocks"
+	"github.com/element-of-surprise/coercion/workflow/utils/clone"
 )
 
 var _ storage.Reader = reader{}
@@ -158,13 +159,24 @@ func (r reader) Read(ctx context.Context, id uuid.UUID) (*workflow.Plan, error) 
 		return nil, errors.ErrNotFound(ctx, fmt.Errorf("plan(%s) is past retention", id))
 	}
 
-	return sharedFetch(ctx, sharedFetchArgs[*workflow.Plan]{
+	plan, err := sharedFetch(ctx, sharedFetchArgs[*workflow.Plan]{
 		flight:  r.readFlight,
 		key:     id.String(),
 		lock:    r.readLock(id),
 		fetch:   func(ctx context.Context) (*workflow.Plan, error) { return r.fetchPlan(ctx, id) },
 		timeout: sharedFetchTimeout,
 	})
+	if err != nil {
+		return nil, err
+	}
+	// Every caller sharing the fetch gets its result, and a caller may run or change the Plan it reads (Start and Resume
+	// run it), so each gets its own copy and the fetched Plan is only ever read. The copy keeps state, secrets and each
+	// object's Plan ID, which the updaters lock and name blobs by; the registry is set again as a fetch sets it.
+	plan = clone.Plan(ctx, plan, clone.WithKeepState(), clone.WithKeepSecrets())
+	if err := r.setRegistry(plan); err != nil {
+		return nil, err
+	}
+	return plan, nil
 }
 
 // ReadDirect reads a plan from storage bypassing the retention check.
