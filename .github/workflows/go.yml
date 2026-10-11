@@ -28,7 +28,30 @@ jobs:
         run: go build -v ./...
 
       - name: Test
-        run: go test -race -coverprofile=coverage.txt -covermode=atomic ./...
+        # The end to end tests run in their own job below.
+        run: go test -race -coverprofile=coverage.txt -covermode=atomic $(go list ./... | grep -v /internal/etoe)
+
+  etoe:
+    name: End to end tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@5c7944e73c4c2a096b17a9cb74d65b6c2bbafbde # v2.9.1
+        with:
+          egress-policy: audit
+
+      - uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
+
+      - name: Set up Go
+        uses: actions/setup-go@0a12ed9d6a96ab950c8f026ed9f722fe0da7ef32 # v5.0.2
+        with:
+          go-version-file: go.mod
+
+      - name: Test
+        # The recovery tests sleep through a 5 minute action by design, so a run takes about 10 minutes locally with
+        # -race. That is go test's default timeout, so raise it.
+        run: go test -race -timeout 45m ./internal/etoe/...
+
   govulncheck_job:
     name: Run govulncheck
     runs-on: ubuntu-latest

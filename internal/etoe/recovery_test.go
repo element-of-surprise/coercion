@@ -172,6 +172,29 @@ func recoveryTestStage(ctx context.Context, stage int, reg *registry.Register, c
 	if err != nil {
 		panic(err)
 	}
+	// Close the vault once its runs finish. Every stage opens its own, each with a full pool of sqlite connections, and
+	// leaving them open held ~16GB across the stages. The etoe tests share the captured vault, so a stage's vault can
+	// hold other tests' Plans that recovery resumed; wait for those too, or their runs write to a closed pool.
+	defer func() {
+		ch, err := vault.List(ctx, -1)
+		if err != nil {
+			panic(err)
+		}
+		for p := range ch {
+			if p.Err != nil {
+				panic(p.Err)
+			}
+			if p.Result.State.Status != workflow.Running {
+				continue
+			}
+			if _, err := ws.Wait(ctx, p.Result.ID); err != nil {
+				log.Printf("TestRecovery(stage %d): plan(%s) from another test: %v", stage, p.Result.ID, err)
+			}
+		}
+		if err := vault.Close(ctx); err != nil {
+			panic(err)
+		}
+	}()
 
 	tr := testResult{
 		Stage:  stage,

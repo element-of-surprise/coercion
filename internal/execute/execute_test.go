@@ -531,14 +531,18 @@ func TestWait(t *testing.T) {
 		inFlight  bool
 		finishRun bool
 		cancelCtx bool
+		// recoveryFails makes a resumed run fail to write the Plan and end, as sm.Recovery does under throttling.
+		recoveryFails bool
 
+		// wantRuns is how many runs Wait resumes. A resumed run records the Plan Completed.
+		wantRuns int
+		// wantStatus is the returned Plan's status, if it is not state's.
+		wantStatus workflow.Status
+		// wantReads is how many times storage is read.
+		wantReads int32
 		// wantPermanent means the error must wrap errors.ErrPermanent. Workstream.Wait's doc (coercion.go:~203) promises
 		// callers that errors retrying cannot fix wrap it, so their retry loops stop.
 		wantPermanent bool
-		// wantNotOwned means errors.IsNotOwned(err). Workstream.Wait's doc (coercion.go:~202) promises it for a Plan
-		// Running in storage with no run here, and Workstream.Resume's doc (coercion.go:~185) tells callers to Resume on
-		// it.
-		wantNotOwned bool
 		// wantCanceled means errors.Is(err, context.Canceled), which coercion.go's Workstream.Wait doc promises callers.
 		wantCanceled bool
 		wantErr      bool
@@ -549,32 +553,56 @@ func TestWait(t *testing.T) {
 			state:     finished(workflow.Completed),
 			inFlight:  true,
 			finishRun: true,
+			wantReads: 1,
 		},
 		{
-			name:   "Success: a Completed plan with no run here is returned",
-			stored: true,
-			state:  finished(workflow.Completed),
+			name:      "Success: a Completed plan with no run here is returned",
+			stored:    true,
+			state:     finished(workflow.Completed),
+			wantReads: 1,
 		},
 		{
-			name:   "Success: a Failed plan with no run here is returned",
-			stored: true,
-			state:  finished(workflow.Failed),
+			name:      "Success: a Failed plan with no run here is returned",
+			stored:    true,
+			state:     finished(workflow.Failed),
+			wantReads: 1,
 		},
 		{
-			name:   "Success: a Stopped plan with no run here is returned",
-			stored: true,
-			state:  finished(workflow.Stopped),
+			name:      "Success: a Stopped plan with no run here is returned",
+			stored:    true,
+			state:     finished(workflow.Stopped),
+			wantReads: 1,
 		},
 		{
 			// Regression: a run that ended without recording a final state (for example sm.Recovery failing to write
-			// the Plan) must not look finished to a caller already waiting on it.
-			name:         "Error: a run here ends while storage still says Running, so the plan is not owned",
-			stored:       true,
-			state:        workflow.State{Status: workflow.Running},
-			inFlight:     true,
-			finishRun:    true,
-			wantNotOwned: true,
-			wantErr:      true,
+			// the Plan) must not look finished to a caller already waiting on it, and must not be left Running with
+			// nothing executing it.
+			name:       "Success: a run here ends while storage still says Running, so Wait resumes it",
+			stored:     true,
+			state:      workflow.State{Status: workflow.Running, Start: time.Now()},
+			inFlight:   true,
+			finishRun:  true,
+			wantRuns:   1,
+			wantStatus: workflow.Completed,
+			// Wait's read, Resume's read, and Wait's read after the resumed run ends.
+			wantReads: 3,
+		},
+		{
+			// Regression: Wait returned an error for a Plan Running in storage with no run here, and medbay panicked on
+			// it. Wait must take the Plan over, as startup recovery does.
+			name:       "Success: a Running plan with no run here is resumed and Wait returns it finished",
+			stored:     true,
+			state:      workflow.State{Status: workflow.Running, Start: time.Now()},
+			wantRuns:   1,
+			wantStatus: workflow.Completed,
+			wantReads:  3,
+		},
+		{
+			name:       "Success: a Running plan with no run here past the recovery limit is returned Failed",
+			stored:     true,
+			state:      workflow.State{Status: workflow.Running, Start: time.Now().Add(-time.Hour)},
+			wantStatus: workflow.Failed,
+			wantReads:  3,
 		},
 		{
 			name:         "Error: the caller's context ends while a run is in flight",
@@ -593,11 +621,12 @@ func TestWait(t *testing.T) {
 			wantErr:       true,
 		},
 		{
-			name:         "Error: a Running plan with no run here is not owned",
-			stored:       true,
-			state:        workflow.State{Status: workflow.Running},
-			wantNotOwned: true,
-			wantErr:      true,
+			name:          "Error: a Running plan with no run here whose resume fails returns the failure",
+			stored:        true,
+			state:         workflow.State{Status: workflow.Running, Start: time.Now()},
+			recoveryFails: true,
+			wantRuns:      1,
+			wantErr:       true,
 		},
 		{
 			name:          "Error: a plan that is not in storage is a permanent not-found error",
@@ -614,7 +643,19 @@ func TestWait(t *testing.T) {
 			plan.State.Set(test.state)
 			store.m[id] = plan
 		}
-		p := &Plans{store: store, running: newRunning()}
+		runner := &resumeRunner{release: make(chan struct{}), complete: store.m[id]}
+		if test.recoveryFails {
+			// sm.Recovery reports a typed storage error.
+			runner.startErr = errors.E(t.Context(), errors.CatInternal, errors.TypeStorageUpdate, errors.New("storage busy"))
+		}
+		close(runner.release)
+		p := &Plans{
+			store:         store,
+			runner:        runner.Run,
+			states:        &sm.States{},
+			running:       newRunning(),
+			maxLastUpdate: 30 * time.Minute,
+		}
 
 		ctx := t.Context()
 		if test.cancelCtx {
@@ -635,11 +676,11 @@ func TestWait(t *testing.T) {
 		}
 
 		got, err := p.Wait(ctx, id)
+		if got, want := runner.Runs(), test.wantRuns; got != want {
+			t.Errorf("TestWait(%s): got %d runs, want %d", test.name, got, want)
+		}
 		if got, want := errors.Is(err, errors.ErrPermanent), test.wantPermanent; got != want {
 			t.Errorf("TestWait(%s): got errors.Is(err, ErrPermanent) == %v, want %v", test.name, got, want)
-		}
-		if got, want := errors.IsNotOwned(err), test.wantNotOwned; got != want {
-			t.Errorf("TestWait(%s): got errors.IsNotOwned(err) == %v, want %v", test.name, got, want)
 		}
 		// coercion.go's Workstream.Wait doc promises callers errors.Is(err, context.Canceled) when ctx is canceled.
 		if got, want := errors.Is(err, context.Canceled), test.wantCanceled; got != want {
@@ -656,12 +697,16 @@ func TestWait(t *testing.T) {
 			continue
 		}
 
-		if got.ID != id || got.State.Get().Status != test.state.Status {
-			t.Errorf("TestWait(%s): got plan(%s) status %v, want plan(%s) status %v", test.name, got.ID, got.State.Get().Status, id, test.state.Status)
+		wantStatus := test.state.Status
+		if test.wantStatus != workflow.NotStarted {
+			wantStatus = test.wantStatus
 		}
-		// Regression: Wait read the plan from storage and Workstream.Wait read it again. One read must be enough.
-		if got := store.reads.Load(); got != 1 {
-			t.Errorf("TestWait(%s): got %d storage reads, want 1", test.name, got)
+		if got.ID != id || got.State.Get().Status != wantStatus {
+			t.Errorf("TestWait(%s): got plan(%s) status %v, want plan(%s) status %v", test.name, got.ID, got.State.Get().Status, id, wantStatus)
+		}
+		// Regression: Wait read the plan from storage and Workstream.Wait read it again.
+		if got := store.reads.Load(); got != test.wantReads {
+			t.Errorf("TestWait(%s): got %d storage reads, want %d", test.name, got, test.wantReads)
 		}
 	}
 }
@@ -765,8 +810,8 @@ func TestWaitConcurrent(t *testing.T) {
 // TestWaitAfterRun is a regression test: Waits on one Plan share a storage read, and a Wait that began after a run
 // ended could join a read that started before the run wrote its final state. That Wait got the stale snapshot, such
 // as a permanent "not started" error for a Plan that had finished. Resume aging a Plan out had the same gap: a Wait
-// after it got the Running snapshot, a TypeNotOwned error, for a Plan that was now Failed. A read that started before
-// a Plan's final state was written must not be shared with a Wait that begins after it.
+// after it got the Running snapshot for a Plan that was now Failed. A read that started before a Plan's final state
+// was written must not be shared with a Wait that begins after it.
 func TestWaitAfterRun(t *testing.T) {
 	t.Parallel()
 
@@ -779,6 +824,8 @@ func TestWaitAfterRun(t *testing.T) {
 		// finish writes the Plan's final state while the early Wait's read is still open.
 		finish     func(t *testing.T, e *Plans, id uuid.UUID)
 		wantStatus workflow.Status
+		// wantEarlyErr means the early Wait, which read the status from before finish, returns an error.
+		wantEarlyErr bool
 	}{
 		{
 			name:   "Success: a Wait after a run ends reads the Plan the run finished",
@@ -799,7 +846,8 @@ func TestWaitAfterRun(t *testing.T) {
 					}
 				}
 			},
-			wantStatus: workflow.Completed,
+			wantStatus:   workflow.Completed,
+			wantEarlyErr: true,
 		},
 		{
 			name:   "Success: a Wait after Resume ages the Plan out reads it Failed",
@@ -853,10 +901,12 @@ func TestWaitAfterRun(t *testing.T) {
 		ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 		got, err := e.Wait(ctx, id)
 		cancel()
-		// The early Wait started before the final state was written, so its outcome is the error it read.
+		// The early Wait started before the final state was written, so its outcome comes from the status it read: an
+		// error for NotStarted, while for Running it resumes the Plan, finds it Failed and returns it.
 		close(store.gate)
-		if earlyErr, _ := early.Wait(t.Context()); earlyErr == nil {
-			t.Errorf("TestWaitAfterRun(%s): got the early Wait's err == nil, want the error for the status it read", test.name)
+		earlyErr, _ := early.Wait(t.Context())
+		if got := earlyErr != nil; got != test.wantEarlyErr {
+			t.Errorf("TestWaitAfterRun(%s): got the early Wait's err == %v, want err != nil == %v", test.name, earlyErr, test.wantEarlyErr)
 		}
 		if err != nil {
 			t.Errorf("TestWaitAfterRun(%s): got err == %s, want err == nil", test.name, err)
@@ -887,6 +937,8 @@ type resumeRunner struct {
 	holdFailed bool
 	// entered, if set, receives a value as each run begins, if it has room; it should have room for every run.
 	entered chan struct{}
+	// complete, if set, is the stored Plan, which a run that started records Completed before it ends, as sm.End does.
+	complete *workflow.Plan
 }
 
 func (r *resumeRunner) Run(_ string, req statemachine.Request[sm.Data], _ ...statemachine.Option) (statemachine.Request[sm.Data], error) {
@@ -917,6 +969,9 @@ func (r *resumeRunner) Run(_ string, req statemachine.Request[sm.Data], _ ...sta
 		return req, startErr
 	}
 	<-r.release
+	if r.complete != nil {
+		r.complete.State.Set(workflow.State{Status: workflow.Completed, Start: time.Now(), End: time.Now()})
+	}
 	return req, nil
 }
 
@@ -949,8 +1004,8 @@ func TestResume(t *testing.T) {
 		wantRuns int
 		// wantAgedOut means the Plan must be left Failed with FRExceedRecovery instead of run.
 		wantAgedOut bool
-		// wantPermanent means the error must wrap errors.ErrPermanent. Workstream.Resume's doc (coercion.go) promises
-		// callers a permanent error for a Plan that was never started, so their retry loops stop.
+		// wantPermanent means the error must wrap errors.ErrPermanent. Wait returns Resume's errors, and
+		// Workstream.Wait's doc (coercion.go) promises callers that errors retrying cannot fix wrap it.
 		wantPermanent bool
 		// wantNotFound means errors.IsNotFound(err), which retry.go's resumeOrExit branches on to stop retrying.
 		wantNotFound bool
@@ -1090,10 +1145,10 @@ func TestResume(t *testing.T) {
 			continue
 		}
 
-		// Resume returned after the run was set up, so the Plan is owned here: Wait must block, not report it
-		// as not owned. A second Resume must not start a second run.
+		// Resume returned after the run was set up, so the Plan is owned here: Wait must block on the run, not resume
+		// it again. A second Resume must not start a second run.
 		if _, ok := e.running.wait(id); !ok {
-			t.Errorf("TestResume(%s): resumed plan has no waiter, Wait would report it as not owned", test.name)
+			t.Errorf("TestResume(%s): resumed plan has no waiter, Wait would resume it again", test.name)
 		}
 		if err := e.Resume(ctx, id); err != nil {
 			t.Errorf("TestResume(%s): second Resume: got err == %s, want err == nil", test.name, err)

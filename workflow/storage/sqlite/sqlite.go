@@ -33,6 +33,10 @@ import (
 // This validates that the ReadWriter type implements the storage.ReadWriter interface.
 var _ storage.Vault = &Vault{}
 
+// poolSize is the number of connections in a Vault's pool. sqlitex.NewPool opens all of them up front, and each holds
+// its own memory outside the Go heap, so this is the Vault's standing cost. A caller that finds none free waits for one.
+const poolSize = 100
+
 // Vault implements the storage.Vault interface.
 type Vault struct {
 	// root is the root path for the storage.
@@ -100,7 +104,7 @@ func New(ctx context.Context, root string, reg *registry.Register, options ...Op
 	if inMem {
 		dsn := fmt.Sprintf("file:%s?mode=memory&cache=shared", uuid.New().String())
 		var err error
-		pool, err = sqlitex.NewPool(dsn, sqlitex.PoolOptions{PoolSize: 1000})
+		pool, err = sqlitex.NewPool(dsn, sqlitex.PoolOptions{PoolSize: poolSize})
 		if err != nil {
 			return nil, errors.E(ctx, errors.CatInternal, errors.TypeStorageCreate, fmt.Errorf("failed to create connection pool: %w", err))
 		}
@@ -122,7 +126,7 @@ func New(ctx context.Context, root string, reg *registry.Register, options ...Op
 			}
 		}
 
-		pool, err = sqlitex.NewPool(path, sqlitex.PoolOptions{Flags: flags, PoolSize: 1000})
+		pool, err = sqlitex.NewPool(path, sqlitex.PoolOptions{Flags: flags, PoolSize: poolSize})
 		if err != nil {
 			return nil, errors.E(ctx, errors.CatInternal, errors.TypeStorageCreate, fmt.Errorf("couldn't create sqlite pool: %w", err))
 		}

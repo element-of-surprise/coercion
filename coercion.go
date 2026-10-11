@@ -52,7 +52,7 @@ type Option func(*Workstream) error
 
 // WithMaxLastUpdate sets the maximum amount of time that can pass between updates to a Plan.
 // If a Plan has not been updated in this amount of time, it is considered stale and cannot be recovered or resumed:
-// startup recovery and Resume mark it Failed with FRExceedRecovery instead of running it.
+// startup recovery and Wait mark it Failed with FRExceedRecovery instead of running it.
 // If this is not set, the default is 30 minutes.
 func WithMaxLastUpdate(d time.Duration) Option {
 	return func(w *Workstream) error {
@@ -182,17 +182,6 @@ func (w *Workstream) Start(ctx context.Context, id uuid.UUID) error {
 	return w.exec.Start(ctx, id)
 }
 
-// Resume takes over a Plan that storage records as Running but that has no run in flight in this Workstream, and
-// continues it from where it left off, as startup recovery does. Use it when Wait returns an error of type
-// errors.TypeNotOwned. It returns once the run is set up. If the Plan is already running here or has finished, Resume
-// does nothing. A Plan that has not been started returns a permanent error; use Start.
-//
-// Like startup recovery, Resume assumes this is the only Workstream executing Plans from this storage, and a Plan not
-// updated within the WithMaxLastUpdate limit is marked Failed instead of run; Resume then returns nil.
-func (w *Workstream) Resume(ctx context.Context, id uuid.UUID) error {
-	return w.exec.Resume(ctx, id)
-}
-
 // Plan returns the plan with the given id. If the plan does not exist, an error is returned.
 func (w *Workstream) Plan(ctx context.Context, id uuid.UUID) (*workflow.Plan, error) {
 	return w.store.Read(ctx, id)
@@ -201,8 +190,10 @@ func (w *Workstream) Plan(ctx context.Context, id uuid.UUID) (*workflow.Plan, er
 // Wait waits for the plan with the given id to complete and returns the Plan's final state. If the plan does not
 // exist, an error is returned. If the context is canceled, the error wraps the context's cause (errors.Is(err,
 // context.Canceled) holds). If storage records the Plan as Running but no run for it is in flight in this Workstream,
-// errors.IsNotOwned(err) is true; call Resume and Wait again. Errors that retrying cannot fix wrap errors.ErrPermanent,
-// as do storage errors after the store has already run out of retries.
+// Wait resumes it from where it left off, as startup recovery does, and waits for it; like startup recovery, this
+// assumes this is the only Workstream executing Plans from this storage. A Plan not updated within the
+// WithMaxLastUpdate limit is marked Failed instead of resumed and returned. Errors that retrying cannot fix wrap
+// errors.ErrPermanent, as do storage errors after the store has already run out of retries.
 func (w *Workstream) Wait(ctx context.Context, id uuid.UUID) (*workflow.Plan, error) {
 	return w.exec.Wait(ctx, id)
 }

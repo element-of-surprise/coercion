@@ -61,7 +61,8 @@ type Plans struct {
 	validators immutable.Slice[validator]
 
 	// maxLastUpdate is the maximum amount of time that can pass between updates to a Plan before it is considered stale
-	// and cannot be recovered or resumed: startup recovery and Resume mark it Failed with FRExceedRecovery. Default 30m.
+	// and cannot be recovered or resumed: startup recovery and Resume (and so Wait) mark it Failed with
+	// FRExceedRecovery. Default 30m.
 	maxLastUpdate time.Duration
 	// maxSubmitTime is the maximum amount of time that can pass between submission and start of a Plan.
 	maxSubmit time.Duration
@@ -80,7 +81,8 @@ type Option func(*Plans) error
 
 // WithMaxLastUpdate sets the maximum amount of time that can pass between updates to a Plan. If a Plan has not been
 // updated in this amount of time, it is considered stale and cannot be recovered or resumed: startup recovery and
-// Resume mark it Failed with FRExceedRecovery instead of running it. If this is not set, the default is 30 minutes.
+// Resume (and so Wait) mark it Failed with FRExceedRecovery instead of running it. If this is not set, the default is
+// 30 minutes.
 func WithMaxLastUpdate(d time.Duration) Option {
 	return func(p *Plans) error {
 		p.maxLastUpdate = d
@@ -413,7 +415,8 @@ func (e *Plans) launch(ctx, runCtx context.Context, c *claim, plan *workflow.Pla
 }
 
 // Resume takes over a Plan that storage records as Running but that has no run in flight in this process, and
-// continues it from where it left off, the same way startup recovery does. It returns once the run is set up, or with
+// continues it from where it left off, the same way startup recovery does. Wait and the retry of Plans that startup
+// recovery could not start use it. It returns once the run is set up, or with
 // the error that kept it from starting. If a run for id is already in flight here, or the Plan has finished, Resume
 // does nothing. A Plan that has not started returns a permanent error; use Start.
 //
@@ -478,33 +481,47 @@ func (e *Plans) now() time.Time {
 // Wait waits for a Plan to finish execution and returns it as stored. Cancelling the Context stops waiting and returns
 // a TypeTimeout error that wraps the Context's cause (so errors.Is(err, context.Canceled) holds). Once no run for the
 // Plan is in flight in this process (at once, or when the run here ends), the outcome comes from storage, so a run
-// that ended without recording a final state is not reported as finished:
+// that ended without recording a final state is not reported as finished. If storage records the Plan as Running, Wait
+// takes it over with Resume and waits on that run; like startup recovery, this assumes this process is the only one
+// executing Plans from this storage. Wait returns:
 //   - the Plan and nil if the Plan has finished.
 //   - a permanent error (errors.ErrPermanent) if the Plan does not exist or has not been started.
-//   - a TypeNotOwned error if storage records the Plan as Running. Resume takes it over.
+//   - the error from Resume if the Plan could not be resumed.
 //   - a storage error if storage could not be read. It wraps errors.ErrPermanent if the store already ran out of
 //     retries.
 func (e *Plans) Wait(ctx context.Context, id uuid.UUID) (*workflow.Plan, error) {
-	if waiter, ok := e.running.wait(id); ok {
-		// waiter is only closed. A close wins over a done ctx, so a run that ended as ctx did is still reported.
-		if _, r := chans.Get(ctx, waiter); !r.Closed() {
-			return nil, errors.E(ctx, errors.CatInternal, errors.TypeTimeout, fmt.Errorf("stopped waiting for plan(%s): %w", id, context.Cause(ctx)))
+	for {
+		if waiter, ok := e.running.wait(id); ok {
+			// waiter is only closed. A close wins over a done ctx, so a run that ended as ctx did is still reported.
+			if _, r := chans.Get(ctx, waiter); !r.Closed() {
+				return nil, errors.E(ctx, errors.CatInternal, errors.TypeTimeout, fmt.Errorf("stopped waiting for plan(%s): %w", id, context.Cause(ctx)))
+			}
+		}
+		plan, err := e.storedOutcome(ctx, id)
+		if err != nil {
+			return nil, err
+		}
+		if plan.GetState().Status != workflow.Running {
+			return plan, nil
+		}
+		// Storage records the Plan as Running, but no run for it is in flight here: a run ended without recording a
+		// final state, or startup recovery did not see the Plan. Take it over, then wait on the run Resume started, or
+		// read the outcome again if Resume found it finished or aged it out.
+		if err := e.Resume(ctx, id); err != nil {
+			return nil, err
 		}
 	}
-	return e.storedOutcome(ctx, id)
 }
 
-// storedOutcome reports what storage says about a Plan that has no run in flight in this process. See Wait.
+// storedOutcome reads what storage says about a Plan that has no run in flight in this process. A Plan that has not
+// been started is a permanent error. See Wait.
 func (e *Plans) storedOutcome(ctx context.Context, id uuid.UUID) (*workflow.Plan, error) {
 	plan, err := e.readShared(ctx, id)
 	if err != nil {
 		return nil, err
 	}
-	switch plan.GetState().Status {
-	case workflow.NotStarted:
+	if plan.GetState().Status == workflow.NotStarted {
 		return nil, errors.E(ctx, errors.CatUser, errors.TypeParameter, fmt.Errorf("plan(%s) is not started: %w", id, errors.ErrPermanent))
-	case workflow.Running:
-		return nil, errors.ErrNotOwned(ctx, fmt.Errorf("plan(%s) is Running in storage, but no run for it is in flight in this process; Resume it", id))
 	}
 	return plan, nil
 }

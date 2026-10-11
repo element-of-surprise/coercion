@@ -51,15 +51,11 @@ const (
 	TypeTimeout Type = Type(4) // TimeoutOrCancel
 	// TypeFS represents an error with the file system.
 	TypeFS Type = Type(5) // FS
-	// TypeNotOwned represents a Plan that storage records as Running, but that has no run in flight in this process.
-	// This happens when a run ended without recording a final state, or when startup recovery did not see the Plan.
-	// The Plan can be taken over with Workstream.Resume().
-	TypeNotOwned Type = Type(6) // NotOwned
 	// TypeNotFound represents a Plan or object that does not exist in storage.
-	TypeNotFound Type = Type(7) // NotFound
+	TypeNotFound Type = Type(6) // NotFound
 	// TypePlugin represents a plugin that failed: its Init failed, or an action it ran returned an error, timed out or
 	// returned a response of the wrong type.
-	TypePlugin Type = Type(8) // Plugin
+	TypePlugin Type = Type(7) // Plugin
 
 	// TypeStorageCreate represents an error with creating storage tables, containers, etc.
 	TypeStorageCreate Type = Type(1000) // StorageCreate
@@ -138,12 +134,6 @@ func ErrNotFound(ctx context.Context, msg error) Error {
 	return E(ctx, CatUser, TypeNotFound, fmt.Errorf("%w: %w", NotFound, msg), WithCallNum(3))
 }
 
-// ErrNotOwned returns the canonical error for a Plan that storage records as Running but that has no run in flight in
-// this process. See TypeNotOwned.
-func ErrNotOwned(ctx context.Context, msg error) Error {
-	return E(ctx, CatInternal, TypeNotOwned, msg, WithCallNum(3))
-}
-
 // ErrStorageInconsistent returns the canonical error for stored data that disagrees with itself (see
 // TypeStorageInconsistent). The stored data stays the same however often it is read, so retrying cannot fix it: the
 // error wraps ErrPermanent so retries stop.
@@ -170,9 +160,4 @@ func IsStorageInconsistent(err error) bool {
 // IsBug reports whether any error in err's chain is a TypeBug error: a state the code should never reach.
 func IsBug(err error) bool {
 	return Is(err, Error{Category: CatInternal, Type: TypeBug})
-}
-
-// IsNotOwned reports whether any error in err's chain is a not-owned error (TypeNotOwned).
-func IsNotOwned(err error) bool {
-	return Is(err, Error{Category: CatInternal, Type: TypeNotOwned})
 }
