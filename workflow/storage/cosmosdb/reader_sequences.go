@@ -7,7 +7,6 @@ import (
 
 	"github.com/Azure/azure-sdk-for-go/sdk/data/azcosmos"
 	"github.com/element-of-surprise/coercion/workflow"
-	"github.com/go-json-experiment/json"
 	"github.com/google/uuid"
 )
 
@@ -37,7 +36,7 @@ func (p reader) fetchSequenceByID(ctx context.Context, planID azcosmos.Partition
 func (p reader) docToSequence(ctx context.Context, planID azcosmos.PartitionKey, response *azcosmos.ItemResponse) (*workflow.Sequence, error) {
 	var err error
 	var resp sequencesEntry
-	if err = json.Unmarshal(response.Value, &resp); err != nil {
+	if err = unmarshalDoc(response.Value, &resp); err != nil {
 		return nil, err
 	}
 

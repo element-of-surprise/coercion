@@ -181,20 +181,21 @@ func planToEntry(swarm string, p *workflow.Plan) (plansEntry, error) {
 	}
 
 	plan := plansEntry{
-		PartitionKey: keyStr(p.ID),
-		Swarm:        swarm,
-		Type:         workflow.OTPlan,
-		ID:           p.ID,
-		PlanID:       p.ID,
-		GroupID:      p.GroupID,
-		Name:         p.Name,
-		Descr:        p.Descr,
-		Meta:         p.Meta,
-		Blocks:       blocks,
-		StateStatus:  p.State.Get().Status,
-		StateStart:   p.State.Get().Start,
-		StateEnd:     p.State.Get().End,
-		Reason:       p.Reason,
+		PartitionKey:  keyStr(p.ID),
+		Swarm:         swarm,
+		Type:          workflow.OTPlan,
+		ID:            p.ID,
+		PlanID:        p.ID,
+		GroupID:       p.GroupID,
+		Name:          p.Name,
+		Descr:         p.Descr,
+		Meta:          p.Meta,
+		Blocks:        blocks,
+		StateStatus:   p.State.Get().Status,
+		StateStart:    p.State.Get().Start,
+		StateEnd:      p.State.Get().End,
+		Reason:        p.Reason,
+		RuntimeUpdate: p.RuntimeUpdate.Get(),
 	}
 
 	if p.BypassChecks != nil {
@@ -486,15 +487,15 @@ func decodeAttempts(rawAttempts []byte, plug plugins.Plugin) ([]workflow.Attempt
 		return []workflow.Attempt{}, nil
 	}
 	rawList := make([][]byte, 0)
-	if err := json.Unmarshal(rawAttempts, &rawList); err != nil {
-		return nil, fmt.Errorf("json.Unmarshal(rawAttempts): %w", err)
+	if err := unmarshalDoc(rawAttempts, &rawList); err != nil {
+		return nil, fmt.Errorf("decoding attempts: %w", err)
 	}
 
 	attempts := make([]workflow.Attempt, 0, len(rawList))
 	for _, raw := range rawList {
 		var a = workflow.Attempt{Resp: plug.Response()}
-		if err := json.Unmarshal(raw, &a); err != nil {
-			return nil, fmt.Errorf("json.Unmarshal(raw): %w", err)
+		if err := unmarshalDoc(raw, &a); err != nil {
+			return nil, fmt.Errorf("decoding attempt: %w", err)
 		}
 		attempts = append(attempts, a)
 	}

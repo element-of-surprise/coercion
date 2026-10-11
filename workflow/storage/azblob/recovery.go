@@ -2,11 +2,8 @@ package azblob
 
 import (
 	"fmt"
-	"testing"
-	"time"
 
-	"github.com/google/uuid"
-	"github.com/gostdlib/base/concurrency/worker"
+	"github.com/gostdlib/base/concurrency/sync"
 	"github.com/gostdlib/base/context"
 
 	"github.com/element-of-surprise/coercion/internal/private"
@@ -16,261 +13,128 @@ import (
 	"github.com/element-of-surprise/coercion/workflow/storage/azblob/internal/blobops"
 )
 
-var _ storage.Recovery = recovery{}
+var (
+	_ storage.Recovery         = recovery{}
+	_ storage.RecoveredRunning = recovery{}
+)
 
-// recovery implements the storage.Recovery interface.
+// recovery implements the storage.Recovery and storage.RecoveredRunning interfaces.
 type recovery struct {
-	retentionDays int
-	reader        reader
-	updater       updater
-	uploader      *uploader
-	nower         func() time.Time
-
-	testRecoverPlan func(ctx context.Context, containerName string, planID uuid.UUID) error
+	reader   reader
+	uploader *uploader
+	// running holds the Running plans the last Recovery found until startup recovery takes them. It is shared by every
+	// copy of the recovery, so it must not be nil; wire sets it.
+	running *sync.MutexValue[runningSnapshot]
 
 	private.Storage
 }
 
-// Recovery implements storage.Recovery.Recovery(). It performs recovery operations
-// on plans that may have incomplete blob storage due to failures or crashes.
-//
-// Recovery strategy:
-// 1. Read the plan blob (which contains the full hierarchy)
-// 2. Check if the plan is currently running (status == Running)
-// 3. If not running, verify all sub-object blobs exist
-// 4. Recreate any missing blobs from the plan hierarchy
+// runningSnapshot is the Running plans found by the last Recovery, held until startup recovery takes them instead of
+// listing every container again with a Search. ok is false when nothing is held.
+type runningSnapshot struct {
+	results []storage.ListResult
+	ok      bool
+}
+
+// Recovery implements storage.Recovery.Recovery().
 func (r recovery) Recovery(ctx context.Context) error {
-	// List all plans in recent containers
-	containers, err := recoveryContainerNames(ctx, r.reader.prefix, r.reader, r.retentionDays)
+	plans, err := r.reader.scanPlans(ctx)
 	if err != nil {
 		return err
 	}
 
-	for _, containerName := range containers {
-		if err := r.recoverPlansInContainer(ctx, containerName); err != nil {
-			return err
+	var running []storage.ListResult
+	// Like scanPlans, the fan-out takes its limit from the default pool, never from a Limited pool the caller's Context
+	// may carry: these jobs can wait minutes on plan locks and blob retries.
+	g := context.Pool(ctx).Default().Limited(ctx, "azBlobRecoveryPlans", fetchConcurrency).Group()
+	for _, sp := range plans {
+		switch {
+		case !sp.hasEntry:
+			continue
+		case sp.entry == nil:
+			// The entry decides the plan's state and it cannot be read. Leave the plan alone rather than guess.
+			context.Log(ctx).Error(fmt.Sprintf("azblob: plan(%s) entry metadata could not be read, skipping it in recovery", sp.id))
+			continue
+		case !sp.hasObject:
+			g.Go(ctx, func(ctx context.Context) error {
+				r.deleteOrphanedEntry(ctx, sp)
+				return nil
+			})
+			continue
+		case sp.object == nil:
+			// The object exists, so this is not a create that never finished; only its metadata is unreadable. Do not
+			// delete or repair anything based on it.
+			context.Log(ctx).Error(fmt.Sprintf("azblob: plan(%s) object metadata could not be read, not checking it for a torn write", sp.id))
+		case sp.entry.State.Status > workflow.Running && sp.object.State.Status != sp.entry.State.Status:
+			g.Go(ctx, func(ctx context.Context) error {
+				if err := r.repairObject(ctx, sp); err != nil {
+					context.Log(ctx).Warn(fmt.Sprintf("azblob: could not repair plan(%s) object, reads rebuild it from the entry: %v", sp.id, err))
+				}
+				return nil
+			})
+		}
+		if sp.entry.State.Status == workflow.Running {
+			running = append(running, sp.entry.ListResult)
 		}
 	}
+	if err := g.Wait(ctx); err != nil {
+		return errors.E(ctx, errors.CatInternal, errors.TypeTimeout, fmt.Errorf("recovery did not finish: %w", unwrapGroup(err)))
+	}
 
+	r.running.Store(runningSnapshot{results: running, ok: true})
 	return nil
 }
 
-func (r recovery) now() time.Time {
-	if r.nower != nil {
-		return r.nower()
-	}
-	return time.Now().UTC()
+// RecoveredRunning implements storage.RecoveredRunning.RecoveredRunning().
+func (r recovery) RecoveredRunning() ([]storage.ListResult, bool) {
+	snap := r.running.Swap(runningSnapshot{})
+	return snap.results, snap.ok
 }
 
-// recoverPlansInContainer recovers all plans in a specific container.
-func (r recovery) recoverPlansInContainer(ctx context.Context, containerName string) error {
-	exists, err := r.reader.client.ContainerExists(ctx, containerName)
+// deleteOrphanedEntry deletes the entry blob of a plan whose create never wrote its object. The scan is a snapshot, so
+// under the plan's lock it checks again that the object is still missing: a create that finished after the scan must
+// not lose its entry.
+func (r recovery) deleteOrphanedEntry(ctx context.Context, sp scannedPlan) {
+	r.reader.mu.Lock(sp.id)
+	defer r.reader.mu.Unlock(sp.id)
+
+	_, err := r.reader.client.GetMetadata(ctx, sp.container, planObjectBlobName(sp.id))
+	switch {
+	case err == nil:
+		return // The object exists now; the create finished.
+	case !blobops.IsNotFound(err):
+		context.Log(ctx).Warn(fmt.Sprintf("azblob: could not check plan(%s) object before deleting its entry, leaving it: %v", sp.id, err))
+		return
+	}
+
+	if err := deleteEntry(ctx, r.reader.client, sp.container, sp.id); err != nil {
+		context.Log(ctx).Warn(fmt.Sprintf("azblob: failed to delete orphaned planEntry for plan(%s), the next recovery will retry: %v", sp.id, err))
+	}
+}
+
+// repairObject rewrites a plan's object blob to match its entry, after a final write updated the entry but not the
+// object.
+func (r recovery) repairObject(ctx context.Context, sp scannedPlan) error {
+	r.reader.mu.Lock(sp.id)
+	defer r.reader.mu.Unlock(sp.id)
+
+	// fetchPlan, not Read: Read takes the plan's read lock, which is not reentrant with the write lock held here.
+	plan, err := r.reader.fetchPlan(ctx, sp.id)
 	if err != nil {
 		return err
 	}
-	if !exists {
-		return nil
+	// A Completed Plan with Running objects cannot be settled from what is stored. Leave the tear rather than save the
+	// contradiction: the entry and object would then agree, and reads would stop rebuilding and flagging it.
+	if plan.State.Get().Status == workflow.Completed && hasRunningObjects(plan) {
+		return errors.ErrStorageInconsistent(ctx, fmt.Errorf("plan(%s) is Completed but has Running objects, not repairing its object", sp.id))
 	}
-
-	planBlobs, err := r.reader.listPlansInContainer(ctx, containerName)
+	md, err := planToMetadata(ctx, plan)
 	if err != nil {
 		return err
 	}
-
-	g := context.Pool(ctx).Limited(ctx, "azBlobRecoveryPlans", fetchConcurrency).Group()
-
-	for _, planResult := range planBlobs {
-		if ctx.Err() != nil {
-			break
-		}
-		if time.Unix(planResult.ID.Time().UnixTime()).Before(r.now().AddDate(0, 0, -r.reader.retentionDays)) {
-			continue
-		}
-		g.Go(
-			ctx,
-			func(ctx context.Context) error {
-				return r.recoverPlan(ctx, containerName, planResult.ID)
-			},
-		)
+	if err := r.uploader.uploadPlanObject(ctx, plan, md, uptComplete); err != nil {
+		return err
 	}
-
-	return unwrapGroup(g.Wait(ctx))
-}
-
-// recoverPlan recovers a single plan by ensuring all sub-object blobs exist.
-// If the plan entry exists but the object blob doesn't, the orphaned entry is deleted.
-func (r recovery) recoverPlan(ctx context.Context, containerName string, planID uuid.UUID) error {
-	if r.testRecoverPlan != nil && testing.Testing() {
-		return r.testRecoverPlan(ctx, containerName, planID)
-	}
-	pom, err := r.reader.fetchPlanObjectMeta(ctx, planID)
-	if err != nil {
-		if blobops.IsNotFound(err) {
-			// Object blob doesn't exist but entry does - delete the orphaned entry blob.
-			// This can happen if plan creation failed after writing the entry but before writing the object.
-			_ = r.reader.client.DeleteBlob(ctx, containerName, planEntryBlobName(planID))
-			return nil
-		}
-		return errors.E(ctx, errors.CatInternal, errors.TypeStorageGet, fmt.Errorf("failed to read plan object meta for recovery: %w", err))
-	}
-
-	// If the object is finished, no recovery needed. Since the object is the last thing to change,
-	// we don't need consistency checks here.
-	if pom.State.Status > workflow.Running {
-		return nil
-	}
-
-	plan, err := r.reader.fetchPlan(ctx, planID)
-	if err != nil {
-		return errors.E(ctx, errors.CatInternal, errors.TypeStorageGet, fmt.Errorf("failed to read plan for recovery: %w", err))
-	}
-
-	// Only recover if the plan is not currently running
-	if plan.State.Get().Status == workflow.Running {
-		return nil // Plan is running, don't interfere
-	}
-
-	if err := r.ensureSubObjectBlobs(ctx, containerName, plan); err != nil {
-		return errors.E(ctx, errors.CatInternal, errors.TypeStoragePut, fmt.Errorf("failed to ensure sub-object blobs: %w", err))
-	}
-
+	context.Log(ctx).Info(fmt.Sprintf("azblob: repaired plan(%s) object to match its entry status %v", sp.id, sp.entry.State.Status))
 	return nil
-}
-
-// ensureSubObjectBlobs ensures all sub-object blobs exist for a plan.
-func (r recovery) ensureSubObjectBlobs(ctx context.Context, containerName string, plan *workflow.Plan) error {
-	c := creator{
-		prefix: r.reader.prefix,
-		reader: r.reader,
-	}
-
-	g := worker.Default().Limited(ctx, "azBlobRecoverySubObjects", fetchConcurrency).Group()
-
-	for _, checks := range []*workflow.Checks{plan.BypassChecks, plan.PreChecks, plan.PostChecks, plan.ContChecks, plan.DeferredChecks} {
-		if checks == nil {
-			continue
-		}
-		g.Go(ctx, func(ctx context.Context) error {
-			return r.ensureChecksBlob(ctx, c, containerName, plan.ID, checks)
-		})
-	}
-
-	for i, block := range plan.Blocks {
-		g.Go(ctx, func(ctx context.Context) error {
-			return r.ensureBlockBlob(ctx, c, containerName, plan.ID, block, i)
-		})
-	}
-
-	return unwrapGroup(g.Wait(ctx))
-}
-
-// ensureBlockBlob ensures a block blob and all its sub-objects exist.
-func (r recovery) ensureBlockBlob(ctx context.Context, c creator, containerName string, planID uuid.UUID, block *workflow.Block, pos int) error {
-	blockBlobName := blockBlobName(planID, block.ID)
-	exists, err := r.blobExists(ctx, containerName, blockBlobName)
-	if err != nil {
-		return err
-	}
-
-	if !exists {
-		if err := r.uploader.uploadBlockBlob(ctx, containerName, planID, block, pos); err != nil {
-			return fmt.Errorf("failed to recreate block blob: %w", err)
-		}
-	}
-
-	g := worker.Default().Limited(ctx, "azBlobRecoveryBlock", fetchConcurrency).Group()
-
-	for _, checks := range []*workflow.Checks{block.BypassChecks, block.PreChecks, block.PostChecks, block.ContChecks, block.DeferredChecks} {
-		if checks == nil {
-			continue
-		}
-		g.Go(ctx, func(ctx context.Context) error {
-			return r.ensureChecksBlob(ctx, c, containerName, planID, checks)
-		})
-	}
-
-	for i, seq := range block.Sequences {
-		g.Go(ctx, func(ctx context.Context) error {
-			return r.ensureSequenceBlob(ctx, c, containerName, planID, seq, i)
-		})
-	}
-
-	return unwrapGroup(g.Wait(ctx))
-}
-
-// ensureSequenceBlob ensures a sequence blob and all its actions exist.
-func (r recovery) ensureSequenceBlob(ctx context.Context, c creator, containerName string, planID uuid.UUID, seq *workflow.Sequence, pos int) error {
-	seqBlobName := sequenceBlobName(planID, seq.ID)
-	exists, err := r.blobExists(ctx, containerName, seqBlobName)
-	if err != nil {
-		return err
-	}
-
-	if !exists {
-		if err := r.uploader.uploadSequenceBlob(ctx, containerName, planID, seq, pos); err != nil {
-			return fmt.Errorf("failed to recreate sequence blob: %w", err)
-		}
-	}
-
-	g := worker.Default().Limited(ctx, "azBlobRecoverySequence", fetchConcurrency).Group()
-	for i, action := range seq.Actions {
-		g.Go(ctx, func(ctx context.Context) error {
-			return r.ensureActionBlob(ctx, c, containerName, planID, action, i)
-		})
-	}
-
-	return unwrapGroup(g.Wait(ctx))
-}
-
-// ensureChecksBlob ensures a checks blob and all its actions exist.
-func (r recovery) ensureChecksBlob(ctx context.Context, c creator, containerName string, planID uuid.UUID, checks *workflow.Checks) error {
-	checksBlobName := checksBlobName(planID, checks.ID)
-	exists, err := r.blobExists(ctx, containerName, checksBlobName)
-	if err != nil {
-		return err
-	}
-
-	if !exists {
-		if err := r.uploader.uploadChecksBlob(ctx, containerName, planID, checks); err != nil {
-			return fmt.Errorf("failed to recreate checks blob: %w", err)
-		}
-	}
-
-	g := worker.Default().Limited(ctx, "azBlobRecoveryChecks", fetchConcurrency).Group()
-	for i, action := range checks.Actions {
-		g.Go(ctx, func(ctx context.Context) error {
-			return r.ensureActionBlob(ctx, c, containerName, planID, action, i)
-		})
-	}
-
-	return unwrapGroup(g.Wait(ctx))
-}
-
-// ensureActionBlob ensures an action blob exists.
-func (r recovery) ensureActionBlob(ctx context.Context, c creator, containerName string, planID uuid.UUID, action *workflow.Action, pos int) error {
-	actionBlobName := actionBlobName(planID, action.ID)
-	exists, err := r.blobExists(ctx, containerName, actionBlobName)
-	if err != nil {
-		return err
-	}
-
-	if !exists {
-		if err := r.uploader.uploadActionBlob(ctx, containerName, planID, action, pos); err != nil {
-			return fmt.Errorf("failed to recreate action blob: %w", err)
-		}
-	}
-
-	return nil
-}
-
-// blobExists checks if a blob exists in a container.
-func (r recovery) blobExists(ctx context.Context, containerName, blobName string) (bool, error) {
-	_, err := r.reader.client.GetMetadata(ctx, containerName, blobName)
-	if err == nil {
-		return true, nil
-	}
-	if blobops.IsNotFound(err) {
-		return false, nil
-	}
-	return false, err
 }

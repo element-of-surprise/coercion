@@ -33,7 +33,7 @@ func (p reader) fetchPlan(ctx context.Context, id uuid.UUID) (*workflow.Plan, er
 			ResultFunc: func(stmt *sqlite.Stmt) error {
 				found = true
 				var err error
-				plan.ID, err = uuid.Parse(stmt.GetText("id"))
+				plan.ID, err = fieldToID(ctx, "id", stmt)
 				if err != nil {
 					return fmt.Errorf("couldn't convert ID to UUID: %w", err)
 				}
@@ -41,7 +41,7 @@ func (p reader) fetchPlan(ctx context.Context, id uuid.UUID) (*workflow.Plan, er
 				if gid == "" {
 					plan.GroupID = uuid.Nil
 				} else {
-					plan.GroupID, err = uuid.Parse(stmt.GetText("group_id"))
+					plan.GroupID, err = fieldToID(ctx, "group_id", stmt)
 					if err != nil {
 						return fmt.Errorf("couldn't convert GroupID to UUID: %w", err)
 					}
@@ -53,6 +53,13 @@ func (p reader) fetchPlan(ctx context.Context, id uuid.UUID) (*workflow.Plan, er
 					return fmt.Errorf("couldn't get plan submit time: %w", err)
 				}
 				plan.Reason = workflow.FailureReason(stmt.GetInt64("reason"))
+				runtimeUpdate, err := timeFromField("runtime_update", stmt)
+				if err != nil {
+					return fmt.Errorf("couldn't get plan runtime update: %w", err)
+				}
+				if !runtimeUpdate.IsZero() {
+					plan.RuntimeUpdate.Set(runtimeUpdate)
+				}
 				state, err := fieldToState(stmt)
 				if err != nil {
 					return fmt.Errorf("couldn't get plan state: %w", err)

@@ -3,6 +3,8 @@
 package errors
 
 import (
+	"fmt"
+
 	"github.com/gostdlib/base/context"
 	"github.com/gostdlib/base/errors"
 )
@@ -49,6 +51,11 @@ const (
 	TypeTimeout Type = Type(4) // TimeoutOrCancel
 	// TypeFS represents an error with the file system.
 	TypeFS Type = Type(5) // FS
+	// TypeNotFound represents a Plan or object that does not exist in storage.
+	TypeNotFound Type = Type(6) // NotFound
+	// TypePlugin represents a plugin that failed: its Init failed, or an action it ran returned an error, timed out or
+	// returned a response of the wrong type.
+	TypePlugin Type = Type(7) // Plugin
 
 	// TypeStorageCreate represents an error with creating storage tables, containers, etc.
 	TypeStorageCreate Type = Type(1000) // StorageCreate
@@ -64,7 +71,9 @@ const (
 	TypeStoragePut Type = Type(1005) // StoragePut
 	// TypeStorageClose represents an error with closing storage.
 	TypeStorageClose Type = Type(1006) // StorageClose
-
+	// TypeStorageInconsistent represents stored data that disagrees with itself and could not be reconciled, such as
+	// a Plan whose final state was only partially written.
+	TypeStorageInconsistent Type = Type(1007) // StorageInconsistent
 )
 
 // LogAttrer is an interface that can be implemented by an error to return a list of attributes
@@ -107,4 +116,48 @@ func E(ctx context.Context, c errors.Category, t errors.Type, msg error, options
 	opts = append(opts, options...)
 
 	return errors.E(ctx, c, t, msg, opts...)
+}
+
+// notFound is the type of NotFound. It is a comparable value, so NotFound can be compared with == and used in a
+// switch; an Error cannot, because it holds a slice.
+type notFound struct{}
+
+func (notFound) Error() string { return "plan not found" }
+
+// NotFound is the sentinel for a Plan or object that does not exist in storage. storage.ErrNotFound is this value.
+// Every error built by ErrNotFound wraps it, so errors.Is(err, NotFound) is true for all of them.
+var NotFound error = notFound{}
+
+// ErrNotFound returns the canonical error for a Plan or object that does not exist in storage: a TypeNotFound Error
+// that wraps NotFound.
+func ErrNotFound(ctx context.Context, msg error) Error {
+	return E(ctx, CatUser, TypeNotFound, fmt.Errorf("%w: %w", NotFound, msg), WithCallNum(3))
+}
+
+// ErrStorageInconsistent returns the canonical error for stored data that disagrees with itself (see
+// TypeStorageInconsistent). The stored data stays the same however often it is read, so retrying cannot fix it: the
+// error wraps ErrPermanent so retries stop.
+func ErrStorageInconsistent(ctx context.Context, msg error) Error {
+	return E(ctx, CatInternal, TypeStorageInconsistent, fmt.Errorf("%w: %w", msg, ErrPermanent), WithCallNum(3))
+}
+
+// ErrPlugin returns the canonical error for a plugin that failed (see TypePlugin).
+func ErrPlugin(ctx context.Context, msg error) Error {
+	return E(ctx, CatInternal, TypePlugin, msg, WithCallNum(3))
+}
+
+// IsNotFound reports whether any error in err's chain is a not-found error: NotFound, or a TypeNotFound Error.
+func IsNotFound(err error) bool {
+	return Is(err, NotFound) || Is(err, Error{Category: CatUser, Type: TypeNotFound})
+}
+
+// IsStorageInconsistent reports whether any error in err's chain is a TypeStorageInconsistent error: stored data
+// that disagrees with itself. Retrying or restarting does not fix it; the storage needs repair.
+func IsStorageInconsistent(err error) bool {
+	return Is(err, Error{Category: CatInternal, Type: TypeStorageInconsistent})
+}
+
+// IsBug reports whether any error in err's chain is a TypeBug error: a state the code should never reach.
+func IsBug(err error) bool {
+	return Is(err, Error{Category: CatInternal, Type: TypeBug})
 }

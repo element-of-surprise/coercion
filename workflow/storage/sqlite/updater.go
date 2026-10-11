@@ -1,11 +1,11 @@
 package sqlite
 
 import (
-	"context"
 	"fmt"
 	"strings"
 
 	"github.com/gostdlib/base/concurrency/sync"
+	"github.com/gostdlib/base/context"
 
 	"github.com/element-of-surprise/coercion/internal/private"
 	"github.com/element-of-surprise/coercion/workflow/errors"
@@ -18,26 +18,14 @@ var _ storage.Updater = updater{}
 
 // updater implements the storage.updater interface.
 type updater struct {
-	planUpdater
-	checksUpdater
-	blockUpdater
-	sequenceUpdater
-	actionUpdater
-	deferredActionsUpdater
-	deferBatchUpdater
+	objectUpdater
 
 	private.Storage
 }
 
-func newUpdater(mu *sync.Mutex, pool *sqlitex.Pool, capture *CaptureStmts) updater {
+func newUpdater(mu *sync.RWMutex, pool *sqlitex.Pool, capture *CaptureStmts) updater {
 	return updater{
-		planUpdater:            planUpdater{mu: mu, pool: pool, capture: capture},
-		checksUpdater:          checksUpdater{mu: mu, pool: pool, capture: capture},
-		blockUpdater:           blockUpdater{mu: mu, pool: pool, capture: capture},
-		sequenceUpdater:        sequenceUpdater{mu: mu, pool: pool, capture: capture},
-		actionUpdater:          actionUpdater{mu: mu, pool: pool, capture: capture},
-		deferredActionsUpdater: deferredActionsUpdater{mu: mu, pool: pool, capture: capture},
-		deferBatchUpdater:      deferBatchUpdater{mu: mu, pool: pool, capture: capture},
+		objectUpdater: objectUpdater{mu: mu, pool: pool, capture: capture},
 	}
 }
 
@@ -64,11 +52,12 @@ type Stmt struct {
 }
 
 // Prepare returns a prepared statement that can executed. It will attach all
-// the parameters that were set on the Stmt.
-func (s *Stmt) Prepare(c *sqlite.Conn) (*sqlite.Stmt, error) {
+// the parameters that were set on the Stmt. A failure is labelled with errType, the kind of storage operation the
+// statement is part of.
+func (s *Stmt) Prepare(ctx context.Context, c *sqlite.Conn, errType errors.Type) (*sqlite.Stmt, error) {
 	stmt, err := c.Prepare(s.q)
 	if err != nil {
-		return nil, errors.E(context.Background(), errors.CatInternal, errors.TypeStorageCreate, fmt.Errorf("problem preparing statement: %w", err))
+		return nil, errors.E(ctx, errors.CatInternal, errType, fmt.Errorf("problem preparing statement: %w", err))
 	}
 	for _, kv := range s.text {
 		stmt.SetText(kv.k, kv.v)
@@ -164,6 +153,15 @@ func (c *CaptureStmts) Capture(stmt Stmt) {
 		return
 	}
 	c.stmts = append(c.stmts, stmt)
+}
+
+// add appends the statements captured in other.
+func (c *CaptureStmts) add(other *CaptureStmts) {
+	if c == nil || other == nil {
+		return
+	}
+	c.stmts = append(c.stmts, other.stmts...)
+	c.insert = append(c.insert, other.insert...)
 }
 
 // Len returns the number of captured statements. This does not include inserts.

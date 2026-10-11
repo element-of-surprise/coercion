@@ -1,50 +1,29 @@
 package azblob
 
 import (
+	"github.com/gostdlib/base/values/chans"
 	"testing"
 	"time"
 
-	"github.com/element-of-surprise/coercion/plugins/registry"
 	"github.com/element-of-surprise/coercion/workflow"
 	"github.com/element-of-surprise/coercion/workflow/context"
+	"github.com/element-of-surprise/coercion/workflow/errors"
+	"github.com/element-of-surprise/coercion/workflow/storage"
 	"github.com/element-of-surprise/coercion/workflow/storage/azblob/internal/blobops"
 	"github.com/element-of-surprise/coercion/workflow/storage/azblob/internal/planlocks"
 	testPlugins "github.com/element-of-surprise/coercion/workflow/storage/sqlite/testing/plugins"
 	"github.com/go-json-experiment/json"
-	"github.com/gostdlib/base/concurrency/sync"
 )
 
 // setupDeleterTest creates a test environment with fake client and deleter struct
 func setupDeleterTest(t *testing.T) (*blobops.Fake, deleter) {
 	t.Helper()
 
-	ctx := context.Background()
 	fakeClient := blobops.NewFake()
-	prefix := "test"
-
-	// Create plugin registry
-	reg := registry.New()
-	reg.Register(&testPlugins.HelloPlugin{})
-
-	planMu := planlocks.New(ctx)
-
-	// Create reader
-	r := reader{
-		mu:            planMu,
-		readFlight:    &sync.Flight[string, *workflow.Plan]{},
-		existsFlight:  &sync.Flight[string, bool]{},
-		prefix:        prefix,
-		client:        fakeClient,
-		reg:           reg,
-		retentionDays: 30,
-	}
-
-	// Create deleter
 	del := deleter{
-		mu:     planMu,
-		prefix: prefix,
+		mu:     planlocks.New(t.Context()),
+		prefix: "test",
 		client: fakeClient,
-		reader: r,
 	}
 
 	return fakeClient, del
@@ -215,7 +194,6 @@ func createAndUploadTestPlan(ctx context.Context, t *testing.T, fakeClient *blob
 
 	// Upload all sub-objects
 	uploader := &uploader{
-		mu:          planlocks.New(ctx),
 		client:      fakeClient,
 		prefix:      prefix,
 		planObjPool: context.Pool(ctx).Limited(ctx, "", 5),
@@ -252,7 +230,9 @@ func TestDelete(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			ctx := context.Background()
+			t.Parallel()
+
+			ctx := t.Context()
 			fakeClient, del := setupDeleterTest(t)
 
 			// Create and upload test plan
@@ -261,11 +241,22 @@ func TestDelete(t *testing.T) {
 
 			// Verify blobs exist before deletion
 			if !fakeClient.BlobExists(containerName, planEntryBlobName(plan.ID)) {
-				t.Fatalf("TestDelete: plan entry blob should exist before deletion")
+				t.Fatalf("TestDelete(%s): plan entry blob should exist before deletion", test.name)
 			}
 
 			// Delete the plan
-			err := del.Delete(ctx, plan.ID)
+			var err error
+			done := make(chan struct{})
+			context.Pool(ctx).Submit(ctx, func() {
+				defer close(done)
+				err = del.Delete(ctx, plan.ID)
+			})
+			wctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+			defer cancel()
+			// done is only closed, so anything but a close means Delete did not return in time.
+			if _, r := chans.Get(wctx, done); !r.Closed() {
+				t.Fatalf("TestDelete(%s): Delete did not return", test.name)
+			}
 
 			switch {
 			case err == nil && test.wantErr:
@@ -381,7 +372,9 @@ func TestDeletePlanInContainer(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			ctx := context.Background()
+			t.Parallel()
+
+			ctx := t.Context()
 			fakeClient, del := setupDeleterTest(t)
 
 			// Create a simple plan
@@ -425,175 +418,90 @@ func TestDeletePlanInContainer(t *testing.T) {
 	}
 }
 
-func TestDeleteBlockBlobs(t *testing.T) {
+// TestDeleteObjectBlobs verifies that deleting a Block, Sequence or Checks removes its own blob and every blob under it.
+func TestDeleteObjectBlobs(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		name    string
-		wantErr bool
+		name       string
+		withBlocks bool
+		// del deletes the object under test from plan.
+		del func(ctx context.Context, d deleter, containerName string, plan *workflow.Plan) error
+		// blobs are the names of the object's blob, first, and the blobs under it. All must exist before del and be
+		// gone after.
+		blobs func(plan *workflow.Plan) []string
 	}{
 		{
-			name:    "Success: block with sequences and checks deleted",
-			wantErr: false,
+			name:       "Success: block with sequences and checks deleted",
+			withBlocks: true,
+			del: func(ctx context.Context, d deleter, containerName string, plan *workflow.Plan) error {
+				return d.deleteBlockBlobs(ctx, containerName, plan.ID, plan.Blocks[0])
+			},
+			blobs: func(plan *workflow.Plan) []string {
+				block := plan.Blocks[0]
+				names := []string{blockBlobName(plan.ID, block.ID)}
+				for _, seq := range block.Sequences {
+					names = append(names, sequenceBlobName(plan.ID, seq.ID))
+				}
+				if block.PreChecks != nil {
+					names = append(names, checksBlobName(plan.ID, block.PreChecks.ID))
+				}
+				return names
+			},
+		},
+		{
+			name:       "Success: sequence with actions deleted",
+			withBlocks: true,
+			del: func(ctx context.Context, d deleter, containerName string, plan *workflow.Plan) error {
+				return d.deleteSequenceBlobs(ctx, containerName, plan.ID, plan.Blocks[0].Sequences[0])
+			},
+			blobs: func(plan *workflow.Plan) []string {
+				seq := plan.Blocks[0].Sequences[0]
+				names := []string{sequenceBlobName(plan.ID, seq.ID)}
+				for _, action := range seq.Actions {
+					names = append(names, actionBlobName(plan.ID, action.ID))
+				}
+				return names
+			},
+		},
+		{
+			name: "Success: checks with actions deleted",
+			del: func(ctx context.Context, d deleter, containerName string, plan *workflow.Plan) error {
+				return d.deleteChecksBlobs(ctx, containerName, plan.ID, plan.PreChecks)
+			},
+			blobs: func(plan *workflow.Plan) []string {
+				names := []string{checksBlobName(plan.ID, plan.PreChecks.ID)}
+				for _, action := range plan.PreChecks.Actions {
+					names = append(names, actionBlobName(plan.ID, action.ID))
+				}
+				return names
+			},
 		},
 	}
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			ctx := context.Background()
+			t.Parallel()
+
+			ctx := t.Context()
 			fakeClient, del := setupDeleterTest(t)
-
-			// Create and upload plan with blocks
-			plan := createAndUploadTestPlan(ctx, t, fakeClient, "test", true)
+			plan := createAndUploadTestPlan(ctx, t, fakeClient, "test", test.withBlocks)
 			containerName := containerForPlan("test", plan.ID)
-			block := plan.Blocks[0]
 
-			// Verify block blob exists before deletion
-			if !fakeClient.BlobExists(containerName, blockBlobName(plan.ID, block.ID)) {
-				t.Fatalf("TestDeleteBlockBlobs: block blob should exist before deletion")
-			}
-
-			err := del.deleteBlockBlobs(ctx, containerName, plan.ID, block)
-
-			switch {
-			case err == nil && test.wantErr:
-				t.Errorf("TestDeleteBlockBlobs(%s): got err == nil, want err != nil", test.name)
-				return
-			case err != nil && !test.wantErr:
-				t.Errorf("TestDeleteBlockBlobs(%s): got err == %s, want err == nil", test.name, err)
-				return
-			case err != nil:
-				return
-			}
-
-			// Verify block blob is deleted
-			if fakeClient.BlobExists(containerName, blockBlobName(plan.ID, block.ID)) {
-				t.Errorf("TestDeleteBlockBlobs(%s): block blob should be deleted", test.name)
-			}
-
-			// Verify sequences are deleted
-			for _, seq := range block.Sequences {
-				if fakeClient.BlobExists(containerName, sequenceBlobName(plan.ID, seq.ID)) {
-					t.Errorf("TestDeleteBlockBlobs(%s): sequence blob should be deleted", test.name)
+			names := test.blobs(plan)
+			for _, name := range names {
+				if !fakeClient.BlobExists(containerName, name) {
+					t.Fatalf("TestDeleteObjectBlobs(%s): blob %s should exist before deletion", test.name, name)
 				}
 			}
 
-			// Verify block checks are deleted
-			if block.PreChecks != nil {
-				if fakeClient.BlobExists(containerName, checksBlobName(plan.ID, block.PreChecks.ID)) {
-					t.Errorf("TestDeleteBlockBlobs(%s): block checks blob should be deleted", test.name)
-				}
-			}
-		})
-	}
-}
-
-func TestDeleteSequenceBlobs(t *testing.T) {
-	t.Parallel()
-
-	tests := []struct {
-		name    string
-		wantErr bool
-	}{
-		{
-			name:    "Success: sequence with actions deleted",
-			wantErr: false,
-		},
-	}
-
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			ctx := context.Background()
-			fakeClient, del := setupDeleterTest(t)
-
-			// Create and upload plan with blocks
-			plan := createAndUploadTestPlan(ctx, t, fakeClient, "test", true)
-			containerName := containerForPlan("test", plan.ID)
-			seq := plan.Blocks[0].Sequences[0]
-
-			// Verify sequence blob exists before deletion
-			if !fakeClient.BlobExists(containerName, sequenceBlobName(plan.ID, seq.ID)) {
-				t.Fatalf("TestDeleteSequenceBlobs: sequence blob should exist before deletion")
+			if err := test.del(ctx, del, containerName, plan); err != nil {
+				t.Fatalf("TestDeleteObjectBlobs(%s): got err == %s, want err == nil", test.name, err)
 			}
 
-			err := del.deleteSequenceBlobs(ctx, containerName, plan.ID, seq)
-
-			switch {
-			case err == nil && test.wantErr:
-				t.Errorf("TestDeleteSequenceBlobs(%s): got err == nil, want err != nil", test.name)
-				return
-			case err != nil && !test.wantErr:
-				t.Errorf("TestDeleteSequenceBlobs(%s): got err == %s, want err == nil", test.name, err)
-				return
-			case err != nil:
-				return
-			}
-
-			// Verify sequence blob is deleted
-			if fakeClient.BlobExists(containerName, sequenceBlobName(plan.ID, seq.ID)) {
-				t.Errorf("TestDeleteSequenceBlobs(%s): sequence blob should be deleted", test.name)
-			}
-
-			// Verify actions are deleted
-			for _, action := range seq.Actions {
-				if fakeClient.BlobExists(containerName, actionBlobName(plan.ID, action.ID)) {
-					t.Errorf("TestDeleteSequenceBlobs(%s): action blob should be deleted", test.name)
-				}
-			}
-		})
-	}
-}
-
-func TestDeleteChecksBlobs(t *testing.T) {
-	t.Parallel()
-
-	tests := []struct {
-		name    string
-		wantErr bool
-	}{
-		{
-			name:    "Success: checks with actions deleted",
-			wantErr: false,
-		},
-	}
-
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			ctx := context.Background()
-			fakeClient, del := setupDeleterTest(t)
-
-			// Create and upload plan
-			plan := createAndUploadTestPlan(ctx, t, fakeClient, "test", false)
-			containerName := containerForPlan("test", plan.ID)
-			checks := plan.PreChecks
-
-			// Verify checks blob exists before deletion
-			if !fakeClient.BlobExists(containerName, checksBlobName(plan.ID, checks.ID)) {
-				t.Fatalf("TestDeleteChecksBlobs: checks blob should exist before deletion")
-			}
-
-			err := del.deleteChecksBlobs(ctx, containerName, plan.ID, checks)
-
-			switch {
-			case err == nil && test.wantErr:
-				t.Errorf("TestDeleteChecksBlobs(%s): got err == nil, want err != nil", test.name)
-				return
-			case err != nil && !test.wantErr:
-				t.Errorf("TestDeleteChecksBlobs(%s): got err == %s, want err == nil", test.name, err)
-				return
-			case err != nil:
-				return
-			}
-
-			// Verify checks blob is deleted
-			if fakeClient.BlobExists(containerName, checksBlobName(plan.ID, checks.ID)) {
-				t.Errorf("TestDeleteChecksBlobs(%s): checks blob should be deleted", test.name)
-			}
-
-			// Verify actions are deleted
-			for _, action := range checks.Actions {
-				if fakeClient.BlobExists(containerName, actionBlobName(plan.ID, action.ID)) {
-					t.Errorf("TestDeleteChecksBlobs(%s): action blob should be deleted", test.name)
+			for _, name := range names {
+				if fakeClient.BlobExists(containerName, name) {
+					t.Errorf("TestDeleteObjectBlobs(%s): blob %s should be deleted", test.name, name)
 				}
 			}
 		})
@@ -622,7 +530,9 @@ func TestDeleteActionBlob(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			ctx := context.Background()
+			t.Parallel()
+
+			ctx := t.Context()
 			fakeClient, del := setupDeleterTest(t)
 
 			// Create and upload plan
@@ -651,6 +561,96 @@ func TestDeleteActionBlob(t *testing.T) {
 			// Verify action blob is deleted
 			if fakeClient.BlobExists(containerName, actionBlobName(plan.ID, action.ID)) {
 				t.Errorf("TestDeleteActionBlob(%s): action blob should be deleted", test.name)
+			}
+		})
+	}
+}
+
+// TestDeleteRetry is a regression test: Delete removed the planEntry blob first, so a Delete that failed on a later blob
+// could not be retried. The retry's read needs the entry, so it failed with not found, and recovery skips plans with no
+// entry, so the rest of the plan's blobs stayed until the container aged out. A retried Delete must finish the job.
+// That includes a Running plan, which a read rebuilds from its child blobs: once a failed Delete has removed some of
+// them, the retry's read failed as inconsistent storage.
+func TestDeleteRetry(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		// running stores a Running plan, which a read rebuilds from its child blobs, instead of a NotStarted one.
+		running bool
+		// failBlob names the blob whose delete fails in the first Delete.
+		failBlob func(plan *workflow.Plan) string
+	}{
+		{
+			name:     "Success: a Delete retried after a block blob failed to delete removes the rest",
+			failBlob: func(plan *workflow.Plan) string { return blockBlobName(plan.ID, plan.Blocks[0].ID) },
+		},
+		{
+			name:     "Success: a Delete retried after the plan object blob failed to delete removes the rest",
+			failBlob: func(plan *workflow.Plan) string { return planObjectBlobName(plan.ID) },
+		},
+		{
+			// Only the entry is left, so the retry deletes just the entry.
+			name:     "Success: a Delete retried after the planEntry blob failed to delete removes it",
+			failBlob: func(plan *workflow.Plan) string { return planEntryBlobName(plan.ID) },
+		},
+		{
+			// Regression: the block blob is deleted before its sequences, so the retry's read could not rebuild the
+			// Running plan.
+			name:     "Success: a Delete of a Running plan retried after a sequence blob failed to delete removes the rest",
+			running:  true,
+			failBlob: func(plan *workflow.Plan) string { return sequenceBlobName(plan.ID, plan.Blocks[0].Sequences[0].ID) },
+		},
+		{
+			// Regression: as above, with the sequence blob gone too.
+			name:    "Success: a Delete of a Running plan retried after an action blob failed to delete removes the rest",
+			running: true,
+			failBlob: func(plan *workflow.Plan) string {
+				return actionBlobName(plan.ID, plan.Blocks[0].Sequences[0].Actions[0].ID)
+			},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+
+			ctx := t.Context()
+			var (
+				fakeClient *blobops.Fake
+				del        storage.Deleter
+				plan       *workflow.Plan
+			)
+			if test.running {
+				var v *Vault
+				v, fakeClient = newFakeVault(t)
+				plan = newRunningPlan(t, v)
+				del = v
+			} else {
+				var d deleter
+				fakeClient, d = setupDeleterTest(t)
+				plan = createAndUploadTestPlan(ctx, t, fakeClient, "test", true)
+				del = d
+			}
+			containerName := containerForPlan("test", plan.ID)
+
+			failBlob := test.failBlob(plan)
+			fakeClient.DeleteBlobErr = func(_, blob string) error {
+				if blob == failBlob {
+					return errors.New("throttled")
+				}
+				return nil
+			}
+			if err := del.Delete(ctx, plan.ID); err == nil {
+				t.Fatalf("TestDeleteRetry(%s): first Delete: got err == nil, want err != nil", test.name)
+			}
+
+			fakeClient.DeleteBlobErr = nil
+			if err := del.Delete(ctx, plan.ID); err != nil {
+				t.Errorf("TestDeleteRetry(%s): retried Delete: got err == %s, want err == nil", test.name, err)
+			}
+			if left := len(fakeClient.GetContainer(containerName)); left != 0 {
+				t.Errorf("TestDeleteRetry(%s): got %d blobs left after the retried Delete, want 0", test.name, left)
 			}
 		})
 	}

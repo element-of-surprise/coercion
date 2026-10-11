@@ -14,6 +14,8 @@ func _() {
 	_ = x[TypeConn-3]
 	_ = x[TypeTimeout-4]
 	_ = x[TypeFS-5]
+	_ = x[TypeNotFound-6]
+	_ = x[TypePlugin-7]
 	_ = x[TypeStorageCreate-1000]
 	_ = x[TypeStorageDelete-1001]
 	_ = x[TypeStorageGet-1002]
@@ -21,23 +23,24 @@ func _() {
 	_ = x[TypeStorageUpdate-1004]
 	_ = x[TypeStoragePut-1005]
 	_ = x[TypeStorageClose-1006]
+	_ = x[TypeStorageInconsistent-1007]
 }
 
 const (
-	_Type_name_0 = "UnknownBugParameterConnTimeoutOrCancelFS"
-	_Type_name_1 = "StorageCreateStorageDeleteStorageGetStorageListStorageUpdateStoragePutStorageClose"
+	_Type_name_0 = "UnknownBugParameterConnTimeoutOrCancelFSNotFoundPlugin"
+	_Type_name_1 = "StorageCreateStorageDeleteStorageGetStorageListStorageUpdateStoragePutStorageCloseStorageInconsistent"
 )
 
 var (
-	_Type_index_0 = [...]uint8{0, 7, 10, 19, 23, 38, 40}
-	_Type_index_1 = [...]uint8{0, 13, 26, 36, 47, 60, 70, 82}
+	_Type_index_0 = [...]uint8{0, 7, 10, 19, 23, 38, 40, 48, 54}
+	_Type_index_1 = [...]uint8{0, 13, 26, 36, 47, 60, 70, 82, 101}
 )
 
 func (i Type) String() string {
 	switch {
-	case i <= 5:
+	case i <= 7:
 		return _Type_name_0[_Type_index_0[i]:_Type_index_0[i+1]]
-	case 1000 <= i && i <= 1006:
+	case 1000 <= i && i <= 1007:
 		i -= 1000
 		return _Type_name_1[_Type_index_1[i]:_Type_index_1[i+1]]
 	default:

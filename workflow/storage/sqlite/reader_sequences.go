@@ -13,7 +13,7 @@ import (
 
 // fieldToSequences converts the "sequences" field in a sqlite row to a list of workflow.Sequences.
 func (p reader) fieldToSequences(ctx context.Context, conn *sqlite.Conn, stmt *sqlite.Stmt) ([]*workflow.Sequence, error) {
-	ids, err := fieldToIDs("sequences", stmt)
+	ids, err := fieldToIDs(ctx, "sequences", stmt)
 	if err != nil {
 		return nil, fmt.Errorf("couldn't read plan sequence ids: %w", err)
 	}
@@ -31,13 +31,13 @@ func (p reader) fieldToSequences(ctx context.Context, conn *sqlite.Conn, stmt *s
 
 // fetchSequenceByID fetches a sequence by its id.
 func (p reader) fetchSequenceByID(ctx context.Context, conn *sqlite.Conn, id uuid.UUID) (*workflow.Sequence, error) {
-	sequence := &workflow.Sequence{}
+	var sequence *workflow.Sequence
 	do := func(conn *sqlite.Conn) (err error) {
 		err = sqlitex.Execute(
 			conn,
 			fetchSequencesByID,
 			&sqlitex.ExecOptions{
-				Named: map[string]interface{}{
+				Named: map[string]any{
 					"$id": id.String(),
 				},
 				ResultFunc: func(stmt *sqlite.Stmt) error {
@@ -58,6 +58,9 @@ func (p reader) fetchSequenceByID(ctx context.Context, conn *sqlite.Conn, id uui
 	if err := do(conn); err != nil {
 		return nil, fmt.Errorf("couldn't fetch sequence by id: %w", err)
 	}
+	if sequence == nil {
+		return nil, errMissingRow(ctx, "Sequence", id)
+	}
 	return sequence, nil
 }
 
@@ -65,12 +68,12 @@ func (p reader) fetchSequenceByID(ctx context.Context, conn *sqlite.Conn, id uui
 func (p reader) sequenceRowToSequence(ctx context.Context, conn *sqlite.Conn, stmt *sqlite.Stmt) (*workflow.Sequence, error) {
 	var err error
 	s := &workflow.Sequence{}
-	s.ID, err = fieldToID("id", stmt)
+	s.ID, err = fieldToID(ctx, "id", stmt)
 	if err != nil {
 		return nil, fmt.Errorf("couldn't read block id: %w", err)
 	}
 
-	planID, err := uuid.Parse(stmt.GetText("plan_id"))
+	planID, err := fieldToID(ctx, "plan_id", stmt)
 	if err != nil {
 		return nil, fmt.Errorf("couldn't parse action id: %w", err)
 	}
@@ -78,7 +81,7 @@ func (p reader) sequenceRowToSequence(ctx context.Context, conn *sqlite.Conn, st
 
 	k := stmt.GetText("key")
 	if k != "" {
-		s.Key, err = uuid.Parse(k)
+		s.Key, err = fieldToID(ctx, "key", stmt)
 		if err != nil {
 			return nil, fmt.Errorf("couldn't parse sequence key: %w", err)
 		}

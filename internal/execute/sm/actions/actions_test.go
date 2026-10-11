@@ -1,7 +1,6 @@
 package actions
 
 import (
-	"errors"
 	"reflect"
 	"runtime"
 	"strings"
@@ -14,9 +13,8 @@ import (
 	"github.com/element-of-surprise/coercion/plugins/registry"
 	"github.com/element-of-surprise/coercion/workflow"
 	"github.com/element-of-surprise/coercion/workflow/context"
-	"github.com/element-of-surprise/coercion/workflow/storage/sqlite"
+	"github.com/element-of-surprise/coercion/workflow/errors"
 
-	"github.com/gostdlib/base/retry/exponential"
 	"github.com/gostdlib/base/statemachine"
 	"github.com/kylelemons/godebug/pretty"
 )
@@ -28,7 +26,9 @@ func newActionWithState(state *workflow.State) *workflow.Action {
 }
 
 type fakeUpdater struct {
-	updates  []*workflow.Action
+	updates []*workflow.Action
+	// attempts holds len(action.Attempts) at the time of each update, as updates holds pointers that change later.
+	attempts []int
 	index    int
 	retErrOn int
 
@@ -53,6 +53,7 @@ func (f *fakeUpdater) UpdateAction(ctx context.Context, action *workflow.Action)
 		return errors.New("fake error")
 	}
 	f.updates = append(f.updates, action)
+	f.attempts = append(f.attempts, len(action.Attempts.Get()))
 	return nil
 }
 
@@ -71,7 +72,7 @@ func TestStart(t *testing.T) {
 	}
 
 	sm := Runner{nower: nower}
-	req := sm.Start(statemachine.Request[Data]{Ctx: context.Background(), Data: data, Next: sm.Start})
+	req := sm.Start(statemachine.Request[Data]{Ctx: t.Context(), Data: data, Next: sm.Start})
 
 	wantAction := newActionWithState(&workflow.State{Start: now, Status: workflow.Running})
 
@@ -109,9 +110,10 @@ func TestGetPlugin(t *testing.T) {
 		data     Data
 		wantData Data
 		wantNext string
+		wantErr  bool
 	}{
 		{
-			name: "Plugin not found",
+			name: "Error: the plugin is not in the registry, so the next state is End",
 			data: Data{
 				Action: &workflow.Action{
 					Plugin: "notfound",
@@ -122,12 +124,12 @@ func TestGetPlugin(t *testing.T) {
 				Action: &workflow.Action{
 					Plugin: "notfound",
 				},
-				err: pluginNotFoundErr("notfound"),
 			},
 			wantNext: methodName(sm.End),
+			wantErr:  true,
 		},
 		{
-			name: "Plugin found",
+			name: "Success: the plugin is in the registry, so it is set and the next state is Execute",
 			data: Data{
 				Action: &workflow.Action{
 					Plugin: testplugin.Name,
@@ -144,9 +146,13 @@ func TestGetPlugin(t *testing.T) {
 		},
 	}
 	for _, test := range tests {
-		req := sm.GetPlugin(statemachine.Request[Data]{Ctx: context.Background(), Data: test.data, Next: sm.GetPlugin})
-		// Remove the registry from the request data for comparison.
+		req := sm.GetPlugin(statemachine.Request[Data]{Ctx: t.Context(), Data: test.data, Next: sm.GetPlugin})
+		if (req.Data.err != nil) != test.wantErr {
+			t.Errorf("TestGetPlugin(%s): got Data.err == %v, want Data.err != nil == %v", test.name, req.Data.err, test.wantErr)
+		}
+		// Remove the registry and error from the request data for comparison.
 		req.Data.Registry = nil
+		req.Data.err = nil
 		if diff := pretty.Compare(test.wantData, req.Data); diff != "" {
 			t.Errorf("TestGetPlugin(%s) -want/+got:\n%s", test.name, diff)
 		}
@@ -172,9 +178,10 @@ func TestExecute(t *testing.T) {
 		name     string
 		data     Data
 		wantData Data
+		wantErr  bool
 	}{
 		{
-			name: "Failed after a retry",
+			name: "Error: the plugin fails on every attempt, so retries are exhausted",
 			data: Data{
 				Action: func() *workflow.Action {
 					a := &workflow.Action{Plugin: testplugin.Name, Timeout: 1 * time.Second, Retries: 1, Req: testplugin.Req{}}
@@ -192,11 +199,11 @@ func TestExecute(t *testing.T) {
 					a.State.Set(workflow.State{})
 					return a
 				}(),
-				err: exponential.ErrPermanent,
 			},
+			wantErr: true,
 		},
 		{
-			name: "Success after retry",
+			name: "Success: the plugin fails once and then succeeds on the retry",
 			data: Data{
 				Action: func() *workflow.Action {
 					a := &workflow.Action{Plugin: testplugin.Name, Timeout: 1 * time.Second, Retries: 1, Req: testplugin.Req{}}
@@ -221,11 +228,15 @@ func TestExecute(t *testing.T) {
 	sm := Runner{nower: nower}
 	for _, test := range tests {
 		test.data.Updater = newFakeUpdater()
-		req := statemachine.Request[Data]{Ctx: context.Background(), Data: test.data}
+		req := statemachine.Request[Data]{Ctx: t.Context(), Data: test.data}
 		req = sm.Execute(req)
-		// Clear the plugin and updater to make the comparison easier.
+		if (req.Data.err != nil) != test.wantErr {
+			t.Errorf("TestExecute(%s): got Data.err == %v, want Data.err != nil == %v", test.name, req.Data.err, test.wantErr)
+		}
+		// Clear the plugin, updater and error to make the comparison easier.
 		req.Data.plugin = nil
 		req.Data.Updater = nil
+		req.Data.err = nil
 
 		if diff := pretty.Compare(test.wantData, req.Data); diff != "" {
 			t.Errorf("TestExecute(%s): -want +got):\n%s", test.name, diff)
@@ -257,7 +268,7 @@ func TestEnd(t *testing.T) {
 		wantErr      bool
 	}{
 		{
-			name: "Data had error, so action should be marked as failed",
+			name: "Error: Data holds an error, so the action is marked as failed",
 			data: Data{
 				Action:  newActionWithState(&workflow.State{}),
 				Updater: newFakeUpdater(),
@@ -267,7 +278,7 @@ func TestEnd(t *testing.T) {
 			wantErr:      true,
 		},
 		{
-			name: "Data had no error, so action should be marked as completed",
+			name: "Success: Data holds no error, so the action is marked as completed",
 			data: Data{
 				Action:  newActionWithState(&workflow.State{}),
 				Updater: newFakeUpdater(),
@@ -285,7 +296,7 @@ func TestEnd(t *testing.T) {
 			t.Errorf("TestEnd(%s): -want +got):\n%s", test.name, diff)
 		}
 		if test.wantErr != (req.Err != nil) {
-			t.Errorf("TestEnd(%s): gotErr=%v, wantErr=%v", test.name, test.wantErr, req.Err)
+			t.Errorf("TestEnd(%s): got err == %v, want err != nil == %v", test.name, req.Err, test.wantErr)
 		}
 	}
 }
@@ -303,40 +314,40 @@ func TestExec(t *testing.T) {
 
 	tests := []struct {
 		name   string
-		ctx    context.Context
 		plugin plugins.Plugin
 		action *workflow.Action
 
 		wantAttempts []*workflow.Attempt
+		// wantWrites holds len(action.Attempts) for each UpdateAction call exec should make.
+		wantWrites   []int
 		wantErr      bool
 		errPermanent bool
 	}{
 		{
-			name: "Attempts exceeds retries",
-			ctx:  context.Background(),
+			name: "Error: attempts already exceed retries, so the plugin is not run and nothing is written",
 			plugin: &testplugin.Plugin{
 				AlwaysRespond: true,
 			},
 			action: func() *workflow.Action {
 				a := &workflow.Action{Retries: 1}
-				a.Attempts.Set([]workflow.Attempt{{}, {}})
+				a.Attempts.Set([]workflow.Attempt{{Err: &plugins.Error{Message: "first"}}, {Err: &plugins.Error{Message: "last"}}})
 				a.State.Set(workflow.State{})
 				return a
 			}(),
 			wantErr:      true,
 			errPermanent: true,
-			wantAttempts: []*workflow.Attempt{{}, {}},
+			wantAttempts: []*workflow.Attempt{{Err: &plugins.Error{Message: "first"}}, {Err: &plugins.Error{Message: "last"}}},
+			wantWrites:   nil,
 		},
 		{
-			name: "Timeout",
-			ctx:  context.Background(),
+			name: "Error: plugin times out, so a retryable attempt is recorded and written",
 			plugin: &testplugin.Plugin{
 				Responses: []any{
 					testplugin.Resp{Arg: "ok"},
 				},
 			},
 			action: func() *workflow.Action {
-				a := &workflow.Action{Req: testplugin.Req{Arg: "error", Sleep: time.Second}, Timeout: 10 * time.Millisecond}
+				a := &workflow.Action{Req: testplugin.Req{Sleep: time.Second}, Timeout: 10 * time.Millisecond}
 				a.State.Set(workflow.State{})
 				return a
 			}(),
@@ -349,11 +360,34 @@ func TestExec(t *testing.T) {
 					End:   now,
 				},
 			},
-			wantErr: true,
+			wantWrites: []int{1},
+			wantErr:    true,
 		},
 		{
-			name: "Unexpected response type",
-			ctx:  context.Background(),
+			name: "Error: the attempt's timeout ends before the plugin is submitted, so a timed-out attempt is recorded and written",
+			plugin: &testplugin.Plugin{
+				AlwaysRespond: true,
+			},
+			action: func() *workflow.Action {
+				// A negative timeout makes the run ctx done before Submit, so the pool refuses it.
+				a := &workflow.Action{Req: testplugin.Req{Arg: "ok"}, Timeout: -1}
+				a.State.Set(workflow.State{})
+				return a
+			}(),
+			wantAttempts: []*workflow.Attempt{
+				{
+					Err: &plugins.Error{
+						Message: pluginTimeoutMsg,
+					},
+					Start: now,
+					End:   now,
+				},
+			},
+			wantWrites: []int{1},
+			wantErr:    true,
+		},
+		{
+			name: "Error: plugin returns an unexpected response type, so a permanent attempt is recorded and written",
 			plugin: &testplugin.Plugin{
 				Responses: []any{
 					struct{ Hello string }{},
@@ -374,12 +408,12 @@ func TestExec(t *testing.T) {
 					End:   now,
 				},
 			},
+			wantWrites:   []int{1},
 			wantErr:      true,
 			errPermanent: true,
 		},
 		{
-			name: "Success",
-			ctx:  context.Background(),
+			name: "Success: plugin returns a response, so the attempt is recorded and written",
 			plugin: &testplugin.Plugin{
 				Responses: []any{
 					testplugin.Resp{Arg: "ok"},
@@ -397,18 +431,15 @@ func TestExec(t *testing.T) {
 					End:   now,
 				},
 			},
+			wantWrites: []int{1},
 		},
 	}
 
 	sm := Runner{nower: nower}
 	for _, test := range tests {
-		rw, err := sqlite.New(context.Background(), "", reg, sqlite.WithInMemory())
-		if err != nil {
-			t.Fatalf("TestExec(%s): failed to create writer: %v", test.name, err)
-		}
-		defer rw.Close(context.Background())
+		updater := newFakeUpdater()
 
-		err = sm.exec(test.ctx, test.action, test.plugin, rw)
+		err := sm.exec(t.Context(), test.action, test.plugin, updater)
 
 		switch {
 		case err == nil && test.wantErr:
@@ -418,13 +449,18 @@ func TestExec(t *testing.T) {
 			t.Errorf("TestExec(%s): got err == %v, want error == nil", test.name, err)
 			continue
 		case err != nil:
-			if test.errPermanent != errors.Is(err, exponential.ErrPermanent) {
-				t.Errorf("TestExec(%s): got err permament == %v, want error permanent == %v", test.name, errors.Is(err, exponential.ErrPermanent), test.errPermanent)
+			// Execute's backoff.Retry branches on this: it stops retrying when errors.Is(err, ErrPermanent).
+			if test.errPermanent != errors.Is(err, errors.ErrPermanent) {
+				t.Errorf("TestExec(%s): got err permanent == %v, want err permanent == %v", test.name, errors.Is(err, errors.ErrPermanent), test.errPermanent)
 			}
 		}
 
 		if diff := pretty.Compare(test.wantAttempts, test.action.Attempts.Get()); diff != "" {
 			t.Errorf("TestExec(%s): unexpected last attempt: -want/+got:\n%s", test.name, diff)
+		}
+		// exec must write the action once, after the attempt is appended, so a stored action always carries it.
+		if diff := pretty.Compare(test.wantWrites, updater.attempts); diff != "" {
+			t.Errorf("TestExec(%s): UpdateAction attempts at each write: -want/+got:\n%s", test.name, diff)
 		}
 	}
 }
@@ -433,15 +469,20 @@ func TestRun(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		name        string
-		req         testplugin.Req
-		timeout     time.Duration
+		name    string
+		req     testplugin.Req
+		timeout time.Duration
+		// poolFull runs with a ctx whose pool is a Limited(1) pool with its only token already held, as a nested
+		// sequence's pool can be when the parent holds the shared tokens.
+		poolFull bool
+		// cancelled runs with a ctx that is already done, so the pool refuses the Submit.
+		cancelled   bool
 		wantResp    testplugin.Resp
 		wantErr     bool
 		wantTimeout bool
 	}{
 		{
-			name:        "successful execution",
+			name:        "Success: the plugin responds before the timeout",
 			req:         testplugin.Req{Sleep: 10 * time.Millisecond},
 			timeout:     100 * time.Millisecond,
 			wantResp:    testplugin.Resp{Arg: "ok"},
@@ -449,24 +490,51 @@ func TestRun(t *testing.T) {
 			wantTimeout: false,
 		},
 		{
-			name:        "execution with error",
+			name:        "Error: the plugin returns an error before the timeout",
 			req:         testplugin.Req{Sleep: 10 * time.Millisecond, Arg: "error"},
 			timeout:     100 * time.Millisecond,
 			wantErr:     true,
 			wantTimeout: false,
 		},
 		{
-			name:        "context timeout",
+			name:        "Success: the plugin does not respond before the context times out, which is reported as a timeout",
 			req:         testplugin.Req{Sleep: 200 * time.Millisecond},
-			timeout:     50 * time.Millisecond,
+			timeout:     100 * time.Millisecond,
 			wantErr:     false,
+			wantTimeout: true,
+		},
+		{
+			name:     "Success: the plugin runs and responds when the ctx's Limited pool has no free token",
+			req:      testplugin.Req{Sleep: 10 * time.Millisecond},
+			timeout:  time.Second,
+			poolFull: true,
+			wantResp: testplugin.Resp{Arg: "ok"},
+		},
+		{
+			name:        "Success: the ctx is done before the plugin is submitted, which is reported as a timeout",
+			req:         testplugin.Req{Sleep: 10 * time.Millisecond},
+			timeout:     time.Second,
+			cancelled:   true,
 			wantTimeout: true,
 		},
 	}
 
 	for _, test := range tests {
-		ctx, cancel := context.WithTimeout(context.Background(), test.timeout)
+		ctx, cancel := context.WithTimeout(t.Context(), test.timeout)
 		defer cancel()
+
+		if test.poolFull {
+			limited := context.Pool(ctx).Limited(ctx, "TestRun", 1)
+			release := make(chan struct{})
+			t.Cleanup(func() { close(release) })
+			if !limited.Submit(ctx, func() { <-release }) {
+				t.Fatalf("TestRun(%s): could not take the Limited pool's only token", test.name)
+			}
+			ctx = context.SetPool(ctx, limited)
+		}
+		if test.cancelled {
+			cancel()
+		}
 
 		resp := run(ctx, &testplugin.Plugin{AlwaysRespond: true}, test.req)
 		switch {
@@ -497,13 +565,13 @@ func TestIsType(t *testing.T) {
 		want bool
 	}{
 		{
-			name: "Error: different types",
+			name: "Success: values of different types are reported as not the same type",
 			a:    &workflow.Action{},
 			b:    &workflow.Plan{},
 			want: false,
 		},
 		{
-			name: "Success",
+			name: "Success: values of the same type are reported as the same type",
 			a:    &workflow.Action{},
 			b:    &workflow.Action{},
 			want: true,

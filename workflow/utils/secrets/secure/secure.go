@@ -38,8 +38,12 @@ func Plan(p *workflow.Plan) {
 
 // scrubAction sets all fields in the Action that are tagged with `coerce:"secure"` to their zero value.
 func scrubAction(a *workflow.Action) {
-	n := make([]workflow.Attempt, len(a.Attempts.Get()))
 	a.Req, _ = walkValue(a.Req, "", scrubHandler)
+	// Setting Attempts would mark unset Attempts set, so an action that never ran would not match its source.
+	if !a.Attempts.IsSet() {
+		return
+	}
+	n := make([]workflow.Attempt, len(a.Attempts.Get()))
 	for i, attempt := range a.Attempts.Get() {
 		result, _ := walkValue(attempt, "", scrubHandler)
 		n[i] = result.(workflow.Attempt)

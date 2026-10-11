@@ -8,6 +8,7 @@ import (
 	"github.com/gostdlib/base/context"
 
 	"github.com/element-of-surprise/coercion/workflow"
+	"github.com/element-of-surprise/coercion/workflow/errors"
 	"github.com/element-of-surprise/coercion/workflow/storage"
 	"github.com/kylelemons/godebug/pretty"
 
@@ -306,35 +307,63 @@ func TestRead(t *testing.T) {
 	store := newFakeStorage(testReg)
 
 	tp := NewTestPlan()
-	if err := store.WritePlan(context.Background(), tp); err != nil {
-		panic(err)
+	if err := store.WritePlan(t.Context(), tp); err != nil {
+		t.Fatalf("TestRead: WritePlan: %s", err)
 	}
 
 	tests := []struct {
-		name    string
-		planID  uuid.UUID
-		wantErr bool
+		name   string
+		planID uuid.UUID
+		// deleteSubDoc deletes the plan's PreChecks document first. The plan is shared, so this row must come last.
+		deleteSubDoc bool
+		// wantNotFound means errors.IsNotFound(err), which callers such as Wait and Resume rely on.
+		wantNotFound     bool
+		wantInconsistent bool
+		wantErr          bool
 	}{
 		{
-			name:    "Error: plan doesn't exist",
-			planID:  mustUUID(),
-			wantErr: true,
+			// Regression: a missing plan came back as a plain storage error that callers could not tell from a
+			// transient failure.
+			name:         "Error: a plan that doesn't exist is a not-found error",
+			planID:       mustUUID(),
+			wantNotFound: true,
+			wantErr:      true,
 		},
 		{
-			name:   "Success",
+			name:   "Success: a stored plan is read back unchanged",
 			planID: tp.GetID(),
+		},
+		{
+			// Regression: a plan missing one sub-document was reported as a missing plan, and callers treated that as
+			// permanent and gave up on a plan whose document still exists.
+			name:             "Error: a plan with a missing sub-document is damaged storage, not a missing plan",
+			planID:           tp.GetID(),
+			deleteSubDoc:     true,
+			wantInconsistent: true,
+			wantErr:          true,
 		},
 	}
 
 	for _, test := range tests {
-		ctx := context.Background()
+		ctx := t.Context()
 
 		r := reader{
 			mu:     &sync.RWMutex{},
 			client: store,
 			reg:    testReg,
 		}
+		if test.deleteSubDoc {
+			if err := store.deleteItem(ctx, tp.PreChecks.ID.String()); err != nil {
+				t.Fatalf("TestRead(%s): deleting PreChecks: %s", test.name, err)
+			}
+		}
 		result, err := r.Read(ctx, test.planID)
+		if got := errors.IsNotFound(err); got != test.wantNotFound {
+			t.Errorf("TestRead(%s): got errors.IsNotFound(err) == %v, want %v", test.name, got, test.wantNotFound)
+		}
+		if got := errors.IsStorageInconsistent(err); got != test.wantInconsistent {
+			t.Errorf("TestRead(%s): got errors.IsStorageInconsistent(err) == %v, want %v", test.name, got, test.wantInconsistent)
+		}
 		switch {
 		case test.wantErr && err == nil:
 			t.Errorf("TestRead(%s): got err == nil, want err != nil", test.name)
@@ -349,5 +378,34 @@ func TestRead(t *testing.T) {
 			t.Errorf("TestRead(%s): returned params: -want/+got:\n%s", test.name, diff)
 			continue
 		}
+	}
+}
+
+// TestReadMissingAction verifies that a query returning fewer Actions than its parent references is reported as
+// inconsistent storage instead of silently returning a truncated Plan.
+func TestReadMissingAction(t *testing.T) {
+	t.Parallel()
+
+	store := newFakeStorage(testReg)
+	plan := NewTestPlan()
+	if err := store.WritePlan(t.Context(), plan); err != nil {
+		t.Fatalf("TestReadMissingAction: WritePlan: %s", err)
+	}
+	missing := plan.PreChecks.Actions[0].ID
+	if err := store.deleteItem(t.Context(), missing.String()); err != nil {
+		t.Fatalf("TestReadMissingAction: deleting Action(%s): %s", missing, err)
+	}
+
+	r := reader{
+		mu:     &sync.RWMutex{},
+		client: store,
+		reg:    testReg,
+	}
+	_, err := r.Read(t.Context(), plan.ID)
+	if !errors.IsStorageInconsistent(err) {
+		t.Errorf("TestReadMissingAction: got err == %v, want a storage-inconsistent error", err)
+	}
+	if errors.IsNotFound(err) {
+		t.Errorf("TestReadMissingAction: got errors.IsNotFound(err) == true, want false")
 	}
 }

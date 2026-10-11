@@ -1,8 +1,13 @@
 package errors
 
 import (
+	"github.com/Azure/retry/exponential"
 	"github.com/gostdlib/base/errors"
 )
+
+// ErrPermanent marks an error that must not be retried. Wrap it with %w alongside the real error. It is the same
+// value as github.com/Azure/retry/exponential.ErrPermanent, so retry loops built on that package stop on it.
+var ErrPermanent = exponential.ErrPermanent
 
 // Everything below here is a wrapper around the stdlib errors package.
 // We do this to prevent having to import the stdlib errors package in every file that needs it.
@@ -26,7 +31,7 @@ func Is(err, target error) bool {
 
 // As finds the first error in err's chain that matches target, and if so, sets
 // target to that error value and returns true.
-func As(err error, target interface{}) bool {
+func As(err error, target any) bool {
 	return errors.As(err, target)
 }
 

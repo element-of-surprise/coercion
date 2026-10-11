@@ -7,7 +7,7 @@ import (
 
 	"github.com/Azure/azure-sdk-for-go/sdk/data/azcosmos"
 	"github.com/element-of-surprise/coercion/workflow"
-	"github.com/go-json-experiment/json"
+	"github.com/element-of-surprise/coercion/workflow/errors"
 	"github.com/google/uuid"
 )
 
@@ -18,13 +18,19 @@ func (p reader) fetchPlan(ctx context.Context, id uuid.UUID) (*workflow.Plan, er
 	if err != nil {
 		return nil, fmt.Errorf("couldn't fetch plan: %w", err)
 	}
-	return p.docToPlan(ctx, &res)
+	plan, err := p.docToPlan(ctx, &res)
+	if err != nil && (isNotFound(err) || errors.IsNotFound(err)) {
+		// The plan document exists, so the plan does; a missing sub-document means storage is damaged, not that the plan
+		// is gone. %v, not %w, so callers do not see a not-found error and give up on a plan that still exists.
+		return nil, errors.E(ctx, errors.CatInternal, errors.TypeStorageInconsistent, fmt.Errorf("plan(%s) is missing a sub-document: %v", id, err))
+	}
+	return plan, err
 }
 
 func (p reader) docToPlan(ctx context.Context, response *azcosmos.ItemResponse) (*workflow.Plan, error) {
 	var err error
 	var resp plansEntry
-	if err = json.Unmarshal(response.Value, &resp); err != nil {
+	if err = unmarshalDoc(response.Value, &resp); err != nil {
 		return nil, err
 	}
 
@@ -42,6 +48,9 @@ func (p reader) docToPlan(ctx context.Context, response *azcosmos.ItemResponse) 
 		End:    resp.StateEnd,
 		ETag:   string(resp.ETag),
 	})
+	if !resp.RuntimeUpdate.IsZero() {
+		plan.RuntimeUpdate.Set(resp.RuntimeUpdate)
+	}
 	k := key(resp.PlanID)
 	plan.BypassChecks, err = p.idToCheck(ctx, k, resp.BypassChecks)
 	if err != nil {

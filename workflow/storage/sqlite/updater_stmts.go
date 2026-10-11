@@ -6,7 +6,8 @@ SET
 	reason = $reason,
 	state_status = $state_status,
 	state_start = $state_start,
-	state_end = $state_end
+	state_end = $state_end,
+	runtime_update = $runtime_update
 WHERE id = $id`
 
 const updateChecks = `

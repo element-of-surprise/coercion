@@ -8,7 +8,7 @@ import (
 
 	"github.com/Azure/azure-sdk-for-go/sdk/data/azcosmos"
 	"github.com/element-of-surprise/coercion/workflow"
-	"github.com/go-json-experiment/json"
+	"github.com/element-of-surprise/coercion/workflow/errors"
 	"github.com/google/uuid"
 )
 
@@ -37,6 +37,15 @@ func (r reader) idsToActions(ctx context.Context, planID azcosmos.PartitionKey, 
 	actions, err := r.fetchActionsByIDs(ctx, planID, actionIDs)
 	if err != nil {
 		return nil, fmt.Errorf("couldn't fetch actions by ids: %w", err)
+	}
+	found := make(map[uuid.UUID]struct{}, len(actions))
+	for _, action := range actions {
+		found[action.ID] = struct{}{}
+	}
+	for _, id := range actionIDs {
+		if _, ok := found[id]; !ok {
+			return nil, errors.ErrNotFound(ctx, fmt.Errorf("action(%s) not found", id))
+		}
 	}
 	return actions, nil
 }
@@ -81,7 +90,7 @@ func (r reader) fetchActionsByIDs(ctx context.Context, planID azcosmos.Partition
 func (r reader) docToAction(ctx context.Context, response []byte) (*workflow.Action, error) {
 	var err error
 	var resp actionsEntry
-	if err = json.Unmarshal(response, &resp); err != nil {
+	if err = unmarshalDoc(response, &resp); err != nil {
 		return nil, err
 	}
 
@@ -112,11 +121,11 @@ func (r reader) docToAction(ctx context.Context, response []byte) (*workflow.Act
 		req := plug.Request()
 		if req != nil {
 			if reflect.TypeOf(req).Kind() != reflect.Pointer {
-				if err := json.Unmarshal(b, &req); err != nil {
+				if err := unmarshalDoc(b, &req); err != nil {
 					return nil, fmt.Errorf("couldn't unmarshal request: %w", err)
 				}
 			} else {
-				if err := json.Unmarshal(b, req); err != nil {
+				if err := unmarshalDoc(b, req); err != nil {
 					return nil, fmt.Errorf("couldn't unmarshal request: %w", err)
 				}
 			}

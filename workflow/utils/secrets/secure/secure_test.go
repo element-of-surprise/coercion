@@ -367,6 +367,52 @@ func TestWalkValue(t *testing.T) {
 	}
 }
 
+func TestScrubAction(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		// attempts are stored on the action before scrubbing. nil leaves Attempts unset.
+		attempts     []workflow.Attempt
+		wantSet      bool
+		wantAttempts []workflow.Attempt
+	}{
+		{
+			name: "Success: unset Attempts stay unset",
+		},
+		{
+			name:     "Success: Attempts set to an empty slice stay set",
+			attempts: []workflow.Attempt{},
+			wantSet:  true,
+		},
+		{
+			name:         "Success: set Attempts have their secure fields zeroed",
+			attempts:     []workflow.Attempt{{Resp: User{Username: "john", Password: "secret123"}}},
+			wantSet:      true,
+			wantAttempts: []workflow.Attempt{{Resp: User{Username: "john"}}},
+		},
+	}
+
+	for _, test := range tests {
+		a := &workflow.Action{Req: User{Username: "john", Password: "secret123"}}
+		if test.attempts != nil {
+			a.Attempts.Set(test.attempts)
+		}
+
+		scrubAction(a)
+
+		if got := a.Attempts.IsSet(); got != test.wantSet {
+			t.Errorf("TestScrubAction(%s): got Attempts.IsSet() == %v, want %v", test.name, got, test.wantSet)
+		}
+		if diff := pretty.Compare(test.wantAttempts, a.Attempts.Get()); diff != "" {
+			t.Errorf("TestScrubAction(%s): Attempts -want/+got:\n%s", test.name, diff)
+		}
+		if diff := pretty.Compare(User{Username: "john"}, a.Req); diff != "" {
+			t.Errorf("TestScrubAction(%s): Req -want/+got:\n%s", test.name, diff)
+		}
+	}
+}
+
 func TestPlan(t *testing.T) {
 	t.Parallel()
 

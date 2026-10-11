@@ -11,10 +11,10 @@ import (
 
 	"github.com/element-of-surprise/coercion/plugins/registry"
 	"github.com/element-of-surprise/coercion/workflow"
-	"github.com/element-of-surprise/coercion/workflow/context"
 	"github.com/element-of-surprise/coercion/workflow/storage/azblob/internal/blobops"
 	"github.com/element-of-surprise/coercion/workflow/storage/azblob/internal/planlocks"
 	testPlugins "github.com/element-of-surprise/coercion/workflow/storage/sqlite/testing/plugins"
+	"github.com/element-of-surprise/coercion/workflow/utils/walk"
 	"github.com/go-json-experiment/json"
 	"github.com/gostdlib/base/concurrency/sync"
 	"github.com/kylelemons/godebug/pretty"
@@ -44,56 +44,63 @@ func TestUnwrapGroup(t *testing.T) {
 	tests := []struct {
 		name         string
 		in           error
-		wantNil      bool
 		wantNotFound bool
+		wantErr      bool
 	}{
 		{
-			name:    "nil error passes through as nil",
-			in:      nil,
-			wantNil: true,
+			name: "Success: a nil error passes through as nil",
+			in:   nil,
 		},
 		{
-			name: "non-group internal error passes through and is not a not-found",
-			in:   internal,
+			name:    "Error: a non-group internal error passes through and is not a not-found",
+			in:      internal,
+			wantErr: true,
 		},
 		{
-			name:         "non-group not-found error passes through as a not-found",
+			name:         "Error: a non-group not-found error passes through as a not-found",
 			in:           notFound,
 			wantNotFound: true,
+			wantErr:      true,
 		},
 		{
-			name:         "group of only not-found errors classifies as a not-found",
+			name:         "Error: a group of only not-found errors classifies as a not-found",
 			in:           groupErrs(notFound, notFound2),
 			wantNotFound: true,
+			wantErr:      true,
 		},
 		{
-			name: "not-found ahead of a transient ResponseError is not a not-found",
-			in:   groupErrs(notFound, transient),
+			name:    "Error: a not-found ahead of a transient ResponseError is not a not-found",
+			in:      groupErrs(notFound, transient),
+			wantErr: true,
 		},
 		{
-			name: "transient ResponseError ahead of a not-found is not a not-found",
-			in:   groupErrs(transient, notFound),
+			name:    "Error: a transient ResponseError ahead of a not-found is not a not-found",
+			in:      groupErrs(transient, notFound),
+			wantErr: true,
 		},
 		{
-			name: "not-found ahead of a ResponseError-less internal error is not a not-found",
-			in:   groupErrs(notFound, internal),
+			name:    "Error: a not-found ahead of a ResponseError-less internal error is not a not-found",
+			in:      groupErrs(notFound, internal),
+			wantErr: true,
 		},
 		{
-			name: "ResponseError-less internal error ahead of a not-found is not a not-found",
-			in:   groupErrs(internal, notFound),
+			name:    "Error: a ResponseError-less internal error ahead of a not-found is not a not-found",
+			in:      groupErrs(internal, notFound),
+			wantErr: true,
 		},
 	}
 
 	for _, test := range tests {
 		got := unwrapGroup(test.in)
 		switch {
-		case test.wantNil && got != nil:
-			t.Errorf("TestUnwrapGroup(%s): got err == %v, want err == nil", test.name, got)
-			continue
-		case !test.wantNil && got == nil:
+		case got == nil && test.wantErr:
 			t.Errorf("TestUnwrapGroup(%s): got err == nil, want err != nil", test.name)
 			continue
+		case got != nil && !test.wantErr:
+			t.Errorf("TestUnwrapGroup(%s): got err == %v, want err == nil", test.name, got)
+			continue
 		}
+		// fetchPlan and reader.exists branch on blobops.IsNotFound to report a missing Plan instead of a storage failure.
 		if gotNF := blobops.IsNotFound(got); gotNF != test.wantNotFound {
 			t.Errorf("TestUnwrapGroup(%s): blobops.IsNotFound == %v, want %v", test.name, gotNF, test.wantNotFound)
 		}
@@ -198,56 +205,10 @@ func makePlanFull(bypassChecks, preChecks, postChecks, contChecks, deferredCheck
 	return p
 }
 
-// TestFixActionsAttempts verifies fixActions does not materialize the Attempts slice of an action
-// that has none. A non-running plan is read back via a full json.Unmarshal followed by fixActions;
-// if fixActions writes back an empty Attempts, the reconstructed plan no longer matches the submitted
-// plan under a SkipZeroFields comparison (the integration test's "Attempts: {}" mismatch).
-func TestFixActionsAttempts(t *testing.T) {
-	t.Parallel()
-
-	ctx := context.Background()
-	reg := registry.New()
-	reg.Register(&testPlugins.HelloPlugin{})
-
-	// The submitted plan's check action has no attempts, so Attempts is an unset (zero) AtomicSlice.
-	want := makePlan(
-		"Test Plan",
-		"Test Description",
-		makeChecks(
-			[]*workflow.Action{
-				makeAction("test action", "test action", testPlugins.HelloPluginName, testPlugins.HelloReq{Say: "hello"}, workflow.NotStarted),
-			},
-			workflow.NotStarted,
-		),
-		[]*workflow.Block{},
-		workflow.NotStarted,
-	)
-
-	// Simulate the non-running read path: marshal to storage, unmarshal back, then fixActions.
-	b, err := json.Marshal(want)
-	if err != nil {
-		t.Fatalf("TestFixActionsAttempts: failed to marshal plan: %v", err)
-	}
-	got := &workflow.Plan{}
-	if err := json.Unmarshal(b, got); err != nil {
-		t.Fatalf("TestFixActionsAttempts: failed to unmarshal plan: %v", err)
-	}
-
-	r := reader{reg: reg}
-	if err := r.fixActions(ctx, got); err != nil {
-		t.Fatalf("TestFixActionsAttempts: fixActions returned err == %s, want err == nil", err)
-	}
-
-	cfg := pretty.Config{SkipZeroFields: true, PrintStringers: true, PrintTextMarshalers: true}
-	if diff := cfg.Compare(want, got); diff != "" {
-		t.Errorf("TestFixActionsAttempts: reconstructed plan mismatch, -want/+got:\n%s", diff)
-	}
-}
-
 func TestFixActions(t *testing.T) {
 	t.Parallel()
 
-	ctx := context.Background()
+	ctx := t.Context()
 	reg := registry.New()
 	reg.Register(&testPlugins.HelloPlugin{})
 
@@ -257,7 +218,9 @@ func TestFixActions(t *testing.T) {
 		wantErr bool
 	}{
 		{
-			name: "Success: fix Action.Req in plan-level PreChecks",
+			// Regression: fixActions wrote back an empty Attempts for an action with none, so a plan read back without
+			// running no longer matched the submitted one under a SkipZeroFields comparison ("Attempts: {}").
+			name: "Success: fix Action.Req in plan-level PreChecks and keep an action's unset Attempts unset",
 			plan: makePlan(
 				"Test Plan",
 				"Test Description",
@@ -369,8 +332,10 @@ func TestFixActions(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+
 			// Simulate what happens when unmarshaling from JSON:
-			// Action.Req and Attempt.Resp lose their concrete types and become map[string]interface{}
+			// Action.Req and Attempt.Resp lose their concrete types and become map[string]any
 			planBytes, err := json.Marshal(test.plan)
 			if err != nil {
 				t.Fatalf("TestFixActions(%s): failed to marshal plan: %v", test.name, err)
@@ -381,13 +346,13 @@ func TestFixActions(t *testing.T) {
 				t.Fatalf("TestFixActions(%s): failed to unmarshal plan: %v", test.name, err)
 			}
 
-			// At this point, all Action.Req and Attempt.Resp are map[string]interface{}
+			// At this point, all Action.Req and Attempt.Resp are map[string]any
 			// Verify this is the case before fixing
 			if unmarshaledPlan.PreChecks != nil && len(unmarshaledPlan.PreChecks.Actions) > 0 {
 				action := unmarshaledPlan.PreChecks.Actions[0]
 				if action.Req != nil {
 					if _, ok := action.Req.(testPlugins.HelloReq); ok {
-						t.Errorf("TestFixActions(%s): Req should be map[string]interface{} before fix, got %T", test.name, action.Req)
+						t.Errorf("TestFixActions(%s): Req should be map[string]any before fix, got %T", test.name, action.Req)
 					}
 				}
 			}
@@ -410,97 +375,23 @@ func TestFixActions(t *testing.T) {
 				return
 			}
 
-			// Verify Action.Req was fixed in plan-level checks
-			for _, checks := range []*workflow.Checks{
-				unmarshaledPlan.BypassChecks,
-				unmarshaledPlan.PreChecks,
-				unmarshaledPlan.PostChecks,
-				unmarshaledPlan.ContChecks,
-				unmarshaledPlan.DeferredChecks,
-			} {
-				if checks != nil {
-					for _, action := range checks.Actions {
-						if action.Req != nil {
-							req, ok := action.Req.(testPlugins.HelloReq)
-							if !ok {
-								t.Errorf("TestFixActions(%s): plan-level action Req type = %T, want testPlugins.HelloReq", test.name, action.Req)
-								continue
-							}
-							if req.Say == "" {
-								t.Errorf("TestFixActions(%s): plan-level action Req.Say is empty", test.name)
-							}
-						}
-
-						// Verify Attempt.Resp was fixed
-						for _, attempt := range action.Attempts.Get() {
-							if attempt.Resp != nil {
-								resp, ok := attempt.Resp.(testPlugins.HelloResp)
-								if !ok {
-									t.Errorf("TestFixActions(%s): plan-level attempt Resp type = %T, want testPlugins.HelloResp", test.name, attempt.Resp)
-									continue
-								}
-								if resp.Said == "" {
-									t.Errorf("TestFixActions(%s): plan-level attempt Resp.Said is empty", test.name)
-								}
-							}
-						}
-					}
-				}
+			cfg := pretty.Config{SkipZeroFields: true, PrintStringers: true, PrintTextMarshalers: true}
+			if diff := cfg.Compare(test.plan, &unmarshaledPlan); diff != "" {
+				t.Errorf("TestFixActions(%s): reconstructed plan mismatch, -want/+got:\n%s", test.name, diff)
 			}
 
-			// Verify Action.Req was fixed in blocks
-			for _, block := range unmarshaledPlan.Blocks {
-				// Block-level checks
-				for _, checks := range []*workflow.Checks{
-					block.BypassChecks,
-					block.PreChecks,
-					block.PostChecks,
-					block.ContChecks,
-					block.DeferredChecks,
-				} {
-					if checks != nil {
-						for _, action := range checks.Actions {
-							if action.Req != nil {
-								req, ok := action.Req.(testPlugins.HelloReq)
-								if !ok {
-									t.Errorf("TestFixActions(%s): block-level action Req type = %T, want testPlugins.HelloReq", test.name, action.Req)
-									continue
-								}
-								if req.Say == "" {
-									t.Errorf("TestFixActions(%s): block-level action Req.Say is empty", test.name)
-								}
-							}
-						}
-					}
+			// The comparison cannot tell a decoded map from the plugin's own type, so check every Req and Resp's type.
+			for item := range walk.Plan(&unmarshaledPlan) {
+				if item.Value.Type() != workflow.OTAction {
+					continue
 				}
-
-				// Sequence actions
-				for _, seq := range block.Sequences {
-					for _, action := range seq.Actions {
-						if action.Req != nil {
-							req, ok := action.Req.(testPlugins.HelloReq)
-							if !ok {
-								t.Errorf("TestFixActions(%s): sequence action Req type = %T, want testPlugins.HelloReq", test.name, action.Req)
-								continue
-							}
-							if req.Say == "" {
-								t.Errorf("TestFixActions(%s): sequence action Req.Say is empty", test.name)
-							}
-						}
-
-						// Verify Attempt.Resp was fixed in sequences
-						for _, attempt := range action.Attempts.Get() {
-							if attempt.Resp != nil {
-								resp, ok := attempt.Resp.(testPlugins.HelloResp)
-								if !ok {
-									t.Errorf("TestFixActions(%s): sequence attempt Resp type = %T, want testPlugins.HelloResp", test.name, attempt.Resp)
-									continue
-								}
-								if resp.Said == "" {
-									t.Errorf("TestFixActions(%s): sequence attempt Resp.Said is empty", test.name)
-								}
-							}
-						}
+				action := item.Action()
+				if _, ok := action.Req.(testPlugins.HelloReq); !ok {
+					t.Errorf("TestFixActions(%s): action(%s) Req type = %T, want testPlugins.HelloReq", test.name, action.Name, action.Req)
+				}
+				for _, attempt := range action.Attempts.Get() {
+					if _, ok := attempt.Resp.(testPlugins.HelloResp); attempt.Resp != nil && !ok {
+						t.Errorf("TestFixActions(%s): action(%s) attempt Resp type = %T, want testPlugins.HelloResp", test.name, action.Name, attempt.Resp)
 					}
 				}
 			}
@@ -511,7 +402,7 @@ func TestFixActions(t *testing.T) {
 func TestFetchNonRunningPlanOrphanedEntry(t *testing.T) {
 	t.Parallel()
 
-	ctx := context.Background()
+	ctx := t.Context()
 	fakeClient := blobops.NewFake()
 	prefix := "test"
 
@@ -522,6 +413,7 @@ func TestFetchNonRunningPlanOrphanedEntry(t *testing.T) {
 		mu:            planlocks.New(ctx),
 		readFlight:    &sync.Flight[string, *workflow.Plan]{},
 		existsFlight:  &sync.Flight[string, bool]{},
+		pools:         newFetchPools(ctx),
 		prefix:        prefix,
 		client:        fakeClient,
 		reg:           reg,
@@ -578,7 +470,8 @@ func TestFetchNonRunningPlanOrphanedEntry(t *testing.T) {
 		t.Fatalf("TestFetchNonRunningPlanOrphanedEntry: expected error when object blob missing")
 	}
 
-	// Verify the error is "not found"
+	// fetchPlan branches on blobops.IsNotFound to report the Plan as not found (errors.ErrNotFound) instead of a storage
+	// failure.
 	if !blobops.IsNotFound(err) {
 		t.Errorf("TestFetchNonRunningPlanOrphanedEntry: expected not found error, got: %v", err)
 	}

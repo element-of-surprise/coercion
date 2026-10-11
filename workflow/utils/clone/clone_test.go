@@ -4,10 +4,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gostdlib/base/context"
-
 	"github.com/element-of-surprise/coercion/plugins"
 	"github.com/element-of-surprise/coercion/workflow"
+	"github.com/element-of-surprise/coercion/workflow/utils/walk"
 	"github.com/google/uuid"
 
 	"github.com/kylelemons/godebug/pretty"
@@ -20,49 +19,81 @@ type Req struct {
 func TestPlan(t *testing.T) {
 	t.Parallel()
 
-	ctx := context.Background()
-
 	start := time.Now()
 	id, err := uuid.NewV7()
 	if err != nil {
-		panic(err)
+		t.Fatalf("TestPlan: uuid.NewV7(): %s", err)
 	}
+
+	// Keys are user supplied references within a Plan, so every clone must keep them. Each object has its own
+	// state and storage ETag, so the state check below sees which object's state a clone dropped.
+	var (
+		actionKey      = uuid.New()
+		blockKey       = uuid.New()
+		seqKey         = uuid.New()
+		checksKey      = uuid.New()
+		batchKey       = uuid.New()
+		batchActionKey = uuid.New()
+	)
 
 	action := &workflow.Action{
 		ID:   id,
+		Key:  actionKey,
 		Name: "action1",
 		Req:  Req{Data: "Hello"},
 	}
+	action.State.Set(workflow.State{Status: workflow.Completed, Start: start, End: start, ETag: "action"})
+
+	seq := &workflow.Sequence{
+		ID:      id,
+		Key:     seqKey,
+		Name:    "seq1",
+		Actions: []*workflow.Action{action},
+	}
+	seq.State.Set(workflow.State{Status: workflow.Completed, Start: start, End: start, ETag: "seq"})
 
 	block := &workflow.Block{
-		ID:    id,
-		Name:  "block1",
-		Descr: "descr",
+		ID:        id,
+		Key:       blockKey,
+		Name:      "block1",
+		Descr:     "descr",
+		Sequences: []*workflow.Sequence{seq},
 	}
+	block.State.Set(workflow.State{Status: workflow.Completed, Start: start, End: start, ETag: "block"})
 
 	checks := &workflow.Checks{
-		ID: id,
-		Actions: []*workflow.Action{
-			Action(ctx, action, WithKeepState(), WithKeepSecrets()),
+		ID:      id,
+		Key:     checksKey,
+		Actions: []*workflow.Action{action},
+	}
+	checks.State.Set(workflow.State{Status: workflow.Completed, Start: start, End: start, ETag: "checks"})
+
+	batchAction := &workflow.Action{
+		ID:   id,
+		Key:  batchActionKey,
+		Name: "fail_action",
+		Req:  Req{Data: "Hello"},
+	}
+	batchAction.State.Set(workflow.State{Status: workflow.NotStarted, ETag: "batchAction"})
+
+	batch := &workflow.DeferBatch{
+		When:        workflow.OnFailure,
+		FailElement: true,
+		Sequence: workflow.Sequence{
+			ID:      id,
+			Key:     batchKey,
+			Name:    "fail",
+			Descr:   "fail",
+			Actions: []*workflow.Action{batchAction},
 		},
 	}
+	batch.State.Set(workflow.State{Status: workflow.NotStarted, ETag: "batch"})
 
 	deferredActions := &workflow.DeferredActions{
-		ID: id,
-		DeferredBatches: []*workflow.DeferBatch{
-			DeferBatch(ctx, &workflow.DeferBatch{
-				When:        workflow.OnFailure,
-				FailElement: true,
-				Sequence: workflow.Sequence{
-					Name:  "fail",
-					Descr: "fail",
-					Actions: []*workflow.Action{
-						{Name: "fail_action", Req: Req{Data: "Hello"}},
-					},
-				},
-			}, WithKeepState(), WithKeepSecrets()),
-		},
+		ID:              id,
+		DeferredBatches: []*workflow.DeferBatch{batch},
 	}
+	deferredActions.State.Set(workflow.State{Status: workflow.NotStarted, ETag: "deferredActions"})
 
 	plan := &workflow.Plan{
 		ID:              id,
@@ -70,100 +101,152 @@ func TestPlan(t *testing.T) {
 		Descr:           "descr",
 		GroupID:         id,
 		Meta:            []byte("hello"),
-		PreChecks:       Checks(ctx, checks, WithKeepSecrets(), WithKeepState()),
-		PostChecks:      Checks(ctx, checks, WithKeepSecrets(), WithKeepState()),
-		ContChecks:      Checks(ctx, checks, WithKeepSecrets(), WithKeepState()),
-		DeferredActions: DeferredActions(ctx, deferredActions, WithKeepSecrets(), WithKeepState()),
-		Blocks: []*workflow.Block{
-			Block(ctx, block, WithKeepSecrets(), WithKeepState()),
-		},
-		Reason:     workflow.FRBlock,
-		SubmitTime: start,
+		PreChecks:       checks,
+		PostChecks:      checks,
+		ContChecks:      checks,
+		DeferredActions: deferredActions,
+		Blocks:          []*workflow.Block{block},
+		Reason:          workflow.FRBlock,
+		SubmitTime:      start,
 	}
-	plan.State.Set(workflow.State{
-		Status: workflow.Completed,
-		Start:  start,
-	})
+	plan.State.Set(workflow.State{Status: workflow.Completed, Start: start, ETag: "plan"})
+	plan.RuntimeUpdate.Set(start)
+
+	// wantPlan builds the expected clone from literals, never from the clone functions under test, so a field one
+	// of them drops shows up in the diff. IDs are kept only with keepState, and data is what an Action's secure Req
+	// field should hold. State is not set here: pretty.Compare does not see inside an AtomicValue, so it is checked
+	// apart through wantStates.
+	wantPlan := func(keepState bool, data string) *workflow.Plan {
+		var wantID uuid.UUID
+		if keepState {
+			wantID = id
+		}
+		wantChecks := func() *workflow.Checks {
+			return &workflow.Checks{
+				ID:      wantID,
+				Key:     checksKey,
+				Actions: []*workflow.Action{{ID: wantID, Key: actionKey, Name: "action1", Req: Req{Data: data}}},
+			}
+		}
+		p := &workflow.Plan{
+			Name:       "plan1",
+			Descr:      "descr",
+			GroupID:    id,
+			Meta:       []byte("hello"),
+			PreChecks:  wantChecks(),
+			PostChecks: wantChecks(),
+			ContChecks: wantChecks(),
+			DeferredActions: &workflow.DeferredActions{
+				ID: wantID,
+				DeferredBatches: []*workflow.DeferBatch{
+					{
+						When:        workflow.OnFailure,
+						FailElement: true,
+						Sequence: workflow.Sequence{
+							ID:      wantID,
+							Key:     batchKey,
+							Name:    "fail",
+							Descr:   "fail",
+							Actions: []*workflow.Action{{ID: wantID, Key: batchActionKey, Name: "fail_action", Req: Req{Data: data}}},
+						},
+					},
+				},
+			},
+			Blocks: []*workflow.Block{
+				{
+					ID:    wantID,
+					Key:   blockKey,
+					Name:  "block1",
+					Descr: "descr",
+					Sequences: []*workflow.Sequence{
+						{
+							ID:      wantID,
+							Key:     seqKey,
+							Name:    "seq1",
+							Actions: []*workflow.Action{{ID: wantID, Key: actionKey, Name: "action1", Req: Req{Data: data}}},
+						},
+					},
+				},
+			},
+		}
+		if keepState {
+			p.ID = id
+			p.Reason = workflow.FRBlock
+			p.SubmitTime = start
+		}
+		return p
+	}
+
+	// states returns the state of every object in p in walk order.
+	states := func(p *workflow.Plan) []workflow.State {
+		var sl []workflow.State
+		for item := range walk.Plan(p) {
+			sl = append(sl, item.Value.(walk.Stateful).GetState())
+		}
+		return sl
+	}
+	// Every state, ETag included, is kept with keepState, and none is without it.
+	keptStates := states(plan)
+	droppedStates := make([]workflow.State, len(keptStates))
 
 	tests := []struct {
 		name    string
 		options cloneOptions
 		plan    *workflow.Plan
 		want    *workflow.Plan
+		// wantStates is the state of every object in the clone in walk order.
+		wantStates []workflow.State
+		// wantRuntimeUpdate is checked apart from want, as pretty.Compare does not see inside an AtomicValue.
+		wantRuntimeUpdate time.Time
 	}{
 		{
-			name: "nil",
+			name: "Success: a nil Plan clones to nil",
 		},
 		{
-			name: "no options",
-			plan: plan,
-			want: &workflow.Plan{
-				Name:            "plan1",
-				Descr:           "descr",
-				GroupID:         id,
-				Meta:            []byte("hello"),
-				PreChecks:       Checks(ctx, checks),
-				PostChecks:      Checks(ctx, checks),
-				ContChecks:      Checks(ctx, checks),
-				DeferredActions: DeferredActions(ctx, deferredActions),
-				Blocks:          []*workflow.Block{Block(ctx, plan.Blocks[0])},
-			},
+			name:       "Success: with no options the clone keeps Keys but drops IDs and state and hides secrets",
+			plan:       plan,
+			want:       wantPlan(false, SecureStr),
+			wantStates: droppedStates,
 		},
 		{
-			name:    "WithKeepState(), WithKeepSecrets()",
-			plan:    plan,
-			options: cloneOptions{keepState: true, keepSecrets: true},
-			want:    plan,
+			name:              "Success: WithKeepState() and WithKeepSecrets() keep Keys, IDs, state, ETags, RuntimeUpdate and secrets",
+			plan:              plan,
+			options:           cloneOptions{keepState: true, keepSecrets: true},
+			want:              wantPlan(true, "Hello"),
+			wantStates:        keptStates,
+			wantRuntimeUpdate: start,
 		},
 		{
-			name:    "WithKeepState()",
-			plan:    plan,
-			options: cloneOptions{keepState: true},
-			want: func() *workflow.Plan {
-				p := &workflow.Plan{
-					ID:              id,
-					Name:            "plan1",
-					Descr:           "descr",
-					GroupID:         id,
-					Meta:            []byte("hello"),
-					PreChecks:       Checks(ctx, checks, WithKeepState()),
-					PostChecks:      Checks(ctx, checks, WithKeepState()),
-					ContChecks:      Checks(ctx, checks, WithKeepState()),
-					DeferredActions: DeferredActions(ctx, deferredActions, WithKeepState()),
-					Blocks:          []*workflow.Block{Block(ctx, plan.Blocks[0], WithKeepState())},
-					Reason:          workflow.FRBlock,
-					SubmitTime:      start,
-				}
-				p.State.Set(workflow.State{
-					Status: workflow.Completed,
-					Start:  start,
-				})
-				return p
-			}(),
+			name:              "Success: WithKeepState() keeps Keys, IDs, state, ETags and RuntimeUpdate but hides secrets",
+			plan:              plan,
+			options:           cloneOptions{keepState: true},
+			want:              wantPlan(true, SecureStr),
+			wantStates:        keptStates,
+			wantRuntimeUpdate: start,
 		},
 		{
-			name:    "Without WithKeepSecrets(), but callNum > 0",
-			plan:    plan,
-			options: cloneOptions{keepSecrets: true, callNum: 1},
-			want: &workflow.Plan{
-				Name:            "plan1",
-				Descr:           "descr",
-				GroupID:         id,
-				Meta:            []byte("hello"),
-				PreChecks:       Checks(ctx, checks, WithKeepSecrets()),
-				PostChecks:      Checks(ctx, checks, WithKeepSecrets()),
-				ContChecks:      Checks(ctx, checks, WithKeepSecrets()),
-				DeferredActions: DeferredActions(ctx, deferredActions, WithKeepSecrets()),
-				Blocks:          []*workflow.Block{Block(ctx, plan.Blocks[0], WithKeepSecrets())},
-			},
+			name:       "Success: without WithKeepSecrets() a nested clone (callNum > 0) leaves secrets for its caller to hide",
+			plan:       plan,
+			options:    cloneOptions{callNum: 1},
+			want:       wantPlan(false, "Hello"),
+			wantStates: droppedStates,
 		},
 	}
 
 	for _, test := range tests {
-		got := Plan(context.Background(), test.plan, withOptions(test.options))
+		got := Plan(t.Context(), test.plan, withOptions(test.options))
 
 		if diff := pretty.Compare(test.want, got); diff != "" {
 			t.Errorf("TestPlan(%s): -want/+got:\n%s", test.name, diff)
+		}
+		if got == nil {
+			continue
+		}
+		if diff := pretty.Compare(test.wantStates, states(got)); diff != "" {
+			t.Errorf("TestPlan(%s): states: -want/+got:\n%s", test.name, diff)
+		}
+		if got, want := got.RuntimeUpdate.Get(), test.wantRuntimeUpdate; !got.Equal(want) {
+			t.Errorf("TestPlan(%s): got RuntimeUpdate %v, want %v", test.name, got, want)
 		}
 	}
 }
@@ -171,7 +254,7 @@ func TestPlan(t *testing.T) {
 func TestBlock(t *testing.T) {
 	t.Parallel()
 
-	ctx := context.Background()
+	ctx := t.Context()
 
 	id, err := uuid.NewV7()
 	if err != nil {
@@ -238,10 +321,10 @@ func TestBlock(t *testing.T) {
 		want    *workflow.Block
 	}{
 		{
-			name: "nil",
+			name: "Success: a nil Block clones to nil",
 		},
 		{
-			name:  "no options",
+			name:  "Success: a Block is cloned with no options",
 			block: block,
 			want: &workflow.Block{
 				Name:          "block1",
@@ -271,13 +354,13 @@ func TestBlock(t *testing.T) {
 			},
 		},
 		{
-			name:    "WithKeepState(), WithKeepSecrets()",
+			name:    "Success: a Block is cloned with WithKeepState() and WithKeepSecrets()",
 			block:   block,
 			options: cloneOptions{keepState: true, keepSecrets: true},
 			want:    block,
 		},
 		{
-			name:    "WithKeepState()",
+			name:    "Success: a Block is cloned with WithKeepState()",
 			block:   block,
 			options: cloneOptions{keepState: true},
 			want: func() *workflow.Block {
@@ -321,7 +404,7 @@ func TestBlock(t *testing.T) {
 			}(),
 		},
 		{
-			name:    "Without WithKeepSecrets(), but callNum > 0",
+			name:    "Success: a Block is cloned without WithKeepSecrets() from a nested call (callNum > 0)",
 			block:   block,
 			options: cloneOptions{keepSecrets: true, callNum: 1},
 			want: &workflow.Block{
@@ -354,7 +437,7 @@ func TestBlock(t *testing.T) {
 	}
 
 	for _, test := range tests {
-		got := Block(context.Background(), test.block, withOptions(test.options))
+		got := Block(t.Context(), test.block, withOptions(test.options))
 
 		if diff := pretty.Compare(test.want, got); diff != "" {
 			t.Errorf("TestBlock(%s): -want/+got:\n%s", test.name, diff)
@@ -396,10 +479,10 @@ func TestChecks(t *testing.T) {
 		want       *workflow.Checks
 	}{
 		{
-			name: "nil",
+			name: "Success: a nil Checks clones to nil",
 		},
 		{
-			name:   "no options",
+			name:   "Success: a Checks is cloned with no options",
 			checks: checks,
 			want: &workflow.Checks{
 				Delay: 1 * time.Second,
@@ -412,20 +495,20 @@ func TestChecks(t *testing.T) {
 			},
 		},
 		{
-			name:    "WithKeepState(), WithKeepSecrets()",
+			name:    "Success: a Checks is cloned with WithKeepState() and WithKeepSecrets()",
 			checks:  checks,
 			options: cloneOptions{keepState: true, keepSecrets: true},
 			want:    checks,
 		},
 		{
-			name:       "WithKeepState()",
+			name:       "Success: a Checks is cloned with WithKeepState()",
 			checks:     checks,
 			options:    cloneOptions{keepState: true},
 			replaceReq: Req{Data: SecureStr},
 			want:       checks,
 		},
 		{
-			name:    "Without WithKeepSecrets(), but callNum > 0",
+			name:    "Success: a Checks is cloned without WithKeepSecrets() from a nested call (callNum > 0)",
 			checks:  checks,
 			options: cloneOptions{keepSecrets: false, callNum: 1},
 			want: &workflow.Checks{
@@ -441,7 +524,7 @@ func TestChecks(t *testing.T) {
 	}
 
 	for _, test := range tests {
-		got := Checks(context.Background(), test.checks, withOptions(test.options))
+		got := Checks(t.Context(), test.checks, withOptions(test.options))
 
 		var oldReq Req
 		if test.want != nil {
@@ -496,10 +579,10 @@ func TestSequence(t *testing.T) {
 		want       *workflow.Sequence
 	}{
 		{
-			name: "nil",
+			name: "Success: a nil Sequence clones to nil",
 		},
 		{
-			name:     "no options",
+			name:     "Success: a Sequence is cloned with no options",
 			sequence: sequence,
 			want: &workflow.Sequence{
 				Name:  "name",
@@ -513,20 +596,20 @@ func TestSequence(t *testing.T) {
 			},
 		},
 		{
-			name:     "WithKeepState(), WithKeepSecrets()",
+			name:     "Success: a Sequence is cloned with WithKeepState() and WithKeepSecrets()",
 			sequence: sequence,
 			options:  cloneOptions{keepState: true, keepSecrets: true},
 			want:     sequence,
 		},
 		{
-			name:       "WithKeepState()",
+			name:       "Success: a Sequence is cloned with WithKeepState()",
 			sequence:   sequence,
 			options:    cloneOptions{keepState: true},
 			replaceReq: Req{Data: SecureStr},
 			want:       sequence,
 		},
 		{
-			name:     "Without WithKeepSecrets(), but callNum > 0",
+			name:     "Success: a Sequence is cloned without WithKeepSecrets() from a nested call (callNum > 0)",
 			sequence: sequence,
 			options:  cloneOptions{callNum: 1},
 			want: &workflow.Sequence{
@@ -543,7 +626,7 @@ func TestSequence(t *testing.T) {
 	}
 
 	for _, test := range tests {
-		got := Sequence(context.Background(), test.sequence, withOptions(test.options))
+		got := Sequence(t.Context(), test.sequence, withOptions(test.options))
 
 		var oldReq Req
 		if test.want != nil {
@@ -595,7 +678,7 @@ func TestDeferBatch(t *testing.T) {
 		want       *workflow.DeferBatch
 	}{
 		{
-			name: "nil",
+			name: "Success: a nil DeferBatch clones to nil",
 		},
 		{
 			name:  "Success: no options",
@@ -648,7 +731,7 @@ func TestDeferBatch(t *testing.T) {
 	}
 
 	for _, test := range tests {
-		got := DeferBatch(context.Background(), test.batch, withOptions(test.options))
+		got := DeferBatch(t.Context(), test.batch, withOptions(test.options))
 
 		var oldReq Req
 		if test.want != nil {
@@ -711,7 +794,7 @@ func TestDeferredActions(t *testing.T) {
 		want    *workflow.DeferredActions
 	}{
 		{
-			name: "nil",
+			name: "Success: a nil DeferredActions clones to nil",
 		},
 		{
 			name: "Success: no options",
@@ -781,7 +864,7 @@ func TestDeferredActions(t *testing.T) {
 	}
 
 	for _, test := range tests {
-		got := DeferredActions(context.Background(), test.da, withOptions(test.options))
+		got := DeferredActions(t.Context(), test.da, withOptions(test.options))
 		if diff := pretty.Compare(test.want, got); diff != "" {
 			t.Errorf("TestDeferredActions(%s): -want/+got:\n%s", test.name, diff)
 		}
@@ -830,12 +913,14 @@ func TestAction(t *testing.T) {
 		// instead of writing the entire action.
 		replaceReq Req
 		want       *workflow.Action
+		// wantAttemptsSet is whether the clone's Attempts must be set. Compare cannot see this.
+		wantAttemptsSet bool
 	}{
 		{
-			name: "nil",
+			name: "Success: a nil Action clones to nil",
 		},
 		{
-			name:   "no options",
+			name:   "Success: a Action is cloned with no options",
 			action: action,
 			want: &workflow.Action{
 				Name:   "name",
@@ -849,16 +934,35 @@ func TestAction(t *testing.T) {
 			},
 		},
 		{
-			name:    "WithKeepState(), WithKeepSecrets()",
-			action:  action,
-			options: cloneOptions{keepState: true, keepSecrets: true},
-			want:    action,
+			name:            "Success: a Action is cloned with WithKeepState() and WithKeepSecrets()",
+			action:          action,
+			options:         cloneOptions{keepState: true, keepSecrets: true},
+			want:            action,
+			wantAttemptsSet: true,
 		},
 		{
-			name:       "WithKeepState()",
-			action:     action,
-			options:    cloneOptions{keepState: true},
-			replaceReq: Req{Data: SecureStr},
+			name:    "Success: WithKeepState() leaves unset Attempts unset",
+			action:  &workflow.Action{ID: id, Name: "name", Req: Req{Data: "hello"}},
+			options: cloneOptions{keepState: true, keepSecrets: true},
+			want:    &workflow.Action{ID: id, Name: "name", Req: Req{Data: "hello"}},
+		},
+		{
+			name: "Success: WithKeepState() keeps Attempts set to an empty slice set",
+			action: func() *workflow.Action {
+				a := &workflow.Action{ID: id, Name: "name", Req: Req{Data: "hello"}}
+				a.Attempts.Set([]workflow.Attempt{})
+				return a
+			}(),
+			options:         cloneOptions{keepState: true, keepSecrets: true},
+			want:            &workflow.Action{ID: id, Name: "name", Req: Req{Data: "hello"}},
+			wantAttemptsSet: true,
+		},
+		{
+			name:            "Success: a Action is cloned with WithKeepState()",
+			action:          action,
+			options:         cloneOptions{keepState: true},
+			replaceReq:      Req{Data: SecureStr},
+			wantAttemptsSet: true,
 			want: func() *workflow.Action {
 				a := &workflow.Action{
 					ID:     id,
@@ -888,7 +992,7 @@ func TestAction(t *testing.T) {
 			}(),
 		},
 		{
-			name:    "Without WithKeepSecrets(), but callNum > 0",
+			name:    "Success: a Action is cloned without WithKeepSecrets() from a nested call (callNum > 0)",
 			action:  action,
 			options: cloneOptions{callNum: 1},
 			want: &workflow.Action{
@@ -905,7 +1009,7 @@ func TestAction(t *testing.T) {
 	}
 
 	for _, test := range tests {
-		got := Action(context.Background(), test.action, withOptions(test.options))
+		got := Action(t.Context(), test.action, withOptions(test.options))
 
 		var oldReq Req
 		if test.want != nil {
@@ -917,6 +1021,9 @@ func TestAction(t *testing.T) {
 
 		if diff := pretty.Compare(test.want, got); diff != "" {
 			t.Errorf("TestAction(%s): -want/+got:\n%s", test.name, diff)
+		}
+		if got != nil && got.Attempts.IsSet() != test.wantAttemptsSet {
+			t.Errorf("TestAction(%s): got Attempts.IsSet() == %v, want %v", test.name, got.Attempts.IsSet(), test.wantAttemptsSet)
 		}
 		if test.want != nil {
 			test.want.Req = oldReq
@@ -931,36 +1038,52 @@ func TestCloneStateAtomic(t *testing.T) {
 	end := time.Now()
 
 	tests := []struct {
-		name  string
-		state workflow.State
-		want  workflow.State
+		name string
+		// unset leaves the source unset instead of setting it to state.
+		unset   bool
+		state   workflow.State
+		want    workflow.State
+		wantSet bool
 	}{
 		{
-			name: "nil",
+			name:  "Success: an unset state stays unset",
+			unset: true,
 		},
 		{
-			name: "Success",
+			name:    "Success: a state set to the zero value stays set",
+			wantSet: true,
+		},
+		{
+			name:    "Success: a set state is copied",
+			wantSet: true,
 			state: workflow.State{
 				Status: workflow.Completed,
 				Start:  start,
 				End:    end,
+				ETag:   "etag",
 			},
 			want: workflow.State{
 				Status: workflow.Completed,
 				Start:  start,
 				End:    end,
+				ETag:   "etag",
 			},
 		},
 	}
 
 	for _, test := range tests {
 		var src, dst workflow.AtomicValue[workflow.State]
-		src.Set(test.state)
+		if !test.unset {
+			src.Set(test.state)
+		}
 		cloneStateAtomic(&dst, &src)
 		got := dst.Get()
 
 		if diff := pretty.Compare(test.want, got); diff != "" {
 			t.Errorf("TestCloneStateAtomic(%s): -want/+got:\n%s", test.name, diff)
+		}
+		if dst.IsSet() != test.wantSet {
+			t.Errorf("TestCloneStateAtomic(%s): got IsSet() == %v, want %v", test.name, dst.IsSet(), test.wantSet)
 		}
 	}
 }
@@ -982,14 +1105,14 @@ func TestCloneAttempts(t *testing.T) {
 		want     []workflow.Attempt
 	}{
 		{
-			name: "nil",
+			name: "Success: nil attempts clone to nil",
 		},
 		{
-			name:     "len(0)",
+			name:     "Success: empty attempts are cloned",
 			attempts: []workflow.Attempt{},
 		},
 		{
-			name: "success",
+			name: "Success: attempts with nested responses are deep copied",
 			attempts: []workflow.Attempt{
 				{
 					Resp: Resp{
@@ -1059,10 +1182,10 @@ func TestCloneErr(t *testing.T) {
 		want *plugins.Error
 	}{
 		{
-			name: "nil",
+			name: "Success: a nil error clones to nil",
 		},
 		{
-			name: "non-nested",
+			name: "Success: an error is cloned",
 			e: &plugins.Error{
 				Code:      plugins.ErrCode(1),
 				Message:   "not found",
@@ -1075,7 +1198,7 @@ func TestCloneErr(t *testing.T) {
 			},
 		},
 		{
-			name: "nested",
+			name: "Success: an error is cloned with the error it wraps",
 			e: &plugins.Error{
 				Code:      plugins.ErrCode(1),
 				Message:   "not found",

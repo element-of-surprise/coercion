@@ -1,7 +1,6 @@
 package sm
 
 import (
-	"context"
 	"testing"
 	"time"
 
@@ -18,8 +17,17 @@ var pConfig = pretty.Config{
 
 func newActionWithStateAndAttempts(state *workflow.State, attempts []workflow.Attempt) *workflow.Action {
 	a := &workflow.Action{}
-	a.Attempts.Set(attempts)
+	// nil attempts leaves Attempts unset, as on an action that never ran.
+	if attempts != nil {
+		a.Attempts.Set(attempts)
+	}
 	a.State.Set(*state)
+	return a
+}
+
+// withRetries sets a's Retries to n and returns a.
+func withRetries(a *workflow.Action, n int) *workflow.Action {
+	a.Retries = n
 	return a
 }
 
@@ -48,6 +56,8 @@ func newPlanWithStateBlocksChecks(state *workflow.State, blocks []*workflow.Bloc
 }
 
 func TestFixAction(t *testing.T) {
+	t.Parallel()
+
 	now := time.Now()
 	tests := []struct {
 		name   string
@@ -55,27 +65,37 @@ func TestFixAction(t *testing.T) {
 		want   *workflow.Action
 	}{
 		{
-			name:   "action not running, no change",
+			name:   "Success: an action that is not running is unchanged",
 			action: newActionWithStateAndAttempts(&workflow.State{Status: workflow.Completed}, []workflow.Attempt{{Start: now, End: now.Add(1)}}),
 			want:   newActionWithStateAndAttempts(&workflow.State{Status: workflow.Completed}, []workflow.Attempt{{Start: now, End: now.Add(1)}}),
 		},
 		{
-			name:   "running action, empty attempts, reset",
+			name:   "Success: a running action with no attempts is reset",
 			action: newActionWithStateAndAttempts(&workflow.State{Status: workflow.Running, Start: now, End: now}, []workflow.Attempt{}),
 			want:   newActionWithStateAndAttempts(&workflow.State{Status: workflow.NotStarted}, nil),
 		},
 		{
-			name:   "running action with attempts that didn't finish, reset",
+			name:   "Success: a running action whose last attempt did not finish is reset",
 			action: newActionWithStateAndAttempts(&workflow.State{Status: workflow.Running, Start: now}, []workflow.Attempt{{Start: now}}),
 			want:   newActionWithStateAndAttempts(&workflow.State{Status: workflow.NotStarted}, nil),
 		},
 		{
-			name:   "running action with attempts that have been completed, no reset",
+			name:   "Success: a running action whose last attempt passed is completed",
 			action: newActionWithStateAndAttempts(&workflow.State{Status: workflow.Running, Start: now}, []workflow.Attempt{{Start: now, End: now.Add(1)}}),
 			want:   newActionWithStateAndAttempts(&workflow.State{Status: workflow.Completed, Start: now, End: now.Add(1)}, []workflow.Attempt{{Start: now, End: now.Add(1)}}),
 		},
 		{
-			name:   "running action with attempts that have been failed, no reset",
+			name:   "Success: a running action whose last attempt failed with retries left stays running to be retried",
+			action: withRetries(newActionWithStateAndAttempts(&workflow.State{Status: workflow.Running, Start: now}, []workflow.Attempt{{Err: &plugins.Error{}, Start: now, End: now.Add(1)}}), 1),
+			want:   withRetries(newActionWithStateAndAttempts(&workflow.State{Status: workflow.Running, Start: now}, []workflow.Attempt{{Err: &plugins.Error{}, Start: now, End: now.Add(1)}}), 1),
+		},
+		{
+			name:   "Success: a running action whose last attempt failed permanently with retries left is failed",
+			action: withRetries(newActionWithStateAndAttempts(&workflow.State{Status: workflow.Running, Start: now}, []workflow.Attempt{{Err: &plugins.Error{Permanent: true}, Start: now, End: now.Add(1)}}), 1),
+			want:   withRetries(newActionWithStateAndAttempts(&workflow.State{Status: workflow.Failed, Start: now, End: now.Add(1)}, []workflow.Attempt{{Err: &plugins.Error{Permanent: true}, Start: now, End: now.Add(1)}}), 1),
+		},
+		{
+			name:   "Success: a running action whose last attempt failed is failed",
 			action: newActionWithStateAndAttempts(&workflow.State{Status: workflow.Running, Start: now}, []workflow.Attempt{{Err: &plugins.Error{}, Start: now, End: now.Add(1)}}),
 			want:   newActionWithStateAndAttempts(&workflow.State{Status: workflow.Failed, Start: now, End: now.Add(1)}, []workflow.Attempt{{Err: &plugins.Error{}, Start: now, End: now.Add(1)}}),
 		},
@@ -86,10 +106,23 @@ func TestFixAction(t *testing.T) {
 		if diff := pConfig.Compare(test.want, test.action); diff != "" {
 			t.Errorf("TestFixAction(%s): -want/+got:\n%s", test.name, diff)
 		}
+		// Compare cannot see inside the atomic State and Attempts, so they are compared on their own.
+		if diff := pConfig.Compare(test.want.State.Get(), test.action.State.Get()); diff != "" {
+			t.Errorf("TestFixAction(%s): State -want/+got:\n%s", test.name, diff)
+		}
+		if diff := pConfig.Compare(test.want.Attempts.Get(), test.action.Attempts.Get()); diff != "" {
+			t.Errorf("TestFixAction(%s): Attempts -want/+got:\n%s", test.name, diff)
+		}
+		// Compare cannot see whether Attempts is set. A reset action must have it unset, like one that never ran.
+		if got, want := test.action.Attempts.IsSet(), test.want.Attempts.IsSet(); got != want {
+			t.Errorf("TestFixAction(%s): got Attempts.IsSet() == %v, want %v", test.name, got, want)
+		}
 	}
 }
 
 func TestFixChecks(t *testing.T) {
+	t.Parallel()
+
 	now := time.Now()
 	tests := []struct {
 		name   string
@@ -97,22 +130,35 @@ func TestFixChecks(t *testing.T) {
 		want   *workflow.Checks
 	}{
 		{
-			name:   "nil checks, no panic",
+			name:   "Success: nil checks do not panic",
 			checks: nil,
 			want:   nil,
 		},
 		{
-			name:   "checks not running, no reset",
+			name:   "Success: checks that are not running are unchanged",
 			checks: newChecksWithStateAndActionsRecov(&workflow.State{Status: workflow.Completed}, nil),
 			want:   newChecksWithStateAndActionsRecov(&workflow.State{Status: workflow.Completed}, nil),
 		},
 		{
-			name:   "running checks with completed action, marks as completed",
+			name:   "Success: running checks with a completed action are completed",
 			checks: newChecksWithStateAndActionsRecov(&workflow.State{Status: workflow.Running, Start: now, End: now}, []*workflow.Action{newActionWithStateAndAttempts(&workflow.State{Status: workflow.Running, Start: now}, []workflow.Attempt{{Start: now, End: now.Add(1)}})}),
 			want:   newChecksWithStateAndActionsRecov(&workflow.State{Status: workflow.Completed, Start: now, End: now}, []*workflow.Action{newActionWithStateAndAttempts(&workflow.State{Status: workflow.Completed, Start: now, End: now.Add(1)}, []workflow.Attempt{{Start: now, End: now.Add(1)}})}),
 		},
 		{
-			name:   "running checks with incomplete action, resets",
+			// Regression: the failed action failed the Checks, but the action between its retries was left Running in
+			// Checks that are not run again.
+			name: "Success: running checks with a failed action settle an action between its retries Failed",
+			checks: newChecksWithStateAndActionsRecov(&workflow.State{Status: workflow.Running, Start: now}, []*workflow.Action{
+				newActionWithStateAndAttempts(&workflow.State{Status: workflow.Failed, Start: now, End: now.Add(1)}, []workflow.Attempt{{Err: &plugins.Error{}, Start: now, End: now.Add(1)}}),
+				withRetries(newActionWithStateAndAttempts(&workflow.State{Status: workflow.Running, Start: now}, []workflow.Attempt{{Err: &plugins.Error{}, Start: now, End: now.Add(1)}}), 1),
+			}),
+			want: newChecksWithStateAndActionsRecov(&workflow.State{Status: workflow.Failed, Start: now}, []*workflow.Action{
+				newActionWithStateAndAttempts(&workflow.State{Status: workflow.Failed, Start: now, End: now.Add(1)}, []workflow.Attempt{{Err: &plugins.Error{}, Start: now, End: now.Add(1)}}),
+				withRetries(newActionWithStateAndAttempts(&workflow.State{Status: workflow.Failed, Start: now, End: now.Add(1)}, []workflow.Attempt{{Err: &plugins.Error{}, Start: now, End: now.Add(1)}}), 1),
+			}),
+		},
+		{
+			name:   "Success: running checks with an unfinished action are reset",
 			checks: newChecksWithStateAndActionsRecov(&workflow.State{Status: workflow.Running, Start: now, End: now}, []*workflow.Action{newActionWithStateAndAttempts(&workflow.State{Status: workflow.Running, Start: now}, []workflow.Attempt{{Start: now}})}),
 			want:   newChecksWithStateAndActionsRecov(&workflow.State{Status: workflow.NotStarted}, []*workflow.Action{newActionWithStateAndAttempts(&workflow.State{Status: workflow.NotStarted}, nil)}),
 		},
@@ -151,10 +197,24 @@ func TestFixChecks(t *testing.T) {
 				t.Errorf("TestFixChecks(%s): -want/+got):\n%s", test.name, diff)
 			}
 		}
+		// Compare cannot see inside the atomic State, so the statuses are compared on their own.
+		if test.want == nil {
+			continue
+		}
+		if got, want := test.checks.State.Get().Status, test.want.State.Get().Status; got != want {
+			t.Errorf("TestFixChecks(%s): got Checks status %v, want %v", test.name, got, want)
+		}
+		for i, a := range test.checks.Actions {
+			if got, want := a.State.Get().Status, test.want.Actions[i].State.Get().Status; got != want {
+				t.Errorf("TestFixChecks(%s): got action %d status %v, want %v", test.name, i, got, want)
+			}
+		}
 	}
 }
 
 func TestFixSeq(t *testing.T) {
+	t.Parallel()
+
 	now := time.Now()
 	tests := []struct {
 		name string
@@ -162,12 +222,12 @@ func TestFixSeq(t *testing.T) {
 		want *workflow.Sequence
 	}{
 		{
-			name: "sequence not running, no change",
+			name: "Success: a sequence that is not running is unchanged",
 			seq:  newSequenceWithStateAndActionsRecov(&workflow.State{Status: workflow.Completed, End: now}, nil),
 			want: newSequenceWithStateAndActionsRecov(&workflow.State{Status: workflow.Completed}, nil),
 		},
 		{
-			name: "running sequence, no actions completed, reset sequence",
+			name: "Success: a running sequence with no completed actions is reset",
 			seq: newSequenceWithStateAndActionsRecov(&workflow.State{Status: workflow.Running, Start: now}, []*workflow.Action{
 				newActionWithStateAndAttempts(&workflow.State{Status: workflow.Running}, nil),
 				newActionWithStateAndAttempts(&workflow.State{Status: workflow.Running}, nil),
@@ -178,7 +238,7 @@ func TestFixSeq(t *testing.T) {
 			}),
 		},
 		{
-			name: "running sequence, an action was stopped, sequence is stopped",
+			name: "Success: a running sequence with a stopped action is stopped",
 			seq: newSequenceWithStateAndActionsRecov(&workflow.State{Status: workflow.Running, Start: now}, []*workflow.Action{
 				newActionWithStateAndAttempts(&workflow.State{Status: workflow.Completed}, nil),
 				newActionWithStateAndAttempts(&workflow.State{Status: workflow.Stopped, End: now}, nil),
@@ -191,7 +251,7 @@ func TestFixSeq(t *testing.T) {
 			}),
 		},
 		{
-			name: "running sequence, all actions completed, complete sequence",
+			name: "Success: a running sequence whose actions all completed is completed",
 			seq: newSequenceWithStateAndActionsRecov(&workflow.State{Status: workflow.Running, Start: now}, []*workflow.Action{
 				newActionWithStateAndAttempts(&workflow.State{Status: workflow.Completed}, nil),
 				newActionWithStateAndAttempts(&workflow.State{Status: workflow.Completed}, nil),
@@ -202,7 +262,7 @@ func TestFixSeq(t *testing.T) {
 			}),
 		},
 		{
-			name: "running sequence, some actions completed, stays running",
+			name: "Success: a running sequence with some completed actions stays running",
 			seq: newSequenceWithStateAndActionsRecov(&workflow.State{Status: workflow.Running, Start: now}, []*workflow.Action{
 				newActionWithStateAndAttempts(&workflow.State{Status: workflow.Completed}, nil),
 				newActionWithStateAndAttempts(&workflow.State{Status: workflow.Running}, nil),
@@ -250,29 +310,37 @@ func TestFixSeq(t *testing.T) {
 	}
 }
 
+// withDeferredChecks sets b's DeferredChecks to c and returns b.
+func withDeferredChecks(b *workflow.Block, c *workflow.Checks) *workflow.Block {
+	b.DeferredChecks = c
+	return b
+}
+
 func TestFixBlock(t *testing.T) {
+	t.Parallel()
+
 	tests := []struct {
 		name string
 		b    *workflow.Block
 		want *workflow.Block
 	}{
 		{
-			name: "block not running, no change",
+			name: "Success: a block that is not running is unchanged",
 			b:    newBlockWithStateSeqsChecks(&workflow.State{Status: workflow.Completed}, nil, nil, nil, nil, nil),
 			want: newBlockWithStateSeqsChecks(&workflow.State{Status: workflow.Completed}, nil, nil, nil, nil, nil),
 		},
 		{
-			name: "running block, prechecks failed, block fails",
+			name: "Success: a running block whose PreChecks failed fails",
 			b:    newBlockWithStateSeqsChecks(&workflow.State{Status: workflow.Running}, nil, nil, newChecksWithStateAndActionsRecov(&workflow.State{Status: workflow.Failed}, nil), nil, nil),
 			want: newBlockWithStateSeqsChecks(&workflow.State{Status: workflow.Failed}, nil, nil, newChecksWithStateAndActionsRecov(&workflow.State{Status: workflow.Failed}, nil), nil, nil),
 		},
 		{
-			name: "running block, contChecks failed, block fails",
+			name: "Success: a running block whose ContChecks failed fails",
 			b:    newBlockWithStateSeqsChecks(&workflow.State{Status: workflow.Running}, nil, nil, newChecksWithStateAndActionsRecov(&workflow.State{Status: workflow.Completed}, nil), newChecksWithStateAndActionsRecov(&workflow.State{Status: workflow.Failed}, nil), nil),
 			want: newBlockWithStateSeqsChecks(&workflow.State{Status: workflow.Failed}, nil, nil, newChecksWithStateAndActionsRecov(&workflow.State{Status: workflow.Completed}, nil), newChecksWithStateAndActionsRecov(&workflow.State{Status: workflow.Failed}, nil), nil),
 		},
 		{
-			name: "running block, postChecks failed, block fails",
+			name: "Success: a block whose PostChecks failed fails",
 			b: newBlockWithStateSeqsChecks(&workflow.State{Status: workflow.Failed}, []*workflow.Sequence{
 				newSequenceWithStateAndActionsRecov(&workflow.State{Status: workflow.Completed}, nil),
 				newSequenceWithStateAndActionsRecov(&workflow.State{Status: workflow.Completed}, nil),
@@ -283,7 +351,57 @@ func TestFixBlock(t *testing.T) {
 			}, nil, newChecksWithStateAndActionsRecov(&workflow.State{Status: workflow.Completed}, nil), newChecksWithStateAndActionsRecov(&workflow.State{Status: workflow.Completed}, nil), newChecksWithStateAndActionsRecov(&workflow.State{Status: workflow.Failed}, nil)),
 		},
 		{
-			name: "running block, all sequences completed, no postchecks, leaves running",
+			// Regression: fixBlock asked whether the PostChecks failed before settling them from their actions, so
+			// PostChecks still Running over a Failed action left the block Running, the PostChecks were re-run on
+			// resume and a pass completed the block.
+			name: "Success: a running block whose PostChecks are running over a failed action fails",
+			b: newBlockWithStateSeqsChecks(&workflow.State{Status: workflow.Running}, []*workflow.Sequence{
+				newSequenceWithStateAndActionsRecov(&workflow.State{Status: workflow.Completed}, nil),
+			}, nil, nil, nil, newChecksWithStateAndActionsRecov(&workflow.State{Status: workflow.Running}, []*workflow.Action{newActionWithStateAndAttempts(&workflow.State{Status: workflow.Failed}, nil)})),
+			want: newBlockWithStateSeqsChecks(&workflow.State{Status: workflow.Failed}, nil, nil, nil, nil, nil),
+		},
+		{
+			// Regression: as above, for PreChecks.
+			name: "Success: a running block whose PreChecks are running over a failed action fails",
+			b:    newBlockWithStateSeqsChecks(&workflow.State{Status: workflow.Running}, nil, nil, newChecksWithStateAndActionsRecov(&workflow.State{Status: workflow.Running}, []*workflow.Action{newActionWithStateAndAttempts(&workflow.State{Status: workflow.Failed}, nil)}), nil, nil),
+			want: newBlockWithStateSeqsChecks(&workflow.State{Status: workflow.Failed}, nil, nil, nil, nil, nil),
+		},
+		{
+			// Regression: fixBlock never looked at a running block's DeferredChecks. A run that wrote them Failed and
+			// crashed before writing the block Failed left the block Running, BlockDeferredChecks reset and re-ran
+			// them on resume, and a pass completed the block and the Plan.
+			name: "Success: a running block whose DeferredChecks failed fails",
+			b: withDeferredChecks(
+				newBlockWithStateSeqsChecks(&workflow.State{Status: workflow.Running}, []*workflow.Sequence{
+					newSequenceWithStateAndActionsRecov(&workflow.State{Status: workflow.Completed}, nil),
+				}, nil, nil, nil, newChecksWithStateAndActionsRecov(&workflow.State{Status: workflow.Completed}, nil)),
+				newChecksWithStateAndActionsRecov(&workflow.State{Status: workflow.Failed}, nil),
+			),
+			want: newBlockWithStateSeqsChecks(&workflow.State{Status: workflow.Failed}, nil, nil, nil, nil, nil),
+		},
+		{
+			// Regression: as above, for a crash after an action was written Failed but before the DeferredChecks were.
+			name: "Success: a running block whose DeferredChecks are running over a failed action fails",
+			b: withDeferredChecks(
+				newBlockWithStateSeqsChecks(&workflow.State{Status: workflow.Running}, []*workflow.Sequence{
+					newSequenceWithStateAndActionsRecov(&workflow.State{Status: workflow.Completed}, nil),
+				}, nil, nil, nil, newChecksWithStateAndActionsRecov(&workflow.State{Status: workflow.Completed}, nil)),
+				newChecksWithStateAndActionsRecov(&workflow.State{Status: workflow.Running}, []*workflow.Action{newActionWithStateAndAttempts(&workflow.State{Status: workflow.Failed}, nil)}),
+			),
+			want: newBlockWithStateSeqsChecks(&workflow.State{Status: workflow.Failed}, nil, nil, nil, nil, nil),
+		},
+		{
+			name: "Success: a running block whose DeferredChecks completed stays running",
+			b: withDeferredChecks(
+				newBlockWithStateSeqsChecks(&workflow.State{Status: workflow.Running}, []*workflow.Sequence{
+					newSequenceWithStateAndActionsRecov(&workflow.State{Status: workflow.Completed}, nil),
+				}, nil, nil, nil, newChecksWithStateAndActionsRecov(&workflow.State{Status: workflow.Completed}, nil)),
+				newChecksWithStateAndActionsRecov(&workflow.State{Status: workflow.Completed}, nil),
+			),
+			want: newBlockWithStateSeqsChecks(&workflow.State{Status: workflow.Running}, nil, nil, nil, nil, nil),
+		},
+		{
+			name: "Success: a running block with completed sequences and no PostChecks stays running",
 			b: newBlockWithStateSeqsChecks(&workflow.State{Status: workflow.Running}, []*workflow.Sequence{
 				newSequenceWithStateAndActionsRecov(&workflow.State{Status: workflow.Completed}, nil),
 				newSequenceWithStateAndActionsRecov(&workflow.State{Status: workflow.Completed}, nil),
@@ -294,7 +412,7 @@ func TestFixBlock(t *testing.T) {
 			}, nil, nil, nil, nil),
 		},
 		{
-			name: "running block, all sequences completed, postcheck completed, leaves running",
+			name: "Success: a running block with completed sequences and PostChecks stays running",
 			b: newBlockWithStateSeqsChecks(&workflow.State{Status: workflow.Running}, []*workflow.Sequence{
 				newSequenceWithStateAndActionsRecov(&workflow.State{Status: workflow.Completed}, nil),
 				newSequenceWithStateAndActionsRecov(&workflow.State{Status: workflow.Completed}, nil),
@@ -305,7 +423,7 @@ func TestFixBlock(t *testing.T) {
 			}, nil, nil, nil, newChecksWithStateAndActionsRecov(&workflow.State{Status: workflow.Completed}, nil)),
 		},
 		{
-			name: "running block, one sequence stopped, block stops",
+			name: "Success: a running block with a stopped sequence stops",
 			b: newBlockWithStateSeqsChecks(&workflow.State{Status: workflow.Running}, []*workflow.Sequence{
 				newSequenceWithStateAndActionsRecov(&workflow.State{Status: workflow.Completed}, nil),
 				newSequenceWithStateAndActionsRecov(&workflow.State{Status: workflow.Stopped}, nil),
@@ -317,7 +435,7 @@ func TestFixBlock(t *testing.T) {
 			}, nil, nil, nil, nil),
 		},
 		{
-			name: "running block, bypass checks completed, block state completed",
+			name: "Success: a running block whose BypassChecks completed is completed",
 			b: newBlockWithStateSeqsChecks(&workflow.State{Status: workflow.Running}, []*workflow.Sequence{
 				newSequenceWithStateAndActionsRecov(&workflow.State{Status: workflow.NotStarted}, nil),
 			}, newChecksWithStateAndActionsRecov(&workflow.State{Status: workflow.Completed}, nil), nil, nil, nil),
@@ -329,7 +447,7 @@ func TestFixBlock(t *testing.T) {
 
 	for _, test := range tests {
 		reg := registry.New()
-		vault, err := sqlite.New(context.Background(), "", reg, sqlite.WithInMemory())
+		vault, err := sqlite.New(t.Context(), "", reg, sqlite.WithInMemory())
 		if err != nil {
 			t.Fatalf("TestFixBlock(%s): failed to create vault: %v", test.name, err)
 		}
@@ -341,28 +459,37 @@ func TestFixBlock(t *testing.T) {
 }
 
 func TestFixPlan(t *testing.T) {
+	t.Parallel()
+
 	tests := []struct {
 		name string
 		plan *workflow.Plan
 		want *workflow.Plan
 	}{
 		{
-			name: "plan not running, no change",
+			name: "Success: a plan that is not running is left unchanged",
 			plan: newPlanWithStateBlocksChecks(&workflow.State{Status: workflow.Completed}, nil, nil, nil, nil, nil, nil),
 			want: newPlanWithStateBlocksChecks(&workflow.State{Status: workflow.Completed}, nil, nil, nil, nil, nil, nil),
 		},
 		{
-			name: "running plan, bypass checks completed, plan completes",
+			name: "Success: a running plan whose bypass checks completed completes",
 			plan: newPlanWithStateBlocksChecks(&workflow.State{Status: workflow.Running}, nil, newChecksWithStateAndActionsRecov(&workflow.State{Status: workflow.Completed}, nil), nil, nil, nil, nil),
 			want: newPlanWithStateBlocksChecks(&workflow.State{Status: workflow.Completed}, nil, newChecksWithStateAndActionsRecov(&workflow.State{Status: workflow.Completed}, nil), nil, nil, nil, nil),
 		},
 		{
-			name: "running plan, prechecks failed, plan fails",
+			name: "Success: a running plan whose prechecks failed fails",
 			plan: newPlanWithStateBlocksChecks(&workflow.State{Status: workflow.Running}, nil, nil, newChecksWithStateAndActionsRecov(&workflow.State{Status: workflow.Failed}, nil), nil, nil, nil),
 			want: newPlanWithStateBlocksChecks(&workflow.State{Status: workflow.Failed}, nil, nil, newChecksWithStateAndActionsRecov(&workflow.State{Status: workflow.Failed}, nil), nil, nil, nil),
 		},
 		{
-			name: "running plan, all blocks completed, postchecks/contchecks completed, deferred checks completed, plan completes",
+			// Regression: fixPlan asked whether the prechecks failed before settling them from their actions, so
+			// prechecks still Running over a Failed action let the Plan be recovered as Completed.
+			name: "Success: a running plan whose prechecks are running over a failed action fails",
+			plan: newPlanWithStateBlocksChecks(&workflow.State{Status: workflow.Running}, nil, nil, newChecksWithStateAndActionsRecov(&workflow.State{Status: workflow.Running}, []*workflow.Action{newActionWithStateAndAttempts(&workflow.State{Status: workflow.Failed}, nil)}), nil, nil, nil),
+			want: newPlanWithStateBlocksChecks(&workflow.State{Status: workflow.Failed}, nil, nil, newChecksWithStateAndActionsRecov(&workflow.State{Status: workflow.Failed}, nil), nil, nil, nil),
+		},
+		{
+			name: "Success: a running plan whose blocks and post, continuous and deferred checks completed completes",
 			plan: newPlanWithStateBlocksChecks(&workflow.State{Status: workflow.Running}, []*workflow.Block{
 				newBlockWithStateSeqsChecks(&workflow.State{Status: workflow.Completed}, nil, nil, nil, nil, nil),
 				newBlockWithStateSeqsChecks(&workflow.State{Status: workflow.Completed}, nil, nil, nil, nil, nil),
@@ -373,7 +500,28 @@ func TestFixPlan(t *testing.T) {
 			}, nil, nil, newChecksWithStateAndActionsRecov(&workflow.State{Status: workflow.Completed}, nil), newChecksWithStateAndActionsRecov(&workflow.State{Status: workflow.Completed}, nil), newChecksWithStateAndActionsRecov(&workflow.State{Status: workflow.Completed}, nil)),
 		},
 		{
-			name: "running plan, block failed, plan fails",
+			// Regression: with every block Completed, a ContChecks pass the crash cut short (reset to NotStarted by
+			// fixChecks) was ignored and the Plan was recovered as Completed instead of running that pass again.
+			name: "Success: a running plan whose blocks completed but whose continuous checks pass was cut short stays running",
+			plan: newPlanWithStateBlocksChecks(&workflow.State{Status: workflow.Running}, []*workflow.Block{
+				newBlockWithStateSeqsChecks(&workflow.State{Status: workflow.Completed}, nil, nil, nil, nil, nil),
+			}, nil, nil, newChecksWithStateAndActionsRecov(&workflow.State{Status: workflow.Running}, []*workflow.Action{
+				newActionWithStateAndAttempts(&workflow.State{Status: workflow.Completed}, nil),
+				newActionWithStateAndAttempts(&workflow.State{Status: workflow.NotStarted}, nil),
+			}), nil, nil),
+			want: newPlanWithStateBlocksChecks(&workflow.State{Status: workflow.Running}, nil, nil, nil, nil, nil, nil),
+		},
+		{
+			name: "Success: a running plan whose blocks and continuous checks completed with no post or deferred work completes",
+			plan: newPlanWithStateBlocksChecks(&workflow.State{Status: workflow.Running}, []*workflow.Block{
+				newBlockWithStateSeqsChecks(&workflow.State{Status: workflow.Completed}, nil, nil, nil, nil, nil),
+			}, nil, nil, newChecksWithStateAndActionsRecov(&workflow.State{Status: workflow.Completed}, []*workflow.Action{
+				newActionWithStateAndAttempts(&workflow.State{Status: workflow.Completed}, nil),
+			}), nil, nil),
+			want: newPlanWithStateBlocksChecks(&workflow.State{Status: workflow.Completed}, nil, nil, nil, nil, nil, nil),
+		},
+		{
+			name: "Success: a running plan with a failed block fails",
 			plan: newPlanWithStateBlocksChecks(&workflow.State{Status: workflow.Running}, []*workflow.Block{
 				newBlockWithStateSeqsChecks(&workflow.State{Status: workflow.Failed}, nil, nil, nil, nil, nil),
 				newBlockWithStateSeqsChecks(&workflow.State{Status: workflow.Completed}, nil, nil, nil, nil, nil),
@@ -387,7 +535,7 @@ func TestFixPlan(t *testing.T) {
 
 	for _, test := range tests {
 		reg := registry.New()
-		vault, err := sqlite.New(context.Background(), "", reg, sqlite.WithInMemory())
+		vault, err := sqlite.New(t.Context(), "", reg, sqlite.WithInMemory())
 		if err != nil {
 			t.Fatalf("TestFixPlan(%s): failed to create vault: %v", test.name, err)
 		}
@@ -399,14 +547,16 @@ func TestFixPlan(t *testing.T) {
 }
 
 func TestChecksFailed(t *testing.T) {
+	t.Parallel()
+
 	tests := []struct {
 		name string
 		c    *workflow.Checks
 		want bool
 	}{
-		{"nil checks", nil, false},
-		{"checks failed", newChecksWithStateAndActionsRecov(&workflow.State{Status: workflow.Failed}, nil), true},
-		{"checks completed", newChecksWithStateAndActionsRecov(&workflow.State{Status: workflow.Completed}, nil), false},
+		{"Success: nil checks have not failed", nil, false},
+		{"Success: failed checks have failed", newChecksWithStateAndActionsRecov(&workflow.State{Status: workflow.Failed}, nil), true},
+		{"Success: completed checks have not failed", newChecksWithStateAndActionsRecov(&workflow.State{Status: workflow.Completed}, nil), false},
 	}
 	for _, test := range tests {
 		if got := checksFailed(test.c); got != test.want {
@@ -416,14 +566,16 @@ func TestChecksFailed(t *testing.T) {
 }
 
 func TestChecksCompleted(t *testing.T) {
+	t.Parallel()
+
 	tests := []struct {
 		name string
 		c    *workflow.Checks
 		want bool
 	}{
-		{"nil checks", nil, true},
-		{"checks completed", newChecksWithStateAndActionsRecov(&workflow.State{Status: workflow.Completed}, nil), true},
-		{"checks running", newChecksWithStateAndActionsRecov(&workflow.State{Status: workflow.Running}, nil), false},
+		{"Success: nil checks count as completed", nil, true},
+		{"Success: completed checks are completed", newChecksWithStateAndActionsRecov(&workflow.State{Status: workflow.Completed}, nil), true},
+		{"Success: running checks are not completed", newChecksWithStateAndActionsRecov(&workflow.State{Status: workflow.Running}, nil), false},
 	}
 	for _, test := range tests {
 		if got := checksCompleted(test.c); got != test.want {
@@ -433,13 +585,15 @@ func TestChecksCompleted(t *testing.T) {
 }
 
 func TestSkipBlock(t *testing.T) {
+	t.Parallel()
+
 	tests := []struct {
 		name string
 		b    block
 		want bool
 	}{
-		{"completed block", block{block: newBlockWithStateSeqsChecks(&workflow.State{Status: workflow.Completed}, nil, nil, nil, nil, nil)}, true},
-		{"running block", block{block: newBlockWithStateSeqsChecks(&workflow.State{Status: workflow.Running}, nil, nil, nil, nil, nil)}, false},
+		{"Success: a completed block is skipped", block{block: newBlockWithStateSeqsChecks(&workflow.State{Status: workflow.Completed}, nil, nil, nil, nil, nil)}, true},
+		{"Success: a running block is not skipped", block{block: newBlockWithStateSeqsChecks(&workflow.State{Status: workflow.Running}, nil, nil, nil, nil, nil)}, false},
 	}
 	for _, test := range tests {
 		if got := skipBlock(test.b); got != test.want {
@@ -449,15 +603,17 @@ func TestSkipBlock(t *testing.T) {
 }
 
 func TestIsCompleted(t *testing.T) {
+	t.Parallel()
+
 	tests := []struct {
 		name string
 		o    workflow.Object
 		want bool
 	}{
-		{"completed object", newBlockWithStateSeqsChecks(&workflow.State{Status: workflow.Completed}, nil, nil, nil, nil, nil), true},
-		{"running object", newPlanWithStateBlocksChecks(&workflow.State{Status: workflow.Running}, nil, nil, nil, nil, nil, nil), false},
-		{"failed object", newSequenceWithStateAndActionsRecov(&workflow.State{Status: workflow.Failed}, nil), true},
-		{"stopped object", newActionWithStateAndAttempts(&workflow.State{Status: workflow.Stopped}, nil), true},
+		{"Success: a completed object is completed", newBlockWithStateSeqsChecks(&workflow.State{Status: workflow.Completed}, nil, nil, nil, nil, nil), true},
+		{"Success: a running object is not completed", newPlanWithStateBlocksChecks(&workflow.State{Status: workflow.Running}, nil, nil, nil, nil, nil, nil), false},
+		{"Success: a failed object is completed", newSequenceWithStateAndActionsRecov(&workflow.State{Status: workflow.Failed}, nil), true},
+		{"Success: a stopped object is completed", newActionWithStateAndAttempts(&workflow.State{Status: workflow.Stopped}, nil), true},
 	}
 	for _, test := range tests {
 		if got := isCompleted(test.o); got != test.want {

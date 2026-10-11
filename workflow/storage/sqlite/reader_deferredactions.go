@@ -19,7 +19,7 @@ func (r reader) fieldToDeferredActions(ctx context.Context, conn *sqlite.Conn, s
 	if strID == "" {
 		return nil, nil
 	}
-	id, err := uuid.Parse(strID)
+	id, err := fieldToID(ctx, "deferredactions", stmt)
 	if err != nil {
 		return nil, fmt.Errorf("fieldToDeferredActions: couldn't parse id: %w", err)
 	}
@@ -49,7 +49,7 @@ func (r reader) fetchDeferredActionsByID(ctx context.Context, conn *sqlite.Conn,
 		return nil, fmt.Errorf("couldn't fetch DeferredActions by id: %w", err)
 	}
 	if da == nil {
-		return nil, fmt.Errorf("couldn't find DeferredActions by id(%s)", id)
+		return nil, errMissingRow(ctx, "DeferredActions", id)
 	}
 	return da, nil
 }
@@ -58,12 +58,12 @@ func (r reader) deferredActionsRowToDeferredActions(ctx context.Context, conn *s
 	da := &workflow.DeferredActions{}
 
 	var err error
-	da.ID, err = uuid.Parse(stmt.GetText("id"))
+	da.ID, err = fieldToID(ctx, "id", stmt)
 	if err != nil {
 		return nil, fmt.Errorf("deferredActionsRowToDeferredActions: couldn't parse id: %w", err)
 	}
 
-	planID, err := uuid.Parse(stmt.GetText("plan_id"))
+	planID, err := fieldToID(ctx, "plan_id", stmt)
 	if err != nil {
 		return nil, fmt.Errorf("deferredActionsRowToDeferredActions: couldn't parse plan_id: %w", err)
 	}
@@ -76,7 +76,7 @@ func (r reader) deferredActionsRowToDeferredActions(ctx context.Context, conn *s
 	da.State.Set(*state)
 
 	if b := fieldToBytes("batches", stmt); b != nil {
-		ids, err := fieldToIDs("batches", stmt)
+		ids, err := fieldToIDs(ctx, "batches", stmt)
 		if err != nil {
 			return nil, fmt.Errorf("deferredActionsRowToDeferredActions(batches): %w", err)
 		}
@@ -122,7 +122,7 @@ func (r reader) fetchDeferBatchesByIDs(ctx context.Context, conn *sqlite.Conn, i
 	for _, id := range ids {
 		b, ok := byID[id]
 		if !ok {
-			return nil, fmt.Errorf("couldn't find DeferBatch by id(%s)", id)
+			return nil, errMissingRow(ctx, "DeferBatch", id)
 		}
 		out = append(out, b)
 	}
@@ -133,12 +133,12 @@ func (r reader) deferBatchRowToDeferBatch(ctx context.Context, conn *sqlite.Conn
 	b := &workflow.DeferBatch{}
 
 	var err error
-	b.ID, err = uuid.Parse(stmt.GetText("id"))
+	b.ID, err = fieldToID(ctx, "id", stmt)
 	if err != nil {
 		return nil, fmt.Errorf("deferBatchRowToDeferBatch: couldn't parse id: %w", err)
 	}
 
-	planID, err := uuid.Parse(stmt.GetText("plan_id"))
+	planID, err := fieldToID(ctx, "plan_id", stmt)
 	if err != nil {
 		return nil, fmt.Errorf("deferBatchRowToDeferBatch: couldn't parse plan_id: %w", err)
 	}

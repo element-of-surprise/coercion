@@ -10,6 +10,7 @@ import (
 
 	"github.com/element-of-surprise/coercion/workflow"
 	"github.com/element-of-surprise/coercion/workflow/storage"
+	"github.com/element-of-surprise/coercion/workflow/utils/changes"
 	"github.com/element-of-surprise/coercion/workflow/utils/clone"
 )
 
@@ -129,6 +130,11 @@ func (f *fakeUpdater) UpdateDeferBatch(ctx context.Context, b *workflow.DeferBat
 	n := clone.DeferBatch(ctx, b, cloneOpts...)
 	f.deferBatches = append(f.deferBatches, n)
 	return nil
+}
+
+// UpdateChanges writes the changed objects one at a time through the other Update methods.
+func (f *fakeUpdater) UpdateChanges(ctx context.Context, plan *workflow.Plan, before changes.Snapshot) error {
+	return storage.WriteChanges(ctx, f, plan, before)
 }
 
 func fakeRunChecksOnce(ctx context.Context, checks *workflow.Checks) error {

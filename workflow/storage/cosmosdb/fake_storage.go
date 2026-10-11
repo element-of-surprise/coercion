@@ -46,6 +46,8 @@ type fakeStorage struct {
 	createItemErr  bool
 	deleteItemErr  bool
 	replaceItemErr bool
+	// batchPatchErr makes a transactional batch that patches items fail without changing anything.
+	batchPatchErr bool
 }
 
 func newFakeStorage(reg *registry.Register) *fakeStorage {
@@ -249,6 +251,14 @@ func (f *fakeStorage) ExecuteTransactionalBatch(ctx context.Context, b azcosmos.
 	}
 	key, ops := unsafeBatchOps(&b)
 
+	// A transactional batch is all or nothing, so a failure is reported before any operation is applied.
+	for _, op := range ops {
+		if op.op == "Patch" && f.batchPatchErr {
+			return azcosmos.TransactionalBatchResponse{}, errors.New("error")
+		}
+	}
+
+	resp := azcosmos.TransactionalBatchResponse{Success: true}
 	for _, op := range ops {
 		switch op.op {
 		case "Create":
@@ -303,11 +313,27 @@ func (f *fakeStorage) ExecuteTransactionalBatch(ctx context.Context, b azcosmos.
 					panic(err)
 				}
 			}
+		case "Patch":
+			if _, err := f.PatchItem(ctx, azcosmos.NewPartitionKeyString(key), op.itemID, op.patch, nil); err != nil {
+				return azcosmos.TransactionalBatchResponse{}, err
+			}
 		default:
 			panic("do not support the TransactionBatch op: " + op.op)
 		}
+		resp.OperationResults = append(resp.OperationResults, azcosmos.TransactionalBatchResult{
+			StatusCode: batchOpStatus[op.op],
+			ETag:       azcore.ETag("etag-" + op.itemID),
+		})
 	}
-	return azcosmos.TransactionalBatchResponse{}, nil
+	return resp, nil
+}
+
+// batchOpStatus is the status code Cosmos DB returns for a successful operation of each kind in a transactional batch.
+var batchOpStatus = map[string]int32{
+	"Create":  http.StatusCreated,
+	"Replace": http.StatusOK,
+	"Delete":  http.StatusNoContent,
+	"Patch":   http.StatusOK,
 }
 
 func (f *fakeStorage) WritePlan(ctx context.Context, plan *workflow.Plan) error {
@@ -600,6 +626,19 @@ func (f *fakeStorage) limitItemPager(query string, pk azcosmos.PartitionKey, o *
 	})
 }
 
+// replaceTargetExists returns the error Cosmos DB returns for a replace patch whose path is not in the document: a
+// replace only changes a field that exists, unlike a set, which adds it. Only top-level paths are supported.
+func replaceTargetExists(doc []byte, path string) error {
+	var fields map[string]any
+	if err := json.Unmarshal(doc, &fields); err != nil {
+		panic(fmt.Sprintf("could not decode stored document: %s", err))
+	}
+	if _, ok := fields[strings.TrimPrefix(path, "/")]; !ok {
+		return &azcore.ResponseError{StatusCode: http.StatusBadRequest}
+	}
+	return nil
+}
+
 type getIDer interface {
 	GetID() uuid.UUID
 }
@@ -609,9 +648,14 @@ func (f *fakeStorage) PatchItem(ctx context.Context, key azcosmos.PartitionKey, 
 	for _, op := range ops {
 		switch op.Op {
 		case "replace", "set":
-			_, planID, err := f.readItem(ctx, itemID)
+			doc, planID, err := f.readItem(ctx, itemID)
 			if err != nil {
 				return azcosmos.ItemResponse{}, err
+			}
+			if op.Op == "replace" {
+				if err := replaceTargetExists(doc, op.Path); err != nil {
+					return azcosmos.ItemResponse{}, err
+				}
 			}
 
 			b, _, err := f.readItem(ctx, planID)
@@ -704,6 +748,9 @@ func (f *fakeStorage) patchObject(op pathOps, o stateObject) {
 				panic(err)
 			}
 			action.Attempts.Set(attempts)
+		case "/runtimeUpdate":
+			plan := o.(*workflow.Plan)
+			plan.RuntimeUpdate.Set(op.Value.(time.Time))
 		default:
 			panic(fmt.Sprintf("unsupported op Path(%s) on set op", op.Path))
 		}
@@ -794,8 +841,9 @@ func unsafePathOps(po *azcosmos.PatchOperations) []pathOps {
 
 type batchOp struct {
 	op           string
-	resourceBody []byte // only on Create
-	itemID       string // only on Delete
+	resourceBody []byte                   // only on Create and Replace
+	itemID       string                   // only on Replace, Delete and Patch
+	patch        azcosmos.PatchOperations // only on Patch
 }
 
 // unsafePathOps extracts unexported `operations` from PatchOperations because the azcosmos authors are sadists.
@@ -864,6 +912,10 @@ func unsafeBatchOps(t *azcosmos.TransactionalBatch) (string, []batchOp) {
 			rsc := getUnexportedField[[]byte](opValue, "resourceBody")
 			id := getUnexportedField[string](opValue, "id")
 			ops = append(ops, batchOp{op: "Replace", itemID: id, resourceBody: rsc})
+		case strings.Contains(name, "batchOperationPatch"):
+			id := getUnexportedField[string](opValue, "id")
+			patch := getUnexportedField[azcosmos.PatchOperations](opValue, "patchOperations")
+			ops = append(ops, batchOp{op: "Patch", itemID: id, patch: patch})
 		case strings.Contains(name, "batchOperationDelete"):
 			field := getUnexportedField[string](opValue, "id")
 			ops = append(ops, batchOp{op: "Delete", itemID: field})

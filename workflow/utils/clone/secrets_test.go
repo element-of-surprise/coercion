@@ -65,22 +65,22 @@ func TestSecure(t *testing.T) {
 		want  any
 	}{
 		{
-			name:  "No secrets",
+			name:  "Success: a struct with no secrets is unchanged",
 			value: &NoSecrets{},
 			want:  &NoSecrets{},
 		},
 		{
-			name:  "Password should be reset to empty string",
+			name:  "Success: a password marked secure is reset to an empty string",
 			value: &User{Password: "password"},
 			want:  &User{Password: "[secret hidden]"},
 		},
 		{
-			name:  "Password should be left alone",
+			name:  "Success: a password not marked secure is left alone",
 			value: &User2{Password: "pass"},
 			want:  &User2{Password: "pass"},
 		},
 		{
-			name: "Fields should be secured in multiple levels",
+			name: "Success: secure fields are secured at every level of nesting",
 			value: &NestedConfig2{
 				Detail: struct {
 					SigningKey string `coerce:"secure"`
@@ -113,7 +113,7 @@ func TestSecure(t *testing.T) {
 			},
 		},
 		{
-			name: "Struct stored in any should be secured",
+			name: "Success: a struct stored in an any is secured",
 			value: &AnyHolder{
 				Holding: &NestedConfig3{
 					Detail: Config{
@@ -132,7 +132,7 @@ func TestSecure(t *testing.T) {
 			},
 		},
 		{
-			name: "Entire struct should inside any should be secure",
+			name: "Success: an entire struct stored inside an any is secured",
 			value: &AnyHolderSecure{
 				Holding: NestedConfig3{Detail: "blah"},
 			},
@@ -141,7 +141,7 @@ func TestSecure(t *testing.T) {
 			},
 		},
 		{
-			name: "DeferBatch: secrets in embedded Sequence actions are wiped",
+			name: "Success: secrets in a DeferBatch's embedded Sequence actions are wiped",
 			value: &workflow.DeferBatch{
 				FailElement: true,
 				Sequence: workflow.Sequence{
@@ -164,7 +164,7 @@ func TestSecure(t *testing.T) {
 			},
 		},
 		{
-			name: "DeferredActions: secrets in nested batches are wiped",
+			name: "Success: secrets in the nested batches of DeferredActions are wiped",
 			value: &workflow.DeferredActions{
 				DeferredBatches: []*workflow.DeferBatch{
 					{

@@ -1,97 +1,87 @@
 package planlocks
 
 import (
-	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/element-of-surprise/coercion/workflow/context"
 	"github.com/google/uuid"
+	"github.com/gostdlib/base/values/chans"
 )
+
+// mode is one way to hold a plan's lock: as a writer or as a reader.
+type mode struct {
+	name   string
+	lock   func(g *Group, id uuid.UUID)
+	unlock func(g *Group, id uuid.UUID)
+}
+
+var (
+	write = mode{name: "write", lock: (*Group).Lock, unlock: (*Group).Unlock}
+	read  = mode{name: "read", lock: (*Group).RLock, unlock: (*Group).RUnlock}
+)
+
+// isFree reports whether nobody holds the lock g has for id. A lock g does not have is free.
+func isFree(g *Group, id uuid.UUID) bool {
+	g.mu.Lock()
+	lock, ok := g.createLocks[id]
+	g.mu.Unlock()
+	if !ok {
+		return true
+	}
+	if !lock.TryLock() {
+		return false
+	}
+	lock.Unlock()
+	return true
+}
 
 func TestLockUnlock(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		name string
+		name   string
+		mode   mode
+		ids    int
+		rounds int
 	}{
-		{
-			name: "Success: basic lock and unlock",
-		},
-		{
-			name: "Success: lock and unlock same plan ID multiple times",
-		},
-		{
-			name: "Success: lock and unlock different plan IDs",
-		},
+		{name: "Success: a write lock is taken and released", mode: write, ids: 1, rounds: 1},
+		{name: "Success: a write lock is taken and released several times", mode: write, ids: 1, rounds: 3},
+		{name: "Success: write locks on different plans are taken and released", mode: write, ids: 2, rounds: 1},
+		{name: "Success: a read lock is taken and released", mode: read, ids: 1, rounds: 1},
+		{name: "Success: a read lock is taken and released several times", mode: read, ids: 1, rounds: 3},
+		{name: "Success: read locks on different plans are taken and released", mode: read, ids: 2, rounds: 1},
 	}
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+
 			g := New(t.Context())
-			planID := uuid.New()
-
-			switch test.name {
-			case "Success: basic lock and unlock":
-				g.Lock(planID)
-				g.Unlock(planID)
-
-			case "Success: lock and unlock same plan ID multiple times":
-				g.Lock(planID)
-				g.Unlock(planID)
-				g.Lock(planID)
-				g.Unlock(planID)
-
-			case "Success: lock and unlock different plan IDs":
-				planID2 := uuid.New()
-				g.Lock(planID)
-				g.Lock(planID2)
-				g.Unlock(planID)
-				g.Unlock(planID2)
+			ids := make([]uuid.UUID, test.ids)
+			for i := 0; i < len(ids); i++ {
+				ids[i] = uuid.New()
 			}
-		})
-	}
-}
 
-func TestRLockRUnlock(t *testing.T) {
-	t.Parallel()
+			for r := 0; r < test.rounds; r++ {
+				for _, id := range ids {
+					test.mode.lock(g, id)
+				}
+				for _, id := range ids {
+					if isFree(g, id) {
+						t.Errorf("TestLockUnlock(%s): got plan %s free while its %s lock is held", test.name, id, test.mode.name)
+					}
+				}
+				for _, id := range ids {
+					test.mode.unlock(g, id)
+				}
+			}
 
-	tests := []struct {
-		name string
-	}{
-		{
-			name: "Success: basic read lock and unlock",
-		},
-		{
-			name: "Success: read lock and unlock same plan ID multiple times",
-		},
-		{
-			name: "Success: read lock and unlock different plan IDs",
-		},
-	}
-
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			g := New(t.Context())
-			planID := uuid.New()
-
-			switch test.name {
-			case "Success: basic read lock and unlock":
-				g.RLock(planID)
-				g.RUnlock(planID)
-
-			case "Success: read lock and unlock same plan ID multiple times":
-				g.RLock(planID)
-				g.RUnlock(planID)
-				g.RLock(planID)
-				g.RUnlock(planID)
-
-			case "Success: read lock and unlock different plan IDs":
-				planID2 := uuid.New()
-				g.RLock(planID)
-				g.RLock(planID2)
-				g.RUnlock(planID)
-				g.RUnlock(planID2)
+			for _, id := range ids {
+				if !isFree(g, id) {
+					t.Errorf("TestLockUnlock(%s): got plan %s held after its %s lock was released", test.name, id, test.mode.name)
+				}
 			}
 		})
 	}
@@ -101,80 +91,66 @@ func TestUnlockPanic(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		name      string
-		setupFunc func(*Group, uuid.UUID)
+		name string
+		mode mode
+		// setup locks plans before id is unlocked.
+		setup     func(g *Group, id uuid.UUID)
+		wantPanic bool
 	}{
 		{
-			name: "Error: unlock without lock panics",
-			setupFunc: func(g *Group, planID uuid.UUID) {
-				// Don't lock anything
-			},
+			name:  "Success: unlocking a write-locked plan does not panic",
+			mode:  write,
+			setup: write.lock,
 		},
 		{
-			name: "Error: unlock non-existent plan ID panics",
-			setupFunc: func(g *Group, planID uuid.UUID) {
-				// Lock a different plan ID
-				otherID := uuid.New()
-				g.Lock(otherID)
-			},
+			name:      "Error: unlocking a plan that was never locked panics",
+			mode:      write,
+			setup:     func(g *Group, id uuid.UUID) {},
+			wantPanic: true,
+		},
+		{
+			name:      "Error: unlocking a plan when only another plan is locked panics",
+			mode:      write,
+			setup:     func(g *Group, id uuid.UUID) { g.Lock(uuid.New()) },
+			wantPanic: true,
+		},
+		{
+			name:  "Success: read unlocking a read-locked plan does not panic",
+			mode:  read,
+			setup: read.lock,
+		},
+		{
+			name:      "Error: read unlocking a plan that was never locked panics",
+			mode:      read,
+			setup:     func(g *Group, id uuid.UUID) {},
+			wantPanic: true,
+		},
+		{
+			name:      "Error: read unlocking a plan when only another plan is read locked panics",
+			mode:      read,
+			setup:     func(g *Group, id uuid.UUID) { g.RLock(uuid.New()) },
+			wantPanic: true,
 		},
 	}
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			g := New(t.Context())
-			planID := uuid.New()
+			t.Parallel()
 
-			test.setupFunc(g, planID)
+			g := New(t.Context())
+			id := uuid.New()
+			test.setup(g, id)
 
 			defer func() {
-				if r := recover(); r == nil {
-					t.Errorf("TestUnlockPanic(%s): expected panic but didn't panic", test.name)
+				r := recover()
+				switch {
+				case r == nil && test.wantPanic:
+					t.Errorf("TestUnlockPanic(%s): got no panic, want panic", test.name)
+				case r != nil && !test.wantPanic:
+					t.Errorf("TestUnlockPanic(%s): got panic %v, want no panic", test.name, r)
 				}
 			}()
-
-			g.Unlock(planID)
-		})
-	}
-}
-
-func TestRUnlockPanic(t *testing.T) {
-	t.Parallel()
-
-	tests := []struct {
-		name      string
-		setupFunc func(*Group, uuid.UUID)
-	}{
-		{
-			name: "Error: read unlock without lock panics",
-			setupFunc: func(g *Group, planID uuid.UUID) {
-				// Don't lock anything
-			},
-		},
-		{
-			name: "Error: read unlock non-existent plan ID panics",
-			setupFunc: func(g *Group, planID uuid.UUID) {
-				// Lock a different plan ID
-				otherID := uuid.New()
-				g.RLock(otherID)
-			},
-		},
-	}
-
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			g := New(t.Context())
-			planID := uuid.New()
-
-			test.setupFunc(g, planID)
-
-			defer func() {
-				if r := recover(); r == nil {
-					t.Errorf("TestRUnlockPanic(%s): expected panic but didn't panic", test.name)
-				}
-			}()
-
-			g.RUnlock(planID)
+			test.mode.unlock(g, id)
 		})
 	}
 }
@@ -182,243 +158,146 @@ func TestRUnlockPanic(t *testing.T) {
 func TestConcurrentWriteLocks(t *testing.T) {
 	t.Parallel()
 
-	tests := []struct {
-		name string
-	}{
-		{
-			name: "Success: multiple goroutines with write locks serialize access",
-		},
+	ctx := t.Context()
+	g := New(ctx)
+	id := uuid.New()
+	const writers = 10
+
+	var inside, done atomic.Int64
+	var overlapped atomic.Bool
+	work := context.Pool(ctx).Group()
+	for i := 0; i < writers; i++ {
+		work.Go(ctx, func(ctx context.Context) error {
+			g.Lock(id)
+			defer g.Unlock(id)
+
+			if inside.Add(1) != 1 {
+				overlapped.Store(true)
+			}
+			time.Sleep(time.Millisecond) // Widens the window another writer would have to overlap in.
+			done.Add(1)
+			inside.Add(-1)
+			return nil
+		})
+	}
+	if err := work.Wait(ctx); err != nil {
+		t.Fatalf("TestConcurrentWriteLocks: got err == %s, want err == nil", err)
 	}
 
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			g := New(t.Context())
-			planID := uuid.New()
-
-			var counter int64
-			var maxConcurrent int64
-			var currentConcurrent int64
-			const numGoroutines = 10
-
-			var wg sync.WaitGroup
-			wg.Add(numGoroutines)
-
-			for i := 0; i < numGoroutines; i++ {
-				go func() {
-					defer wg.Done()
-
-					g.Lock(planID)
-					defer g.Unlock(planID)
-
-					// Track concurrent access
-					current := atomic.AddInt64(&currentConcurrent, 1)
-					if current > atomic.LoadInt64(&maxConcurrent) {
-						atomic.StoreInt64(&maxConcurrent, current)
-					}
-
-					// Simulate work
-					time.Sleep(10 * time.Millisecond)
-					atomic.AddInt64(&counter, 1)
-
-					atomic.AddInt64(&currentConcurrent, -1)
-				}()
-			}
-
-			wg.Wait()
-
-			if counter != numGoroutines {
-				t.Errorf("TestConcurrentWriteLocks(%s): counter = %d, want %d", test.name, counter, numGoroutines)
-			}
-
-			// With write locks, max concurrent should be 1
-			if maxConcurrent != 1 {
-				t.Errorf("TestConcurrentWriteLocks(%s): maxConcurrent = %d, want 1", test.name, maxConcurrent)
-			}
-		})
+	if got := done.Load(); got != writers {
+		t.Errorf("TestConcurrentWriteLocks: got %d writers done, want %d", got, writers)
+	}
+	if overlapped.Load() {
+		t.Errorf("TestConcurrentWriteLocks: got two writers holding the lock at once, want one at a time")
 	}
 }
 
 func TestConcurrentReadLocks(t *testing.T) {
 	t.Parallel()
 
-	tests := []struct {
-		name string
-	}{
-		{
-			name: "Success: multiple goroutines with read locks run concurrently",
-		},
+	ctx := t.Context()
+	g := New(ctx)
+	id := uuid.New()
+	const readers = 10
+
+	// Every reader holds its lock until all of them hold one, which only happens if they can hold it together.
+	var holding atomic.Int64
+	all := make(chan struct{})
+	release := make(chan struct{})
+	work := context.Pool(ctx).Group()
+	for i := 0; i < readers; i++ {
+		work.Go(ctx, func(ctx context.Context) error {
+			g.RLock(id)
+			defer g.RUnlock(id)
+
+			if holding.Add(1) == readers {
+				close(all)
+			}
+			<-release
+			return nil
+		})
 	}
 
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			g := New(t.Context())
-			planID := uuid.New()
-
-			var counter int64
-			var maxConcurrent int64
-			var currentConcurrent int64
-			const numGoroutines = 10
-
-			var wg sync.WaitGroup
-			wg.Add(numGoroutines)
-
-			for i := 0; i < numGoroutines; i++ {
-				go func() {
-					defer wg.Done()
-
-					g.RLock(planID)
-					defer g.RUnlock(planID)
-
-					// Track concurrent access
-					current := atomic.AddInt64(&currentConcurrent, 1)
-					if current > atomic.LoadInt64(&maxConcurrent) {
-						atomic.StoreInt64(&maxConcurrent, current)
-					}
-
-					// Simulate work
-					time.Sleep(50 * time.Millisecond)
-					atomic.AddInt64(&counter, 1)
-
-					atomic.AddInt64(&currentConcurrent, -1)
-				}()
-			}
-
-			wg.Wait()
-
-			if counter != numGoroutines {
-				t.Errorf("TestConcurrentReadLocks(%s): counter = %d, want %d", test.name, counter, numGoroutines)
-			}
-
-			// With read locks, we should see concurrent access
-			if maxConcurrent < 2 {
-				t.Errorf("TestConcurrentReadLocks(%s): maxConcurrent = %d, want >= 2", test.name, maxConcurrent)
-			}
-		})
+	// all is only closed.
+	allCtx, allCancel := context.WithTimeout(t.Context(), 5*time.Second)
+	if _, r := chans.Get(allCtx, all); !r.Closed() {
+		t.Errorf("TestConcurrentReadLocks: got %d readers holding the lock at once, want %d", holding.Load(), readers)
+	}
+	allCancel()
+	close(release)
+	if err := work.Wait(ctx); err != nil {
+		t.Errorf("TestConcurrentReadLocks: got err == %s, want err == nil", err)
 	}
 }
 
-func TestMixedReadWriteLocks(t *testing.T) {
+func TestLockExclusion(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
 		name string
+		// hold is taken first and held while try is attempted.
+		hold mode
+		try  mode
+		// otherPlan has try lock a different plan than hold.
+		otherPlan   bool
+		wantBlocked bool
 	}{
-		{
-			name: "Success: write lock blocks read locks",
-		},
-		{
-			name: "Success: read locks block write lock",
-		},
+		{name: "Success: a write lock blocks another write lock", hold: write, try: write, wantBlocked: true},
+		{name: "Success: a write lock blocks a read lock", hold: write, try: read, wantBlocked: true},
+		{name: "Success: a read lock blocks a write lock", hold: read, try: write, wantBlocked: true},
+		{name: "Success: a read lock does not block another read lock", hold: read, try: read},
+		{name: "Success: a write lock does not block a write lock on another plan", hold: write, try: write, otherPlan: true},
 	}
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			g := New(t.Context())
-			planID := uuid.New()
+			t.Parallel()
 
-			switch test.name {
-			case "Success: write lock blocks read locks":
-				// Acquire write lock
-				g.Lock(planID)
-
-				// Try to acquire read lock in goroutine
-				readLockAcquired := make(chan bool)
-				go func() {
-					g.RLock(planID)
-					readLockAcquired <- true
-					g.RUnlock(planID)
-				}()
-
-				// Read lock should not be acquired while write lock is held
-				select {
-				case <-readLockAcquired:
-					t.Errorf("TestMixedReadWriteLocks(%s): read lock acquired while write lock held", test.name)
-				case <-time.After(100 * time.Millisecond):
-					// Expected - read lock is blocked
-				}
-
-				// Release write lock
-				g.Unlock(planID)
-
-				// Now read lock should be acquired
-				select {
-				case <-readLockAcquired:
-					// Expected
-				case <-time.After(100 * time.Millisecond):
-					t.Errorf("TestMixedReadWriteLocks(%s): read lock not acquired after write lock released", test.name)
-				}
-
-			case "Success: read locks block write lock":
-				// Acquire read lock
-				g.RLock(planID)
-
-				// Try to acquire write lock in goroutine
-				writeLockAcquired := make(chan bool)
-				go func() {
-					g.Lock(planID)
-					writeLockAcquired <- true
-					g.Unlock(planID)
-				}()
-
-				// Write lock should not be acquired while read lock is held
-				select {
-				case <-writeLockAcquired:
-					t.Errorf("TestMixedReadWriteLocks(%s): write lock acquired while read lock held", test.name)
-				case <-time.After(100 * time.Millisecond):
-					// Expected - write lock is blocked
-				}
-
-				// Release read lock
-				g.RUnlock(planID)
-
-				// Now write lock should be acquired
-				select {
-				case <-writeLockAcquired:
-					// Expected
-				case <-time.After(100 * time.Millisecond):
-					t.Errorf("TestMixedReadWriteLocks(%s): write lock not acquired after read lock released", test.name)
-				}
-			}
-		})
-	}
-}
-
-func TestMultiplePlanIDs(t *testing.T) {
-	t.Parallel()
-
-	tests := []struct {
-		name string
-	}{
-		{
-			name: "Success: different plan IDs have independent locks",
-		},
-	}
-
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			g := New(t.Context())
-			planID1 := uuid.New()
-			planID2 := uuid.New()
-
-			// Lock planID1
-			g.Lock(planID1)
-
-			// Should be able to lock planID2 concurrently
-			lockAcquired := make(chan bool)
-			go func() {
-				g.Lock(planID2)
-				lockAcquired <- true
-				g.Unlock(planID2)
-			}()
-
-			select {
-			case <-lockAcquired:
-				// Expected - different plan IDs have independent locks
-			case <-time.After(100 * time.Millisecond):
-				t.Errorf("TestMultiplePlanIDs(%s): could not acquire lock for planID2 while planID1 is locked", test.name)
+			ctx := t.Context()
+			g := New(ctx)
+			held := uuid.New()
+			tried := held
+			if test.otherPlan {
+				tried = uuid.New()
 			}
 
-			g.Unlock(planID1)
+			test.hold.lock(g, held)
+			acquired := make(chan struct{})
+			context.Pool(ctx).Submit(
+				ctx,
+				func() {
+					test.try.lock(g, tried)
+					close(acquired)
+					test.try.unlock(g, tried)
+				},
+			)
+
+			if test.wantBlocked {
+				// This wait can only miss a lock that fails to block, never fail one that works. acquired is only
+				// closed, and the wait running out is the pass.
+				blockCtx, blockCancel := context.WithTimeout(t.Context(), 100*time.Millisecond)
+				_, r := chans.Get(blockCtx, acquired)
+				blockCancel()
+				if r != chans.ResultCtxDone {
+					t.Errorf("TestLockExclusion(%s): got the %s lock while the %s lock is held, want it blocked", test.name, test.try.name, test.hold.name)
+				}
+			}
+			if !test.wantBlocked {
+				takeCtx, takeCancel := context.WithTimeout(t.Context(), 5*time.Second)
+				_, r := chans.Get(takeCtx, acquired)
+				takeCancel()
+				if !r.Closed() {
+					t.Errorf("TestLockExclusion(%s): got the %s lock blocked by the %s lock, want it taken", test.name, test.try.name, test.hold.name)
+				}
+			}
+
+			test.hold.unlock(g, held)
+			releaseCtx, releaseCancel := context.WithTimeout(t.Context(), 5*time.Second)
+			_, r := chans.Get(releaseCtx, acquired)
+			releaseCancel()
+			if !r.Closed() {
+				t.Errorf("TestLockExclusion(%s): got the %s lock still blocked after the %s lock was released", test.name, test.try.name, test.hold.name)
+			}
 		})
 	}
 }
@@ -426,89 +305,201 @@ func TestMultiplePlanIDs(t *testing.T) {
 func TestConcurrentOperationsDifferentPlanIDs(t *testing.T) {
 	t.Parallel()
 
-	tests := []struct {
-		name string
-	}{
-		{
-			name: "Success: concurrent operations on different plan IDs",
-		},
+	ctx := t.Context()
+	g := New(ctx)
+	const plans = 10
+	const opsPerPlan = 5
+
+	ids := make([]uuid.UUID, plans)
+	work := context.Pool(ctx).Group()
+	for i := 0; i < plans; i++ {
+		ids[i] = uuid.New()
+		for j := 0; j < opsPerPlan; j++ {
+			work.Go(ctx, func(ctx context.Context) error {
+				g.Lock(ids[i])
+				time.Sleep(time.Millisecond)
+				g.Unlock(ids[i])
+				return nil
+			})
+		}
+	}
+	if err := work.Wait(ctx); err != nil {
+		t.Fatalf("TestConcurrentOperationsDifferentPlanIDs: got err == %s, want err == nil", err)
 	}
 
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			g := New(t.Context())
-			const numPlanIDs = 10
-			const opsPerPlan = 5
-
-			var wg sync.WaitGroup
-			wg.Add(numPlanIDs * opsPerPlan)
-
-			for i := 0; i < numPlanIDs; i++ {
-				planID := uuid.New()
-				for j := 0; j < opsPerPlan; j++ {
-					go func() {
-						defer wg.Done()
-
-						g.Lock(planID)
-						time.Sleep(10 * time.Millisecond)
-						g.Unlock(planID)
-					}()
-				}
-			}
-
-			// Wait with a timeout
-			done := make(chan bool)
-			go func() {
-				wg.Wait()
-				done <- true
-			}()
-
-			select {
-			case <-done:
-				// Expected - all operations completed
-			case <-time.After(5 * time.Second):
-				t.Errorf("TestConcurrentOperationsDifferentPlanIDs(%s): timed out waiting for operations to complete", test.name)
-			}
-		})
+	for _, id := range ids {
+		if !isFree(g, id) {
+			t.Errorf("TestConcurrentOperationsDifferentPlanIDs: got plan %s held after every operation finished", id)
+		}
 	}
 }
 
-func TestMultipleReadLocksSamePlan(t *testing.T) {
+func TestSweep(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
 		name string
+		// hold takes the lock before the sweep and returns how to let it go.
+		hold     func(g *Group, id uuid.UUID) func()
+		wantKept bool
 	}{
 		{
-			name: "Success: multiple read locks can be held simultaneously on same plan",
+			name:     "Success: an unused lock is removed",
+			hold:     func(g *Group, id uuid.UUID) func() { g.Lock(id); g.Unlock(id); return func() {} },
+			wantKept: false,
+		},
+		{
+			name:     "Success: a write-held lock is kept",
+			hold:     func(g *Group, id uuid.UUID) func() { g.Lock(id); return func() { g.Unlock(id) } },
+			wantKept: true,
+		},
+		{
+			name:     "Success: a read-held lock is kept",
+			hold:     func(g *Group, id uuid.UUID) func() { g.RLock(id); return func() { g.RUnlock(id) } },
+			wantKept: true,
 		},
 	}
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+
 			g := New(t.Context())
-			planID := uuid.New()
+			id := uuid.New()
+			release := test.hold(g, id)
+			g.sweep()
 
-			// Acquire first read lock
-			g.RLock(planID)
+			g.mu.Lock()
+			_, kept := g.createLocks[id]
+			g.mu.Unlock()
+			if kept != test.wantKept {
+				t.Errorf("TestSweep(%s): got lock kept == %v, want %v", test.name, kept, test.wantKept)
+			}
+			release()
+		})
+	}
+}
 
-			// Try to acquire second read lock in goroutine
-			readLockAcquired := make(chan bool)
-			go func() {
-				g.RLock(planID)
-				readLockAcquired <- true
-				g.RUnlock(planID)
-			}()
+// TestLockAcrossSweep is a regression test: a lock swept between being looked up and being taken was taken anyway,
+// leaving the caller holding a lock no longer in the Group, so its Unlock panicked (or unlocked someone else's lock).
+// Lock and RLock must end up holding the lock the Group has for the plan.
+func TestLockAcrossSweep(t *testing.T) {
+	t.Parallel()
 
-			// Second read lock should be acquired immediately
-			select {
-			case <-readLockAcquired:
-				// Expected - multiple read locks allowed
-			case <-time.After(100 * time.Millisecond):
-				t.Errorf("TestMultipleReadLocksSamePlan(%s): second read lock not acquired", test.name)
+	tests := []struct {
+		name string
+		mode mode
+	}{
+		{
+			name: "Success: Lock after its lock was swept holds the Group's lock",
+			mode: write,
+		},
+		{
+			name: "Success: RLock after its lock was swept holds the Group's lock",
+			mode: read,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+
+			g := New(t.Context())
+			id := uuid.New()
+			swept := false
+			g.testAfterLookup = func() {
+				if !swept {
+					swept = true
+					g.sweep()
+				}
 			}
 
-			g.RUnlock(planID)
+			test.mode.lock(g, id)
+
+			g.mu.Lock()
+			current, ok := g.createLocks[id]
+			g.mu.Unlock()
+			if !ok {
+				t.Fatalf("TestLockAcrossSweep(%s): the Group has no lock for the plan while it is held", test.name)
+			}
+			if current.TryLock() {
+				t.Errorf("TestLockAcrossSweep(%s): the Group's %s lock is not held", test.name, test.mode.name)
+				current.Unlock()
+			}
+			test.mode.unlock(g, id)
+		})
+	}
+}
+
+// TestClean is a regression test for three bugs. After its first tick the cleanup loop never looked at its context
+// again, so it never stopped. Once it did stop, it marked the Group canceled and every Lock and Unlock after that
+// panicked, so a canceled process context crashed a Plan write that held a lock through shutdown. And the Vault gives
+// the Group a context that is never canceled, with no other way to stop the loop, so every Vault leaked it. Canceling
+// the context or calling Close must stop the loop and leave the locks working, including one taken before the stop.
+func TestClean(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		// cancelFirst cancels the context before the Group is made, so the loop never starts.
+		cancelFirst bool
+		// stop stops the loop of a Group made with a context that cancel cancels.
+		stop func(g *Group, cancel context.CancelFunc)
+	}{
+		{
+			name: "Success: canceling the context stops the loop and the locks keep working",
+			stop: func(g *Group, cancel context.CancelFunc) { cancel() },
+		},
+		{
+			name: "Success: Close stops the loop and the locks keep working",
+			stop: func(g *Group, cancel context.CancelFunc) { g.Close() },
+		},
+		{
+			name: "Success: Close twice stops the loop and the locks keep working",
+			stop: func(g *Group, cancel context.CancelFunc) { g.Close(); g.Close() },
+		},
+		{
+			name:        "Success: a Group made with a canceled context reports its loop stopped and the locks work",
+			cancelFirst: true,
+			stop:        func(g *Group, cancel context.CancelFunc) {},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+
+			ctx, cancel := context.WithCancel(t.Context())
+			defer cancel()
+			if test.cancelFirst {
+				cancel()
+			}
+			g := newGroup(ctx, time.Millisecond)
+			time.Sleep(20 * time.Millisecond) // Let the loop tick several times.
+
+			held := uuid.New()
+			g.Lock(held)
+			test.stop(g, cancel)
+
+			// cleaned is only closed.
+			cleanCtx, cleanCancel := context.WithTimeout(t.Context(), 5*time.Second)
+			_, r := chans.Get(cleanCtx, g.cleaned)
+			cleanCancel()
+			if !r.Closed() {
+				t.Fatalf("TestClean(%s): the cleanup loop did not stop", test.name)
+			}
+
+			defer func() {
+				if r := recover(); r != nil {
+					t.Errorf("TestClean(%s): got panic %v using locks after the loop stopped, want the locks to keep working", test.name, r)
+				}
+			}()
+			g.Unlock(held)
+			id := uuid.New()
+			g.Lock(id)
+			g.Unlock(id)
+			g.RLock(id)
+			g.RUnlock(id)
 		})
 	}
 }

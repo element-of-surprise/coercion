@@ -1,6 +1,7 @@
 package azblob
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -8,6 +9,7 @@ import (
 	"github.com/element-of-surprise/coercion/plugins/registry"
 	"github.com/element-of-surprise/coercion/workflow"
 	"github.com/element-of-surprise/coercion/workflow/storage"
+	"github.com/element-of-surprise/coercion/workflow/storage/azblob/internal/blobops"
 	testPlugins "github.com/element-of-surprise/coercion/workflow/storage/sqlite/testing/plugins"
 	"github.com/go-json-experiment/json"
 	"github.com/google/uuid"
@@ -91,6 +93,8 @@ func TestPlanToEntry(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+
 			got, err := planToPlanEntry(test.plan)
 			switch {
 			case err == nil && test.wantErr:
@@ -115,10 +119,6 @@ func TestPlanToEntry(t *testing.T) {
 			}
 		})
 	}
-}
-
-func TestEntryToPlan(t *testing.T) {
-	t.Skip("entryToPlan function was removed - no longer needed with new architecture")
 }
 
 func TestBlockToEntry(t *testing.T) {
@@ -169,6 +169,8 @@ func TestBlockToEntry(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+
 			got, err := blockToEntry(test.block, test.pos)
 			switch {
 			case err == nil && test.wantErr:
@@ -220,6 +222,8 @@ func TestEntryToBlock(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+
 			got, err := entryToBlock(test.entry)
 			if err != nil {
 				t.Errorf("TestEntryToBlock(%s): got err == %s, want err == nil", test.name, err)
@@ -280,6 +284,8 @@ func TestChecksToEntry(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+
 			got, err := checksToEntry(test.checks)
 			switch {
 			case err == nil && test.wantErr:
@@ -340,6 +346,8 @@ func TestSequenceToEntry(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+
 			got, err := sequenceToEntry(test.sequence, test.pos)
 			switch {
 			case err == nil && test.wantErr:
@@ -401,6 +409,8 @@ func TestActionToEntry(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+
 			got, err := actionToEntry(test.action, test.pos)
 			switch {
 			case err == nil && test.wantErr:
@@ -424,6 +434,8 @@ func TestActionToEntry(t *testing.T) {
 }
 
 func TestDecodeAttempts(t *testing.T) {
+	t.Parallel()
+
 	reg := registry.New()
 	reg.Register(&testPlugins.HelloPlugin{})
 
@@ -510,6 +522,38 @@ func TestPlanMetadataConversion(t *testing.T) {
 			wantErr:           false,
 		},
 		{
+			// Regression: Name and Descr were copied into blob metadata as is, and metadata is sent as HTTP headers, so
+			// a valid multiline description failed every upload of the plan.
+			name: "Success: round trip of a multiline description and a name with backslashes",
+			plan: func() *workflow.Plan {
+				p := &workflow.Plan{
+					ID:         planID,
+					Name:       `C:\plans\one`,
+					Descr:      "first line\nsecond\tline with a \\n that is not a newline",
+					SubmitTime: now,
+				}
+				p.State.Set(workflow.State{Status: workflow.NotStarted})
+				return p
+			}(),
+			testPlanToMeta:    true,
+			testMapToPlanMeta: true,
+		},
+		{
+			name: "Success: a description at the size limit fits in blob metadata",
+			plan: func() *workflow.Plan {
+				p := &workflow.Plan{
+					ID:         planID,
+					Name:       strings.Repeat("n", 256),
+					Descr:      strings.Repeat("a\n", 1023) + "ab", // 2048 bytes, workflow's limit.
+					SubmitTime: now,
+				}
+				p.State.Set(workflow.State{Status: workflow.NotStarted})
+				return p
+			}(),
+			testPlanToMeta:    true,
+			testMapToPlanMeta: true,
+		},
+		{
 			name: "Success: plan without group ID",
 			plan: func() *workflow.Plan {
 				p := &workflow.Plan{
@@ -583,6 +627,44 @@ func TestPlanMetadataConversion(t *testing.T) {
 			wantErr:           false,
 		},
 		{
+			// Metadata written before Name and Descr were encoded has no encoding marker and is read exactly as stored,
+			// even where it looks like an escape.
+			name: "Success: metadata written before encoding is read as stored",
+			metadataOverride: map[string]*string{
+				"planid":     toPtr(planID.String()),
+				"name":       toPtr(`C:\new`),
+				"descr":      toPtr(`a\nb`),
+				"submittime": toPtr(now.Format(time.RFC3339)),
+				"state":      toPtr(`{"status":"notstarted"}`),
+			},
+			testMapToPlanMeta: true,
+			wantPlanMeta: &planMeta{ListResult: storage.ListResult{
+				ID:         planID,
+				Name:       `C:\new`,
+				Descr:      `a\nb`,
+				SubmitTime: now.Truncate(time.Second),
+			}},
+		},
+		{
+			// A corrupt encoded value is a display string; it must not make the plan's metadata unreadable.
+			name: "Success: an encoded value that does not decode is read as stored",
+			metadataOverride: map[string]*string{
+				"planid":      toPtr(planID.String()),
+				"name":        toPtr("name"),
+				"descr":       toPtr(`ends in \`),
+				mdKeyEncoding: toPtr(mdEncodingEscaped),
+				"submittime":  toPtr(now.Format(time.RFC3339)),
+				"state":       toPtr(`{"status":"notstarted"}`),
+			},
+			testMapToPlanMeta: true,
+			wantPlanMeta: &planMeta{ListResult: storage.ListResult{
+				ID:         planID,
+				Name:       "name",
+				Descr:      `ends in \`,
+				SubmitTime: now.Truncate(time.Second),
+			}},
+		},
+		{
 			name: "Error: invalid plan ID in metadata",
 			metadataOverride: map[string]*string{
 				"planid":     toPtr("not-a-uuid"),
@@ -635,6 +717,8 @@ func TestPlanMetadataConversion(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+
 			// Test planToMetadata
 			var metadata map[string]*string
 			if test.testPlanToMeta {
@@ -655,11 +739,17 @@ func TestPlanMetadataConversion(t *testing.T) {
 				if metadata[mdKeyPlanID] == nil || *metadata[mdKeyPlanID] != test.plan.ID.String() {
 					t.Errorf("TestPlanMetadataConversion(%s): metadata planid mismatch", test.name)
 				}
-				if metadata[mdKeyName] == nil || *metadata[mdKeyName] != test.plan.Name {
-					t.Errorf("TestPlanMetadataConversion(%s): metadata name mismatch", test.name)
+				// Metadata is sent as HTTP headers, so every value must be one Azure accepts and keeps as is, and all of
+				// it must fit in a blob's metadata.
+				size := 0
+				for k, v := range metadata {
+					size += len(k) + len(*v)
+					if !blobops.ValidMetadataValue(*v) {
+						t.Errorf("TestPlanMetadataConversion(%s): metadata %s = %q is not a valid metadata value", test.name, k, *v)
+					}
 				}
-				if metadata[mdKeyDescr] == nil || *metadata[mdKeyDescr] != test.plan.Descr {
-					t.Errorf("TestPlanMetadataConversion(%s): metadata descr mismatch", test.name)
+				if size > blobops.MaxMetadataSize {
+					t.Errorf("TestPlanMetadataConversion(%s): metadata is %d bytes, more than the %d allowed", test.name, size, blobops.MaxMetadataSize)
 				}
 
 				// Check GroupID handling

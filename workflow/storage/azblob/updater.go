@@ -12,6 +12,7 @@ import (
 	"github.com/element-of-surprise/coercion/workflow/storage"
 	"github.com/element-of-surprise/coercion/workflow/storage/azblob/internal/blobops"
 	"github.com/element-of-surprise/coercion/workflow/storage/azblob/internal/planlocks"
+	"github.com/element-of-surprise/coercion/workflow/utils/changes"
 )
 
 var _ storage.Updater = updater{}
@@ -79,6 +80,12 @@ func newUpdater(mu *planlocks.Group, prefix string, client blobops.Ops, endpoint
 	}
 
 	return u
+}
+
+// UpdateChanges implements storage.ChangesUpdater.UpdateChanges(). Blob writes cannot be grouped into a transaction, so
+// the objects are written one at a time, each after all of its descendants (see storage.WriteChanges).
+func (u updater) UpdateChanges(ctx context.Context, plan *workflow.Plan, before changes.Snapshot) error {
+	return storage.WriteChanges(ctx, u, plan, before)
 }
 
 // planUpdater implements storage.PlanUpdater.

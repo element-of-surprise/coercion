@@ -9,6 +9,7 @@ import (
 	"zombiezen.com/go/sqlite/sqlitex"
 )
 
+// closer implements storage.Closer.
 type closer struct {
 	pool *sqlitex.Pool
 	mu   *sync.RWMutex
@@ -16,7 +17,11 @@ type closer struct {
 	private.Storage
 }
 
+// Close closes the storage once in-flight reads and writes finish. Later reads and writes fail.
 func (c *closer) Close(ctx context.Context) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
 	err := c.pool.Close()
 	if err == nil {
 		return err

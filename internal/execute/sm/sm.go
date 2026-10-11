@@ -2,7 +2,6 @@
 package sm
 
 import (
-	"errors"
 	"fmt"
 	"reflect"
 	"sync/atomic"
@@ -12,14 +11,16 @@ import (
 	"github.com/element-of-surprise/coercion/plugins/registry"
 	"github.com/element-of-surprise/coercion/workflow"
 	"github.com/element-of-surprise/coercion/workflow/context"
+	"github.com/element-of-surprise/coercion/workflow/errors"
 	"github.com/element-of-surprise/coercion/workflow/storage"
 	"github.com/element-of-surprise/coercion/workflow/utils/walk"
 
+	"github.com/gostdlib/base/concurrency/sync"
 	"github.com/gostdlib/base/statemachine"
 	"github.com/gostdlib/base/telemetry/log"
+	"github.com/gostdlib/base/values/chans"
+	"github.com/gostdlib/base/values/generics/result"
 )
-
-var ErrInternalFailure = errors.New("internal failure")
 
 // block is a wrapper around a workflow.Block that contains additional information for the statemachine.
 type block struct {
@@ -34,9 +35,9 @@ type Data struct {
 	// Plan is the workflow.Plan that is being executed.
 	Plan *workflow.Plan
 
-	// RecoveryStarted is the channel that will complete once recovery has finished updating the data store
-	// with the fixed state of the Plan and is off to execute the next state.
-	RecoveryStarted chan struct{}
+	// RecoveryStarted is reported once recovery has finished updating the data store with the fixed state of the
+	// Plan and is off to execute the next state, or with the error that stopped it. nil when not recovering.
+	RecoveryStarted *Started
 
 	// recovered indicates whether we are recovering a Plan after a crash.
 	recovered bool
@@ -47,29 +48,42 @@ type Data struct {
 	contCancel context.CancelFunc
 	// contCheckResult is the channel that will receive the result of the continuous check for the Plan.
 	contCheckResult chan error
+	// stopHeartbeat stops the heartbeat startHeartbeat started and waits for it to exit. nil if none was started.
+	stopHeartbeat func()
+	// cut are the actions of the recovered block in blocks[0] that the crash cut mid-attempt after the Plan's ContChecks
+	// failed. FinishCutBlock runs them again to completion.
+	cut []cutAction
 
 	err error
 }
 
-// contChecks will check if any of the continuous checks on the Plan or the current block have failed.
-// If a check has failed, the type of the object that failed is returned (OTPlan or OTBlock).
+// contChecksPassing reports whether the continuous checks on the Plan or the current block have failed. If one has, it
+// returns the type of the object whose checks failed (OTPlan or OTBlock) and the failure. The Plan's channel is polled
+// first, then the block's, each on its own: a select over both picks at random among ready channels, and a closed
+// channel (no ContChecks) or a waiting pass is always ready, so it would miss a waiting failure on the other.
 func (d Data) contChecksPassing() (workflow.ObjectType, error) {
-	if len(d.blocks) == 0 {
-		select {
-		case err := <-d.contCheckResult:
-			return workflow.OTPlan, err
-		default:
-			return workflow.OTUnknown, nil
-		}
-	}
-	select {
-	case err := <-d.contCheckResult:
+	if err := contFailure(d.contCheckResult); err != nil {
 		return workflow.OTPlan, err
-	case err := <-d.blocks[0].contCheckResult:
+	}
+	if len(d.blocks) == 0 {
+		return workflow.OTUnknown, nil
+	}
+	if err := contFailure(d.blocks[0].contCheckResult); err != nil {
 		return workflow.OTBlock, err
-	default:
 	}
 	return workflow.OTUnknown, nil
+}
+
+// contFailure takes a waiting result off ch, if there is one, and returns it if it is a failure. A nil or closed ch,
+// an empty ch and a waiting pass all return nil.
+func contFailure(ch chan error) error {
+	if ch == nil {
+		return nil
+	}
+	if err, ok, _ := chans.TryGet(ch); ok && err != nil {
+		return err
+	}
+	return nil
 }
 
 type nower func() time.Time
@@ -92,6 +106,9 @@ type States struct {
 
 	// nower is the function that returns the current time. This is set to time.Now by default.
 	nower nower
+	// maxLastUpdate is how long a Plan may go without an update before recovery treats it as abandoned. The heartbeat
+	// writes often enough to stay inside it. Zero uses the heartbeat's defaults.
+	maxLastUpdate time.Duration
 
 	// testChecksRunner is the function that runs checks. If set, runChecksOnce calls this and returns.
 	// We use this to fake out the check runner in tests.
@@ -103,14 +120,16 @@ type States struct {
 	testActionRunner actionRunner
 }
 
-// New creates a new States statemachine.
-func New(store storage.Vault, registry *registry.Register) (*States, error) {
+// New creates a new States statemachine. maxLastUpdate is how long a Plan may go without an update before recovery
+// treats it as abandoned; the heartbeat writes often enough to stay inside it.
+func New(ctx context.Context, store storage.Vault, registry *registry.Register, maxLastUpdate time.Duration) (*States, error) {
 	if store == nil {
-		return nil, fmt.Errorf("store is required")
+		return nil, errors.E(ctx, errors.CatUser, errors.TypeParameter, errors.New("store is required"))
 	}
 	s := &States{
-		store:    store,
-		registry: registry,
+		store:         store,
+		registry:      registry,
+		maxLastUpdate: maxLastUpdate,
 	}
 	return s, nil
 }
@@ -138,42 +157,85 @@ func (s *States) Start(req statemachine.Request[Data]) statemachine.Request[Data
 		log.Fatalf("failed to write Plan: %v", err)
 	}
 
-	// Copy req for the background goroutine to avoid race with req.Next assignment below
-	reqCopy := req
-	_ = context.Tasks(req.Ctx).Once(
-		req.Ctx,
-		"updateLastUpdate",
-		func(ctx context.Context) error {
-			s.updateLastUpdate(ctx, reqCopy)
-			return nil
-		},
-	)
+	req = s.startHeartbeat(req)
 
 	req.Next = s.PlanBypassChecks
 	return req
 }
 
+// startHeartbeat keeps the Plan's RuntimeUpdate fresh while it runs, so startup recovery does not age a live Plan out.
+// Both a fresh start and a recovered run must call it. It returns req with Data.stopHeartbeat set; End calls that
+// before it works out and writes the Plan's final state, because a heartbeat write landing then could store the final
+// Plan before its objects, which recovery relies on never happening (see WriteObject).
+func (s *States) startHeartbeat(req statemachine.Request[Data]) statemachine.Request[Data] {
+	hbCtx, cancel := context.WithCancel(req.Ctx)
+	done := result.New[struct{}]()
+
+	// Copy req for the background goroutine to avoid a race with the caller's later req.Next assignment.
+	reqCopy := req
+	// The heartbeat lives as long as the Plan runs, so it goes on the default pool and never holds a slot in a
+	// caller's Limited pool. It is a pool job rather than a context.Tasks Run because nothing about it should be
+	// retried: its loop already survives a failed beat (runtimeUpdate only logs), it ends on purpose when stopped or
+	// the Plan leaves Running, and stopHeartbeat must join it (done) before End writes the final state.
+	ok := context.Pool(req.Ctx).Default().Submit(
+		hbCtx,
+		func() {
+			defer done.Set(struct{}{}, nil)
+			s.updateLastUpdate(hbCtx, reqCopy)
+		},
+	)
+	if !ok {
+		// Without a heartbeat, a restart can age this Plan out while it is still running.
+		context.Log(req.Ctx).Error(fmt.Sprintf("plan(%s) heartbeat did not start: %v", req.Data.Plan.ID, context.Cause(hbCtx)))
+		done.Set(struct{}{}, nil)
+	}
+
+	req.Data.stopHeartbeat = func() {
+		cancel()
+		// Wait on a Context that does not end, so a write the heartbeat has in flight finishes before End writes.
+		_, _ = done.Wait(context.WithoutCancel(req.Ctx))
+	}
+	return req
+}
+
+// heartbeat returns how long a Plan may go without an update before the heartbeat writes one (write), and how often
+// the heartbeat checks (tick), for a Plan that recovery treats as abandoned after maxLastUpdate. The defaults are 5
+// minutes and 10 seconds. A shorter maxLastUpdate writes within a third of it, so a write that is slow or fails once
+// still lands in time, and checks at least that often. Zero or less uses the defaults.
+func heartbeat(maxLastUpdate time.Duration) (write, tick time.Duration) {
+	write, tick = 5*time.Minute, 10*time.Second
+	if maxLastUpdate <= 0 {
+		return write, tick
+	}
+	write = min(write, maxLastUpdate/3)
+	// A ticker's period must be positive.
+	tick = max(min(tick, write), time.Millisecond)
+	return write, tick
+}
+
 // updateLastUpdate periodically updates the last update time of the Plan while it is running.
 func (s *States) updateLastUpdate(ctx context.Context, req statemachine.Request[Data]) {
-	t := time.NewTicker(10 * time.Second)
+	_, tick := heartbeat(s.maxLastUpdate)
+	t := time.NewTicker(tick)
 	defer t.Stop()
 
 	for {
-		select {
-		case <-ctx.Done():
+		// Stop on a tick that arrives after ctx is done (ResultOKCanceled) too, so no update starts once stopped.
+		if _, r := chans.Get(ctx, t.C); r != chans.ResultOK {
 			return
-		case <-t.C:
-			if req.Data.Plan.State.Get().Status != workflow.Running {
-				return
-			}
-			s.runtimeUpdate(req.Ctx, req.Data.Plan)
 		}
+		if req.Data.Plan.State.Get().Status != workflow.Running {
+			return
+		}
+		s.runtimeUpdate(req.Ctx, req.Data.Plan)
 	}
 }
 
-// runtimeUpdate updates the RuntimeUpdate time of the Plan if more than 5 minutes have passed since the last update.
+// runtimeUpdate updates the RuntimeUpdate time of the Plan if more time than heartbeat allows has passed since the
+// last update.
 func (s *States) runtimeUpdate(ctx context.Context, plan *workflow.Plan) {
-	if s.now().Sub(walk.LastUpdate(ctx, plan)) > 5*time.Minute {
+	write, _ := heartbeat(s.maxLastUpdate)
+	if s.now().Sub(walk.LastUpdate(ctx, plan)) > write {
 		now := s.now()
 		plan.RuntimeUpdate.Set(now)
 		if err := s.store.UpdatePlan(ctx, plan); err != nil {
@@ -235,22 +297,42 @@ func (s *States) PlanPreChecks(req statemachine.Request[Data]) statemachine.Requ
 
 // PlanStartContChecks starts the ContChecks of the Plan.
 func (s *States) PlanStartContChecks(req statemachine.Request[Data]) statemachine.Request[Data] {
-	if req.Data.Plan.ContChecks != nil {
-		var ctx context.Context
-		ctx, req.Data.contCancel = context.WithCancel(req.Ctx)
+	req.Next = s.ExecuteBlock
 
-		context.Pool(req.Ctx).Submit(
-			ctx,
-			func() {
-				s.runContChecks(ctx, req.Data.Plan.ContChecks, req.Data.contCheckResult)
-			},
-		)
-	} else {
+	if req.Data.Plan.ContChecks == nil {
 		close(req.Data.contCheckResult)
+		return req
 	}
 
-	req.Next = s.ExecuteBlock
+	var ctx context.Context
+	ctx, req.Data.contCancel = context.WithCancel(req.Ctx)
+	s.startContChecks(ctx, req.Data.Plan.ContChecks, req.Data.contCheckResult)
 	return req
+}
+
+// startContChecks runs checks in a loop until ctx is canceled, sending results to results. The loop lives as long as
+// the Plan or Block it guards, so it goes on the default pool and never holds a slot in a caller's Limited pool. If
+// the pool refuses it, results gets an error and is closed, so nothing draining results waits forever.
+func (s *States) startContChecks(ctx context.Context, checks *workflow.Checks, results chan error) {
+	ok := context.Pool(ctx).Default().Submit(
+		ctx,
+		func() {
+			s.runContChecks(ctx, checks, results)
+		},
+	)
+	if ok {
+		return
+	}
+
+	var err error
+	switch cause := context.Cause(ctx); cause {
+	case nil:
+		err = errors.E(ctx, errors.CatInternal, errors.TypeBug, fmt.Errorf("worker pool refused the continuous checks with a live Context"))
+	default:
+		err = errors.E(ctx, errors.CatInternal, errors.TypeTimeout, fmt.Errorf("continuous checks did not start: %w", cause))
+	}
+	chans.TryPut(results, err)
+	close(results)
 }
 
 // ExecuteBlock executes the current block.
@@ -258,6 +340,16 @@ func (s *States) ExecuteBlock(req statemachine.Request[Data]) statemachine.Reque
 	// No more blocks, the Plan is done.
 	if len(req.Data.blocks) == 0 {
 		req.Next = s.PlanPostChecks
+		return req
+	}
+
+	// ExecuteSequences polls the Plan's ContChecks only while a block's sequences run. A failure that arrived after
+	// them, during the previous block's PostChecks, DeferredChecks or ExitDelay, is read here, so it fails the Plan
+	// before this block runs its EntranceDelay, BypassChecks and PreChecks. The block is left untouched. Only a result
+	// that has already arrived is read: no ContChecks pass is started here.
+	if err := contFailure(req.Data.contCheckResult); err != nil {
+		req.Data.err = err
+		req.Next = s.PlanDeferredActions
 		return req
 	}
 
@@ -279,12 +371,10 @@ func (s *States) ExecuteBlock(req statemachine.Request[Data]) statemachine.Reque
 		return req
 	}
 
-	if req.Data.recovered && h.block.GetState().Status == workflow.Running {
-		s.handleRecoveredSeqs(req, h.block)
-		if h.block.State.Get().Status != workflow.Running {
-			req.Next = s.BlockDeferredChecks
-		}
-	} else {
+	// A recovered block that was Running keeps its start and has had its entrance delay. It goes through its bypass,
+	// pre and continuous checks again like a new block (checks that completed are skipped), so its recovered Running
+	// sequences resume in ExecuteSequences guarded by the continuous checks rather than running unguarded first.
+	if !req.Data.recovered || h.block.GetState().Status != workflow.Running {
 		if err := after(req.Ctx, h.block.EntranceDelay); err != nil {
 			state := h.block.State.Get()
 			state.Status = workflow.Stopped
@@ -301,47 +391,6 @@ func (s *States) ExecuteBlock(req statemachine.Request[Data]) statemachine.Reque
 
 	req.Next = s.BlockBypassChecks
 	return req
-}
-
-func (s *States) handleRecoveredSeqs(req statemachine.Request[Data], b *workflow.Block) {
-	// Detach from cancellation so recovered sequences run to completion, but keep the request's
-	// context values (pool, tracing, plan ID). Mirrors ExecuteSequences.
-	ctx := context.WithoutCancel(req.Ctx)
-
-	seqs := []*workflow.Sequence{}
-	g := context.Pool(ctx).Group()
-	var completed, failed, stopped atomic.Int64
-
-	for _, seq := range b.Sequences {
-		if seq.GetState().Status == workflow.Running {
-			seqs = append(seqs, seq)
-			g.Go(
-				ctx,
-				func(ctx context.Context) error {
-					err := s.execSeq(ctx, seq)
-					switch seq.GetState().Status {
-					case workflow.Completed:
-						completed.Add(1)
-					case workflow.Failed:
-						failed.Add(1)
-					case workflow.Stopped:
-						stopped.Add(1)
-					default:
-						panic("unexpected seq state after execSeq: " + seq.GetState().Status.String())
-					}
-					return err
-				},
-			)
-		}
-	}
-	_ = g.Wait(ctx)
-
-	if s.exceededFailures(b, &failed) {
-		state := b.State.Get()
-		state.Status = workflow.Failed
-		b.State.Set(state)
-		req.Data.err = fmt.Errorf("block(%s) has exceeded the tolerated failures", b.Name)
-	}
 }
 
 // BlockBypassChecks runs all the gates on the Block. If any of the gates fail,
@@ -388,9 +437,10 @@ func (s *States) BlockPreChecks(req statemachine.Request[Data]) statemachine.Req
 
 	err := s.runPreChecks(req.Ctx, h.block.PreChecks, h.block.ContChecks)
 	if err != nil {
-		state := h.block.State.Get()
-		state.Status = workflow.Failed
-		h.block.State.Set(state)
+		if err := s.failSequences(req.Ctx, h.block); err != nil {
+			log.Fatalf("failed to settle Block sequences: %v", err)
+		}
+		s.failBlock(h.block)
 		req.Data.err = err
 		req.Next = s.BlockDeferredChecks
 		return req
@@ -424,12 +474,7 @@ func (s *States) BlockStartContChecks(req statemachine.Request[Data]) statemachi
 	// But contextCanel is not, so it needs to be re-assigned here.
 	req.Data.blocks[0] = h
 
-	context.Pool(req.Ctx).Submit(
-		ctx,
-		func() {
-			s.runContChecks(ctx, h.block.ContChecks, h.contCheckResult)
-		},
-	)
+	s.startContChecks(ctx, h.block.ContChecks, h.contCheckResult)
 
 	req.Next = s.ExecuteSequences
 	return req
@@ -438,6 +483,8 @@ func (s *States) BlockStartContChecks(req statemachine.Request[Data]) statemachi
 // ExecuteSequences executes the sequences of the current block.
 func (s *States) ExecuteSequences(req statemachine.Request[Data]) statemachine.Request[Data] {
 	h := req.Data.blocks[0]
+	// data is the copy of req.Data the launched sequences poll the continuous checks with.
+	data := req.Data
 
 	failures := atomic.Int64{}
 
@@ -447,14 +494,27 @@ func (s *States) ExecuteSequences(req statemachine.Request[Data]) statemachine.R
 		}
 	}
 
-	// So the limiter is pretty standard, but you might be asking why we have one if the pool is already limiting.
-	// Its because g.Go() that uses the pool is going to fire off whatever you give it, even if it blocks on waiting for the pool
-	// to have room. So if we call g.Go(), and it blocks and in one that is currently running we go over the failures, we will
-	// still end up running the one we just queued up. So we use the limiter to block the g.Go() from even being called.
-	limiter := make(chan struct{}, h.block.Concurrency)
 	pool := context.Pool(req.Ctx).Limited(req.Ctx, "ExecuteSequences", h.block.Concurrency)
 	g := pool.Group()
 
+	// contErr is the first continuous checks failure seen. Polling takes a failure off its result channel, so it is
+	// kept here for every later launch, and the poll after they finish, to see.
+	var contErr sync.MutexValue[error]
+	contFailed := func() error {
+		var err error
+		contErr.WithLock(func(p *error) {
+			if *p == nil {
+				_, *p = data.contChecksPassing()
+			}
+			err = *p
+		})
+		return err
+	}
+
+	// stopErr is why no more sequences are launched. The sequences already launched still run to completion before
+	// this state returns: the states after it write the block and Plan as final, and a sequence still running would
+	// write after them.
+	var stopErr error
 	for i := 0; i < len(h.block.Sequences); i++ {
 		seq := h.block.Sequences[i]
 		seqStatus := seq.State.Get().Status
@@ -462,33 +522,28 @@ func (s *States) ExecuteSequences(req statemachine.Request[Data]) statemachine.R
 			continue
 		}
 
-		if _, err := req.Data.contChecksPassing(); err != nil {
-			state := h.block.State.Get()
-			state.Status = workflow.Failed
-			h.block.State.Set(state)
-			req.Data.err = err
-			req.Next = s.BlockDeferredChecks
-			return req
+		if err := contFailed(); err != nil {
+			stopErr = err
+			break
 		}
 
-		if s.exceededFailures(h.block, &failures) {
-			state := h.block.State.Get()
-			state.Status = workflow.Failed
-			h.block.State.Set(state)
-			req.Data.err = fmt.Errorf("block(%s) has exceeded the tolerated failures", h.block.Name)
-			req.Next = s.BlockDeferredChecks
-			return req
+		if s.exceededFailures(h.block, failures.Load()) {
+			stopErr = errors.ErrPlugin(req.Ctx, fmt.Errorf("block(%s) has exceeded the tolerated failures", h.block.Name))
+			break
 		}
 
-		limiter <- struct{}{}
+		// g.Go blocks until the Limited pool has a free slot, and the continuous checks can fail or a running sequence
+		// can fail while it waits. A sequence counts its failure before it gives its slot back, so checking both again
+		// here, once this sequence holds a slot, keeps any sequence from starting after the continuous checks failed or
+		// the tolerated failures are exceeded.
 		g.Go(
 			context.WithoutCancel(req.Ctx),
 			func(ctx context.Context) error {
-				defer func() { <-limiter }()
-
-				// Defense in depth to make sure we don't run more than we should.
-				if s.exceededFailures(h.block, &failures) {
-					return fmt.Errorf("exceeded tolerated failures")
+				if err := contFailed(); err != nil {
+					return errors.ErrPlugin(ctx, fmt.Errorf("block(%s) continuous checks failed, sequence(%s) not started: %w", h.block.Name, seq.Name, err))
+				}
+				if s.exceededFailures(h.block, failures.Load()) {
+					return errors.ErrPlugin(ctx, fmt.Errorf("block(%s) has exceeded the tolerated failures, sequence(%s) not started", h.block.Name, seq.Name))
 				}
 
 				err := s.execSeq(ctx, seq)
@@ -500,14 +555,29 @@ func (s *States) ExecuteSequences(req statemachine.Request[Data]) statemachine.R
 		)
 	}
 
-	g.Wait(context.WithoutCancel(req.Ctx)) // We don't care about the error here, we just want to wait for all sequences to finish.'
+	// We don't care about the error here, we just want to wait for all sequences to finish.
+	_ = g.Wait(context.WithoutCancel(req.Ctx))
 
+	// A launched sequence may have found the continuous checks failed and taken that failure off its channel, and a
+	// failure may have arrived after every launch polled, while the last sequences ran. Poll once more so that failure
+	// fails this block rather than leaking into the next one, which would otherwise run its BypassChecks and PreChecks
+	// first. This only reads a result that has already arrived: no ContChecks pass is started here. It goes through
+	// contFailed so a failure a launch already took is not lost. This agrees with BlockEnd's drain of the block's
+	// ContChecks: a block failure read here fails the block now, and BlockEnd still drains whatever is left on the
+	// block's channel, so either way a block ContChecks failure fails this block and never reaches the next one.
+	if stopErr == nil {
+		stopErr = contFailed()
+	}
 	// Need to recheck in case the last sequence failed and sent us over the edge.
-	if h.block.ToleratedFailures >= 0 && failures.Load() > int64(h.block.ToleratedFailures) {
-		state := h.block.State.Get()
-		state.Status = workflow.Failed
-		h.block.State.Set(state)
-		req.Data.err = fmt.Errorf("block(%s) has exceeded the tolerated failures", h.block.Name)
+	if stopErr == nil && s.exceededFailures(h.block, failures.Load()) {
+		stopErr = errors.ErrPlugin(req.Ctx, fmt.Errorf("block(%s) has exceeded the tolerated failures", h.block.Name))
+	}
+	if stopErr != nil {
+		if err := s.failSequences(req.Ctx, h.block); err != nil {
+			log.Fatalf("failed to settle Block sequences: %v", err)
+		}
+		s.failBlock(h.block)
+		req.Data.err = stopErr
 		req.Next = s.BlockDeferredChecks
 		return req
 	}
@@ -516,11 +586,102 @@ func (s *States) ExecuteSequences(req statemachine.Request[Data]) statemachine.R
 	return req
 }
 
-func (s *States) exceededFailures(block *workflow.Block, failures *atomic.Int64) bool {
-	if block.ToleratedFailures >= 0 && failures.Load() > int64(block.ToleratedFailures) {
-		return true
+// FinishCutBlock finishes the recovered block a crash cut short after the Plan's ContChecks failed. Each action the crash
+// cut mid-attempt runs again to completion, and then nothing new starts, as ExecuteSequences starts nothing once the
+// ContChecks fail: a sequence with actions left is settled Failed and one not started stays NotStarted. The block's
+// PostChecks always run to completion once its sequences are done, and its ContChecks are not run again. The block then
+// goes on through BlockDeferredChecks and BlockEnd as in a live run, and no later block starts.
+func (s *States) FinishCutBlock(req statemachine.Request[Data]) statemachine.Request[Data] {
+	h := req.Data.blocks[0]
+	defer func() {
+		if err := s.store.UpdateBlock(req.Ctx, h.block); err != nil {
+			log.Fatalf("failed to write Block: %v", err)
+		}
+	}()
+	req.Next = s.BlockDeferredChecks
+
+	// As in ExecuteSequences, the work runs to completion whatever happens to req.Ctx: the states after this one write
+	// the block as final, and work still running would write after them.
+	ctx := context.WithoutCancel(req.Ctx)
+	g := context.Pool(ctx).Group()
+	for _, c := range req.Data.cut {
+		g.Go(ctx, func(ctx context.Context) error {
+			err := s.runAction(ctx, c.action, s.store)
+			s.endCutSeq(ctx, c.seq)
+			return err
+		})
 	}
-	return false
+	// Each action's state is the source of truth, so the error is not needed.
+	_ = g.Wait(ctx)
+
+	if err := s.failSequences(ctx, h.block); err != nil {
+		log.Fatalf("failed to settle Block sequences: %v", err)
+	}
+
+	if !s.seqsDone(h.block) {
+		s.failBlock(h.block)
+		return req
+	}
+	if h.block.PostChecks != nil && !isCompleted(h.block.PostChecks) {
+		if err := s.runChecksOnce(ctx, h.block.PostChecks); err != nil {
+			s.failBlock(h.block)
+			req.Data.err = err
+			return req
+		}
+	}
+	if checksFailed(h.block.PreChecks) || checksFailed(h.block.ContChecks) || checksFailed(h.block.PostChecks) {
+		s.failBlock(h.block)
+	}
+	// Otherwise the block stays Running for BlockEnd to complete.
+	return req
+}
+
+// endCutSeq ends seq once its action that the crash cut mid-attempt has run again: Completed if every action in it
+// completed, otherwise Failed, as a sequence whose action failed or that the ContChecks failure stopped with actions
+// left.
+func (s *States) endCutSeq(ctx context.Context, seq *workflow.Sequence) {
+	status := workflow.Completed
+	for _, a := range seq.Actions {
+		if a.State.Get().Status != workflow.Completed {
+			status = workflow.Failed
+			break
+		}
+	}
+	state := seq.State.Get()
+	state.Status = status
+	state.End = s.now()
+	seq.State.Set(state)
+	if err := s.store.UpdateSequence(ctx, seq); err != nil {
+		log.Fatalf("failed to write Sequence: %v", err)
+	}
+}
+
+// seqsDone reports whether every sequence of b has finished with no more failures than b tolerates, which is when a
+// live run goes on to the block's PostChecks.
+func (s *States) seqsDone(b *workflow.Block) bool {
+	var failures int64
+	for _, seq := range b.Sequences {
+		switch seq.State.Get().Status {
+		case workflow.Completed:
+		case workflow.Failed:
+			failures++
+		default:
+			return false
+		}
+	}
+	return !s.exceededFailures(b, failures)
+}
+
+// failBlock sets b to Failed.
+func (s *States) failBlock(b *workflow.Block) {
+	state := b.State.Get()
+	state.Status = workflow.Failed
+	b.State.Set(state)
+}
+
+// exceededFailures reports whether failures is more than block tolerates.
+func (s *States) exceededFailures(block *workflow.Block, failures int64) bool {
+	return block.ToleratedFailures >= 0 && failures > int64(block.ToleratedFailures)
 }
 
 // BlockPostChecks runs all PostChecks on the current block.
@@ -538,9 +699,7 @@ func (s *States) BlockPostChecks(req statemachine.Request[Data]) statemachine.Re
 
 	err := s.runChecksOnce(req.Ctx, h.block.PostChecks)
 	if err != nil {
-		state := h.block.State.Get()
-		state.Status = workflow.Failed
-		h.block.State.Set(state)
+		s.failBlock(h.block)
 		req.Data.err = err
 		return req
 	}
@@ -560,17 +719,42 @@ func (s *States) BlockDeferredChecks(req statemachine.Request[Data]) statemachin
 	if checksCompleted(h.block.DeferredChecks) {
 		return req
 	}
+	// Only a recovered block reaches here with its DeferredChecks already Failed: a run writes them Failed before it
+	// writes the block. runChecksOnce resets the checks it runs, so running them again could turn the failure into a
+	// pass. Keep the failure and fail the block with it.
+	if checksFailed(h.block.DeferredChecks) {
+		s.failBlock(h.block)
+		req.Data.err = checksErr(req.Ctx, h.block.DeferredChecks)
+		return req
+	}
 
 	err := s.runChecksOnce(req.Ctx, h.block.DeferredChecks)
 	if err != nil {
-		state := h.block.State.Get()
-		state.Status = workflow.Failed
-		h.block.State.Set(state)
+		s.failBlock(h.block)
 		req.Data.err = err
 		return req
 	}
 
 	return req
+}
+
+// checksErr returns the error that failed checks: the last attempt's error of the first failed action that recorded
+// one, or a plugin error naming the checks if none did, as for an action recovery settled Failed when a crash cut it.
+func checksErr(ctx context.Context, checks *workflow.Checks) error {
+	for _, a := range checks.Actions {
+		if a.State.Get().Status != workflow.Failed {
+			continue
+		}
+		attempts := a.Attempts.Get()
+		if len(attempts) == 0 {
+			continue
+		}
+		// Err is a *plugins.Error: only a non-nil one may become an error, or the error would be non-nil but empty.
+		if err := attempts[len(attempts)-1].Err; err != nil {
+			return err
+		}
+	}
+	return errors.ErrPlugin(ctx, fmt.Errorf("checks(%s) failed before a restart, and no action recorded an error", checks.ID))
 }
 
 // BlockEnd ends the current block and moves to the next block.
@@ -597,8 +781,10 @@ func (s *States) BlockEnd(req statemachine.Request[Data]) statemachine.Request[D
 			h.contCancel()
 		}
 
-		// Stop our cont checks if they are still running, get the final result.
-		if h.block.ContChecks != nil {
+		// Stop our cont checks if they are still running, get the final result. contCancel is set only when
+		// BlockStartContChecks started them; a block whose PreChecks failed never did, and nothing would ever send on
+		// or close their result channel.
+		if h.block.ContChecks != nil && h.contCancel != nil {
 			var err error
 			for err = range h.contCheckResult {
 				if err != nil {
@@ -606,9 +792,7 @@ func (s *States) BlockEnd(req statemachine.Request[Data]) statemachine.Request[D
 				}
 			}
 			if err != nil {
-				state := h.block.State.Get()
-				state.Status = workflow.Failed
-				h.block.State.Set(state)
+				s.failBlock(h.block)
 				req.Data.err = err
 				req.Next = s.PlanDeferredActions
 				return req
@@ -620,9 +804,7 @@ func (s *States) BlockEnd(req statemachine.Request[Data]) statemachine.Request[D
 			state.Status = workflow.Completed
 			h.block.State.Set(state)
 		} else {
-			state := h.block.State.Get()
-			state.Status = workflow.Failed
-			h.block.State.Set(state)
+			s.failBlock(h.block)
 			req.Next = s.PlanDeferredActions
 			return req
 		}
@@ -661,12 +843,28 @@ func (s *States) PlanPostChecks(req statemachine.Request[Data]) statemachine.Req
 		req.Data.contCancel()
 	}
 
-	if req.Data.Plan.ContChecks != nil {
+	// contCancel is set only when PlanStartContChecks started the ContChecks; otherwise nothing would ever send on or
+	// close their result channel.
+	if req.Data.Plan.ContChecks != nil && req.Data.contCancel != nil {
 		for err := range req.Data.contCheckResult {
 			if err != nil {
 				req.Data.err = err
 				return req
 			}
+		}
+	}
+	// A recovered Plan whose ContChecks had failed goes on to its deferred work once FinishCutBlock and BlockEnd finish
+	// the block they cut short. Its PostChecks do not run, as the drain above returns on that failure in a live run.
+	if checksFailed(req.Data.Plan.ContChecks) {
+		return req
+	}
+	// A recovered Plan whose blocks were all done has no ContChecks loop to drain, but a pass the crash cut short was
+	// reset to NotStarted. Run it once, to completion, here where a live run drains it: its result counts as the drained
+	// pass's would. No loop is started, so no new pass follows it.
+	if req.Data.recovered && req.Data.contCancel == nil && contPassCut(req.Data.Plan.ContChecks) {
+		if err := s.runChecksOnce(context.WithoutCancel(req.Ctx), req.Data.Plan.ContChecks); err != nil {
+			req.Data.err = err
+			return req
 		}
 	}
 
@@ -801,9 +999,29 @@ func (s *States) End(req statemachine.Request[Data]) statemachine.Request[Data] 
 		s.writeEverything(req.Ctx, plan)
 	}()
 
-	// Extra cancel, defense in depth.
+	// PlanPostChecks stops and drains the Plan's ContChecks, but every failure path skips it. Stop them here too and
+	// wait for them: a pass runs detached from cancellation, so one in flight would still be setting the ContChecks'
+	// state while the final state is worked out and would write after writeEverything. contCancel is set only when
+	// PlanStartContChecks started them; otherwise nothing would ever send on or close the result channel. Draining a
+	// channel PlanPostChecks already drained ends at once.
 	if req.Data.contCancel != nil {
 		req.Data.contCancel()
+		if req.Data.Plan.ContChecks != nil {
+			for err := range req.Data.contCheckResult {
+				if err != nil && req.Data.err == nil {
+					req.Data.err = err
+				}
+			}
+		}
+	}
+
+	// Stop the heartbeat only now: the Plan is still Running while an in-flight ContChecks pass is drained above, which
+	// may take a while, and a heartbeat that stopped first would let a restart age the Plan out as abandoned. It must
+	// stop before the final state is worked out below and written by the deferred writeEverything, so no heartbeat
+	// write lands after them. stopHeartbeat is nil when Recovery sent the Plan straight here because it was already
+	// finished or had nothing left to run.
+	if req.Data.stopHeartbeat != nil {
+		req.Data.stopHeartbeat()
 	}
 
 	// Runs a new statemachine to calculate the final state of the Plan.
@@ -812,10 +1030,8 @@ func (s *States) End(req statemachine.Request[Data]) statemachine.Request[Data] 
 
 	var err error
 	req, err = statemachine.Run("finalStates", req)
-	if err != nil {
-		if errors.Is(err, ErrInternalFailure) {
-			context.Log(req.Ctx).Error(fmt.Sprintf("failed to calculate final state of Plan: %s", err))
-		}
+	if errors.IsBug(err) {
+		context.Log(req.Ctx).Error(fmt.Sprintf("failed to calculate final state of Plan: %s", err))
 	}
 	req.Next = nil
 
@@ -829,39 +1045,13 @@ func (s *States) End(req statemachine.Request[Data]) statemachine.Request[Data] 
 
 func (s *States) writeEverything(ctx context.Context, plan *workflow.Plan) {
 	ctx = context.WithoutCancel(ctx)
-	for item := range walk.Plan(plan) {
-		switch item.Value.Type() {
-		case workflow.OTPlan:
-			if err := s.store.UpdatePlan(ctx, item.Plan()); err != nil {
-				log.Fatalf("failed to write Plan: %v", err)
-			}
-		case workflow.OTBlock:
-			if err := s.store.UpdateBlock(ctx, item.Block()); err != nil {
-				log.Fatalf("failed to write Block: %v", err)
-			}
-		case workflow.OTAction:
-			if err := s.store.UpdateAction(ctx, item.Action()); err != nil {
-				log.Fatalf("failed to write Action: %v", err)
-			}
-		case workflow.OTCheck:
-			if err := s.store.UpdateChecks(ctx, item.Checks()); err != nil {
-				log.Fatalf("failed to write Checks: %v", err)
-			}
-		case workflow.OTSequence:
-			if err := s.store.UpdateSequence(ctx, item.Sequence()); err != nil {
-				log.Fatalf("failed to write Sequence: %v", err)
-			}
-		case workflow.OTDeferredActions:
-			if err := s.store.UpdateDeferredActions(ctx, item.DeferredActions()); err != nil {
-				log.Fatalf("failed to write DeferredActions: %v", err)
-			}
-		case workflow.OTBatch:
-			if err := s.store.UpdateDeferBatch(ctx, item.DeferBatch()); err != nil {
-				log.Fatalf("failed to write DeferBatch: %v", err)
-			}
-		default:
-			log.Fatalf("unknown type: %s", item.Value.Type())
-		}
+	// With no snapshot, every object counts as changed and is written.
+	if err := s.store.UpdateChanges(ctx, plan, nil); err != nil {
+		log.Fatalf("failed to write Plan objects: %v", err)
+	}
+
+	if err := s.store.UpdatePlan(ctx, plan); err != nil {
+		log.Fatalf("failed to write Plan: %v", err)
 	}
 }
 
@@ -872,15 +1062,7 @@ func (s *States) runBypasses(ctx context.Context, bypasses *workflow.Checks) (sk
 		return false
 	}
 
-	// TODO(jdoak): I am not sure why this is here, seems like I could just run s.runChecksOnce().
-	// Try to fix this in its own PR.
-	g := context.Pool(ctx).Group()
-
-	g.Go(ctx, func(cts context.Context) error {
-		return s.runChecksOnce(cts, bypasses)
-	})
-
-	if err := g.Wait(ctx); err != nil {
+	if err := s.runChecksOnce(ctx, bypasses); err != nil {
 		return false
 	}
 	return true
@@ -910,8 +1092,8 @@ func (s *States) runPreChecks(ctx context.Context, preChecks *workflow.Checks, c
 }
 
 // runContChecks runs the ContChecks in a loop with a delay between each run until the Context is cancelled.
-// It writes the final result to the given channel. If a check fails before the Context is cancelled, the
-// error is written to the channel and the function returns.
+// Each result goes to resultCh through sendContResult. If a check fails before the Context is cancelled, the
+// error is sent and the function returns. resultCh is closed on return.
 func (s *States) runContChecks(ctx context.Context, checks *workflow.Checks, resultCh chan error) {
 	defer close(resultCh)
 
@@ -925,7 +1107,7 @@ func (s *States) runContChecks(ctx context.Context, checks *workflow.Checks, res
 	// Run checks immediately on start to ensure they transition to Running state,
 	// even if the plan completes before the first ticker fires.
 	err := s.runChecksOnce(context.WithoutCancel(ctx), checks)
-	resultCh <- err
+	sendContResult(resultCh, err)
 	if err != nil {
 		return
 	}
@@ -935,17 +1117,30 @@ func (s *States) runContChecks(ctx context.Context, checks *workflow.Checks, res
 
 	for {
 		t.Reset(delay)
-		select {
-		case <-ctx.Done():
+		// Stop on a tick that arrives after ctx is done (ResultOKCanceled) too, so no pass starts once stopped.
+		if _, r := chans.Get(ctx, t.C); r != chans.ResultOK {
 			return
-		case <-t.C:
-			err := s.runChecksOnce(context.WithoutCancel(ctx), checks)
-			resultCh <- err
-			if err != nil {
-				return
-			}
+		}
+		err := s.runChecksOnce(context.WithoutCancel(ctx), checks)
+		sendContResult(resultCh, err)
+		if err != nil {
+			return
 		}
 	}
+}
+
+// sendContResult sends a ContChecks result on ch, which must have a buffer of one and runContChecks as its only
+// sender. While sequences run, the only reader polls ch once per sequence launch and once after they all finish, so a
+// pass is dropped when one is already waiting rather than parking the checks. A failure is the last result sent and
+// must reach those polls or the drains in BlockEnd and PlanPostChecks, so it replaces a waiting pass.
+func sendContResult(ch chan error, err error) {
+	if chans.TryPut(ch, err) || err == nil {
+		return
+	}
+	// The buffer holds a pass. Drop it unless a reader just took it; either way the buffer is now empty and nothing
+	// else sends, so this send does not block.
+	chans.TryGet(ch)
+	ch <- err
 }
 
 // runChecksOnce runs Checks once and writes the result to the store.
@@ -1036,7 +1231,7 @@ func (s *States) execSeq(ctx context.Context, seq *workflow.Sequence) error {
 			}
 		}
 		// Well, this shouldn't happen, but we have a failed sequence with no failed actions.
-		return fmt.Errorf("bug: sequence %s is already failed, but can't figure out why", seq.Name)
+		return errors.E(ctx, errors.CatInternal, errors.TypeBug, fmt.Errorf("sequence %s is already failed, but has no failed action", seq.Name))
 	}
 
 	state := seq.State.Get()
@@ -1192,7 +1387,7 @@ func (s *States) now() time.Time {
 func resetActions(actions []*workflow.Action) {
 	for _, action := range actions {
 		action.State.Set(workflow.State{Status: workflow.NotStarted})
-		action.Attempts.Set(nil)
+		action.Attempts.Clear()
 	}
 }
 
@@ -1208,10 +1403,9 @@ func after(ctx context.Context, d time.Duration) error {
 	t := time.NewTimer(d)
 	defer t.Stop()
 
-	select {
-	case <-ctx.Done():
+	// A timer that fired as ctx ended still means ctx ended, so only a clean receive lets the caller go on.
+	if _, r := chans.Get(ctx, t.C); r != chans.ResultOK {
 		return ctx.Err()
-	case <-t.C:
 	}
 	return nil
 }

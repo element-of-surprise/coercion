@@ -1,10 +1,11 @@
 package clone
 
 import (
-	"context"
 	"fmt"
 	"reflect"
 	"time"
+
+	"github.com/gostdlib/base/context"
 
 	"github.com/element-of-surprise/coercion/workflow/errors"
 )

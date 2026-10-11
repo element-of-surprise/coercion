@@ -7,27 +7,27 @@ import (
 
 	"github.com/gostdlib/base/context"
 
-	"github.com/element-of-surprise/coercion/workflow"
 	"github.com/element-of-surprise/coercion/workflow/errors"
 	"github.com/google/uuid"
-	"zombiezen.com/go/sqlite"
 	"zombiezen.com/go/sqlite/sqlitex"
 )
 
 type deleter struct {
-	mu   *sync.Mutex
+	mu   *sync.RWMutex
 	pool *sqlitex.Pool
-
-	reader reader
 }
 
-// Delete deletes a plan with "id" from the storage.
+// Delete deletes a plan with "id" from the storage. A delete that fails on a lock conflict is retried.
 func (d deleter) Delete(ctx context.Context, id uuid.UUID) error {
-	plan, err := d.reader.Read(ctx, id)
-	if err != nil {
-		return err
-	}
+	// A started Delete always finishes, like every other write, so the caller knows whether it took effect.
+	ctx = context.WithoutCancel(ctx)
+	return retryLocked(ctx, lockBackoff, func() error { return d.delete(ctx, id) })
+}
 
+// delete is one attempt at Delete. It deletes the plan's row and then every row below it by plan_id, in one
+// transaction, so it never reads or decodes the plan. Rows below a plan whose own row is already gone are deleted too;
+// only a plan with no rows at all is not found. err is named so the transaction's commit error is returned.
+func (d deleter) delete(ctx context.Context, id uuid.UUID) (err error) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 
@@ -39,191 +39,18 @@ func (d deleter) Delete(ctx context.Context, id uuid.UUID) error {
 
 	defer sqlitex.Transaction(conn)(&err)
 
-	if err = d.deletePlan(ctx, conn, plan); err != nil {
-		return errors.E(ctx, errors.CatInternal, errors.TypeStorageDelete, fmt.Errorf("couldn't delete plan: %w", err))
+	if err := sqlitex.Execute(conn, deletePlanByID, &sqlitex.ExecOptions{Named: map[string]any{"$id": id.String()}}); err != nil {
+		return errors.E(ctx, errors.CatInternal, errors.TypeStorageDelete, fmt.Errorf("couldn't delete plan(%s): %w", id, err))
 	}
-	return nil
-}
-
-func (d deleter) deletePlan(ctx context.Context, conn *sqlite.Conn, plan *workflow.Plan) error {
-	if err := d.deleteChecks(ctx, conn, plan.BypassChecks); err != nil {
-		return fmt.Errorf("couldn't delete plan bypasschecks: %w", err)
-	}
-	if err := d.deleteChecks(ctx, conn, plan.PreChecks); err != nil {
-		return fmt.Errorf("couldn't delete plan prechecks: %w", err)
-	}
-	if err := d.deleteChecks(ctx, conn, plan.PostChecks); err != nil {
-		return fmt.Errorf("couldn't delete plan postchecks: %w", err)
-	}
-	if err := d.deleteChecks(ctx, conn, plan.ContChecks); err != nil {
-		return fmt.Errorf("couldn't delete plan contchecks: %w", err)
-	}
-	if err := d.deleteChecks(ctx, conn, plan.DeferredChecks); err != nil {
-		return fmt.Errorf("couldn't delete plan deferredchecks: %w", err)
-	}
-	if err := d.deleteDeferredActions(ctx, conn, plan.DeferredActions); err != nil {
-		return fmt.Errorf("couldn't delete plan deferredactions: %w", err)
-	}
-	if err := d.deleteBlocks(ctx, conn, plan.Blocks); err != nil {
-		return fmt.Errorf("couldn't delete blocks: %w", err)
-	}
-
-	stmt, err := conn.Prepare(deletePlanByID)
-	if err != nil {
-		return fmt.Errorf("couldn't prepare delete statement: %w", err)
-	}
-
-	stmt.SetText("$id", plan.ID.String())
-	_, err = stmt.Step()
-	if err != nil {
-		return fmt.Errorf("problem deleting plan: %w", err)
-	}
-	return nil
-}
-
-func (d deleter) deleteBlocks(ctx context.Context, conn *sqlite.Conn, blocks []*workflow.Block) error {
-	if len(blocks) == 0 {
-		return nil
-	}
-
-	for _, block := range blocks {
-		if err := d.deleteChecks(ctx, conn, block.BypassChecks); err != nil {
-			return fmt.Errorf("couldn't delete block bypasschecks: %w", err)
+	deleted := conn.Changes()
+	for _, q := range deleteByPlanID {
+		if err := sqlitex.Execute(conn, q, &sqlitex.ExecOptions{Named: map[string]any{"$plan_id": id.String()}}); err != nil {
+			return errors.E(ctx, errors.CatInternal, errors.TypeStorageDelete, fmt.Errorf("couldn't delete plan(%s): %w", id, err))
 		}
-		if err := d.deleteChecks(ctx, conn, block.PreChecks); err != nil {
-			return fmt.Errorf("couldn't delete block prechecks: %w", err)
-		}
-		if err := d.deleteChecks(ctx, conn, block.PostChecks); err != nil {
-			return fmt.Errorf("couldn't delete block postchecks: %w", err)
-		}
-		if err := d.deleteChecks(ctx, conn, block.ContChecks); err != nil {
-			return fmt.Errorf("couldn't delete block contchecks: %w", err)
-		}
-		if err := d.deleteChecks(ctx, conn, block.DeferredChecks); err != nil {
-			return fmt.Errorf("couldn't delete block deferredchecks: %w", err)
-		}
-		if err := d.deletesSeqs(ctx, conn, block.Sequences); err != nil {
-			return fmt.Errorf("couldn't delete block sequences: %w", err)
-		}
+		deleted += conn.Changes()
 	}
-
-	for _, block := range blocks {
-		stmt, err := conn.Prepare(delteBlocksByID)
-		if err != nil {
-			return fmt.Errorf("couldn't prepare delete statement: %w", err)
-		}
-		stmt.SetText("$id", block.ID.String())
-		_, err = stmt.Step()
-		if err != nil {
-			return fmt.Errorf("problem deleting block: %w", err)
-		}
-	}
-	return nil
-}
-
-func (d deleter) deleteChecks(ctx context.Context, conn *sqlite.Conn, checks *workflow.Checks) error {
-	if checks == nil {
-		return nil
-	}
-
-	if err := d.deleteActions(ctx, conn, checks.Actions); err != nil {
-		return fmt.Errorf("couldn't delete checks actions: %w", err)
-	}
-
-	stmt, err := conn.Prepare(deleteChecksByID)
-	if err != nil {
-		return fmt.Errorf("couldn't prepare checks delete statement: %w", err)
-	}
-	stmt.SetText("$id", checks.ID.String())
-	_, err = stmt.Step()
-	if err != nil {
-		return fmt.Errorf("problem deleting check: %w", err)
-	}
-	return nil
-}
-
-func (d deleter) deletesSeqs(ctx context.Context, conn *sqlite.Conn, seqs []*workflow.Sequence) error {
-	if len(seqs) == 0 {
-		return nil
-	}
-
-	for _, seq := range seqs {
-		if err := d.deleteActions(ctx, conn, seq.Actions); err != nil {
-			return fmt.Errorf("couldn't delete sequence actions: %w", err)
-		}
-	}
-
-	for _, seq := range seqs {
-		stmt, err := conn.Prepare(deleteSequencesByID)
-		if err != nil {
-			return fmt.Errorf("couldn't prepare delete statement: %w", err)
-		}
-		stmt.SetText("$id", seq.ID.String())
-		_, err = stmt.Step()
-		if err != nil {
-			return fmt.Errorf("problem deleting sequence: %w", err)
-		}
-	}
-	return nil
-}
-
-func (d deleter) deleteDeferredActions(ctx context.Context, conn *sqlite.Conn, da *workflow.DeferredActions) error {
-	if da == nil {
-		return nil
-	}
-
-	for _, b := range da.DeferredBatches {
-		if err := d.deleteDeferBatch(ctx, conn, b); err != nil {
-			return fmt.Errorf("couldn't delete defer batch: %w", err)
-		}
-	}
-
-	stmt, err := conn.Prepare(deleteDeferredActionsByID)
-	if err != nil {
-		return fmt.Errorf("couldn't prepare DeferredActions delete statement: %w", err)
-	}
-	stmt.SetText("$id", da.ID.String())
-	if _, err := stmt.Step(); err != nil {
-		return fmt.Errorf("problem deleting DeferredActions: %w", err)
-	}
-	return nil
-}
-
-func (d deleter) deleteDeferBatch(ctx context.Context, conn *sqlite.Conn, b *workflow.DeferBatch) error {
-	if b == nil {
-		return nil
-	}
-
-	if err := d.deleteActions(ctx, conn, b.Actions); err != nil {
-		return fmt.Errorf("couldn't delete defer batch actions: %w", err)
-	}
-
-	stmt, err := conn.Prepare(deleteDeferBatchesByID)
-	if err != nil {
-		return fmt.Errorf("couldn't prepare DeferBatch delete statement: %w", err)
-	}
-	stmt.SetText("$id", b.ID.String())
-	if _, err := stmt.Step(); err != nil {
-		return fmt.Errorf("problem deleting DeferBatch: %w", err)
-	}
-	return nil
-}
-
-func (d deleter) deleteActions(ctx context.Context, conn *sqlite.Conn, actions []*workflow.Action) error {
-	if len(actions) == 0 {
-		return nil
-	}
-
-	for _, action := range actions {
-		stmt, err := conn.Prepare(deleteActionsByID)
-		if err != nil {
-			return fmt.Errorf("couldn't prepare delete statement: %w", err)
-		}
-		stmt.SetText("$id", action.ID.String())
-		_, err = stmt.Step()
-		if err != nil {
-			return fmt.Errorf("problem deleting action: %w", err)
-		}
+	if deleted == 0 {
+		return errors.ErrNotFound(ctx, fmt.Errorf("plan(%s)", id))
 	}
 	return nil
 }

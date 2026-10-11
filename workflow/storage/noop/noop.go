@@ -9,6 +9,7 @@ import (
 	"github.com/element-of-surprise/coercion/internal/private"
 	"github.com/element-of-surprise/coercion/workflow"
 	"github.com/element-of-surprise/coercion/workflow/storage"
+	"github.com/element-of-surprise/coercion/workflow/utils/changes"
 	"github.com/google/uuid"
 )
 
@@ -87,5 +88,10 @@ func (v *Vault) UpdateDeferredActions(context.Context, *workflow.DeferredActions
 
 // UpdateDeferBatch implements the storage.Vault interface. It does nothing.
 func (v *Vault) UpdateDeferBatch(context.Context, *workflow.DeferBatch) error {
+	return nil
+}
+
+// UpdateChanges implements the storage.Vault interface. It does nothing.
+func (v *Vault) UpdateChanges(context.Context, *workflow.Plan, changes.Snapshot) error {
 	return nil
 }

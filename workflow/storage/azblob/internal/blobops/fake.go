@@ -1,12 +1,16 @@
 package blobops
 
 import (
-	"sync"
+	"fmt"
+	"slices"
+	"strings"
 
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore/runtime"
 	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob"
 	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob/bloberror"
+	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob/container"
+	"github.com/gostdlib/base/concurrency/sync"
 	"github.com/gostdlib/base/context"
 )
 
@@ -19,14 +23,15 @@ type Fake struct {
 	containers map[string]map[string]*blobData
 
 	// Error injection functions - if set, these will be called and their error returned
-	CreateContainerErr       func(containerName string) error
-	EnsureContainerErr       func(containerName string) error
-	ContainerExistsErr       func(containerName string) error
-	UploadBlobErr            func(containerName, blobName string) error
-	DeleteBlobErr            func(containerName, blobName string) error
-	GetMetadataErr           func(containerName, blobName string) error
-	GetBlobErr               func(containerName, blobName string) error
-	NewListBlobsFlatPagerErr func(containerName string) error
+	CreateContainerErr func(containerName string) error
+	EnsureContainerErr func(containerName string) error
+	ContainerExistsErr func(containerName string) error
+	UploadBlobErr      func(containerName, blobName string) error
+	DeleteBlobErr      func(containerName, blobName string) error
+	GetMetadataErr     func(containerName, blobName string) error
+	GetBlobErr         func(containerName, blobName string) error
+	// NextListPageErr is called on each NextListPage call. Returning an error fails that call.
+	NextListPageErr func(containerName string) error
 }
 
 type blobData struct {
@@ -104,6 +109,21 @@ func (f *Fake) UploadBlob(ctx context.Context, containerName, blobName string, m
 		}
 	}
 
+	// Like the service, reject metadata it cannot store as is.
+	size := 0
+	for k, v := range md {
+		if v == nil {
+			continue
+		}
+		size += len(k) + len(*v)
+		if !ValidMetadataValue(*v) {
+			return fmt.Errorf("invalid metadata value for %q: %q", k, *v)
+		}
+	}
+	if size > MaxMetadataSize {
+		return fmt.Errorf("metadata is %d bytes, more than the %d allowed", size, MaxMetadataSize)
+	}
+
 	f.mu.Lock()
 	defer f.mu.Unlock()
 
@@ -112,21 +132,12 @@ func (f *Fake) UploadBlob(ctx context.Context, containerName, blobName string, m
 		return &azcore.ResponseError{ErrorCode: string(bloberror.ContainerNotFound)}
 	}
 
-	// Copy metadata to avoid external modifications
-	mdCopy := make(map[string]*string)
-	for k, v := range md {
-		if v != nil {
-			val := *v
-			mdCopy[k] = &val
-		}
-	}
-
 	// Copy data to avoid external modifications
 	dataCopy := make([]byte, len(data))
 	copy(dataCopy, data)
 
 	container[blobName] = &blobData{
-		metadata: mdCopy,
+		metadata: copyMetadata(md),
 		data:     dataCopy,
 	}
 
@@ -164,6 +175,10 @@ func (f *Fake) GetMetadata(ctx context.Context, containerName, blobName string) 
 			return nil, err
 		}
 	}
+	// Like Real, a call whose ctx has ended fails.
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 
 	f.mu.RLock()
 	defer f.mu.RUnlock()
@@ -179,15 +194,7 @@ func (f *Fake) GetMetadata(ctx context.Context, containerName, blobName string) 
 	}
 
 	// Return a copy to avoid external modifications
-	mdCopy := make(map[string]*string)
-	for k, v := range blob.metadata {
-		if v != nil {
-			val := *v
-			mdCopy[k] = &val
-		}
-	}
-
-	return mdCopy, nil
+	return copyMetadata(blob.metadata), nil
 }
 
 // GetBlob downloads the blob data.
@@ -196,6 +203,10 @@ func (f *Fake) GetBlob(ctx context.Context, containerName, blobName string) ([]b
 		if err := f.GetBlobErr(containerName, blobName); err != nil {
 			return nil, err
 		}
+	}
+	// Like Real, a call whose ctx has ended fails.
+	if err := ctx.Err(); err != nil {
+		return nil, err
 	}
 
 	f.mu.RLock()
@@ -218,12 +229,79 @@ func (f *Fake) GetBlob(ctx context.Context, containerName, blobName string) ([]b
 	return dataCopy, nil
 }
 
-// NewListBlobsFlatPager creates a pager for listing blobs in a container.
-// Note: This is a simplified implementation for testing purposes.
+// NewListBlobsFlatPager creates a pager for listing blobs in a container. The pager returns every blob matching
+// options.Prefix, sorted by name, in a single page. Metadata is included when options.Include.Metadata is set.
 func (f *Fake) NewListBlobsFlatPager(containerName string, options *azblob.ListBlobsFlatOptions) *runtime.Pager[azblob.ListBlobsFlatResponse] {
-	// For testing recovery.go, we don't actually need to implement this
-	// as recovery.go uses reader.listPlansInContainer which we'll mock differently
-	return nil
+	return runtime.NewPager(runtime.PagingHandler[azblob.ListBlobsFlatResponse]{
+		More: func(azblob.ListBlobsFlatResponse) bool { return false },
+		Fetcher: func(ctx context.Context, _ *azblob.ListBlobsFlatResponse) (azblob.ListBlobsFlatResponse, error) {
+			return f.listPage(containerName, options)
+		},
+	})
+}
+
+// NextListPage fetches the next page from pager.
+func (f *Fake) NextListPage(ctx context.Context, pager *runtime.Pager[azblob.ListBlobsFlatResponse]) (azblob.ListBlobsFlatResponse, error) {
+	return pager.NextPage(ctx)
+}
+
+// listPage builds the single page NewListBlobsFlatPager returns.
+func (f *Fake) listPage(containerName string, options *azblob.ListBlobsFlatOptions) (azblob.ListBlobsFlatResponse, error) {
+	if f.NextListPageErr != nil {
+		if err := f.NextListPageErr(containerName); err != nil {
+			return azblob.ListBlobsFlatResponse{}, err
+		}
+	}
+
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+
+	blobs, exists := f.containers[containerName]
+	if !exists {
+		return azblob.ListBlobsFlatResponse{}, &azcore.ResponseError{ErrorCode: string(bloberror.ContainerNotFound)}
+	}
+
+	prefix := ""
+	withMD := false
+	if options != nil {
+		if options.Prefix != nil {
+			prefix = *options.Prefix
+		}
+		withMD = options.Include.Metadata
+	}
+
+	names := make([]string, 0, len(blobs))
+	for name := range blobs {
+		if strings.HasPrefix(name, prefix) {
+			names = append(names, name)
+		}
+	}
+	slices.Sort(names)
+
+	items := make([]*container.BlobItem, 0, len(names))
+	for _, name := range names {
+		item := &container.BlobItem{Name: toPtr(name)}
+		if withMD {
+			item.Metadata = copyMetadata(blobs[name].metadata)
+		}
+		items = append(items, item)
+	}
+
+	resp := azblob.ListBlobsFlatResponse{}
+	resp.Segment = &container.BlobFlatListSegment{BlobItems: items}
+	return resp, nil
+}
+
+// copyMetadata returns a copy of md so callers cannot modify stored metadata.
+func copyMetadata(md map[string]*string) map[string]*string {
+	c := make(map[string]*string, len(md))
+	for k, v := range md {
+		if v != nil {
+			val := *v
+			c[k] = &val
+		}
+	}
+	return c
 }
 
 // GetContainer returns the blobs in a container for test assertions.

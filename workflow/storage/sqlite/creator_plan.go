@@ -34,9 +34,10 @@ const insertPlan = `
 		state_start,
 		state_end,
 		submit_time,
-		reason
+		reason,
+		runtime_update
 	) VALUES ($id, $group_id, $name, $descr, $meta, $bypasschecks, $prechecks, $postchecks, $contchecks, $deferredchecks,
-	$deferredactions, $blocks, $state_status, $state_start, $state_end, $submit_time, $reason)`
+	$deferredactions, $blocks, $state_status, $state_start, $state_end, $submit_time, $reason, $runtime_update)`
 
 var zeroTime = time.Unix(0, 0)
 
@@ -87,14 +88,18 @@ func commitPlan(ctx context.Context, conn *sqlite.Conn, p *workflow.Plan, captur
 		stmt.SetInt64("$submit_time", p.SubmitTime.UnixNano())
 	}
 	stmt.SetInt64("$reason", int64(p.Reason))
+	stmt.SetInt64("$runtime_update", runtimeUpdateNanos(p))
 
-	sStmt, err := stmt.Prepare(conn)
+	sStmt, err := stmt.Prepare(ctx, conn, errors.TypeStorageCreate)
 	if err != nil {
 		return errors.E(ctx, errors.CatInternal, errors.TypeBug, fmt.Errorf("planToSQL(insertPlan): %w", err))
 	}
 
 	_, err = sStmt.Step()
 	if err != nil {
+		if sqlite.ErrCode(err) == sqlite.ResultConstraintPrimaryKey {
+			return errors.E(ctx, errors.CatUser, errors.TypeParameter, fmt.Errorf("plan with ID(%s) already exists", p.ID))
+		}
 		return errors.E(ctx, errors.CatInternal, errors.TypeStoragePut, fmt.Errorf("planToSQL: %w", err))
 	}
 	capture.Capture(stmt)
@@ -159,7 +164,7 @@ func commitChecks(ctx context.Context, conn *sqlite.Conn, planID uuid.UUID, chec
 	stmt.SetInt64("$state_start", checks.State.Get().Start.UnixNano())
 	stmt.SetInt64("$state_end", checks.State.Get().End.UnixNano())
 
-	sStmt, err := stmt.Prepare(conn)
+	sStmt, err := stmt.Prepare(ctx, conn, errors.TypeStorageCreate)
 	if err != nil {
 		return fmt.Errorf("commitCheck: %w", err)
 	}
@@ -248,7 +253,7 @@ func commitBlock(ctx context.Context, conn *sqlite.Conn, planID uuid.UUID, pos i
 	stmt.SetInt64("$state_start", block.State.Get().Start.UnixNano())
 	stmt.SetInt64("$state_end", block.State.Get().End.UnixNano())
 
-	sStmt, err := stmt.Prepare(conn)
+	sStmt, err := stmt.Prepare(ctx, conn, errors.TypeStorageCreate)
 	if err != nil {
 		return fmt.Errorf("commitBlock: %w", err)
 	}
@@ -301,7 +306,7 @@ func commitSequence(ctx context.Context, conn *sqlite.Conn, planID uuid.UUID, po
 	stmt.SetInt64("$state_start", seq.State.Get().Start.UnixNano())
 	stmt.SetInt64("$state_end", seq.State.Get().End.UnixNano())
 
-	sStmt, err := stmt.Prepare(conn)
+	sStmt, err := stmt.Prepare(ctx, conn, errors.TypeStorageCreate)
 	if err != nil {
 		return fmt.Errorf("commitSequence: %w", err)
 	}
@@ -370,7 +375,7 @@ func commitAction(ctx context.Context, conn *sqlite.Conn, planID uuid.UUID, pos 
 	stmt.SetInt64("$state_start", action.State.Get().Start.UnixNano())
 	stmt.SetInt64("$state_end", action.State.Get().End.UnixNano())
 
-	sStmt, err := stmt.Prepare(conn)
+	sStmt, err := stmt.Prepare(ctx, conn, errors.TypeStorageCreate)
 	if err != nil {
 		return fmt.Errorf("commitAction: %w", err)
 	}

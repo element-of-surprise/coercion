@@ -47,9 +47,9 @@ func WithRemoveCompletedSequences() Option {
 	}
 }
 
-// WithKeepState keeps all the state for all objects. This includes IDs,
-// output, etc. This is only useful if going to out to display or writing
-// to disk. You cannot submit an object cloned this way.
+// WithKeepState keeps all the state for all objects. This includes IDs, the ID of the Plan each object belongs to,
+// output, etc. This is only useful if going to out to display or writing to disk: storage locks and names an object's
+// records by its Plan ID, so a clone can be written back. You cannot submit an object cloned this way.
 func WithKeepState() Option {
 	return func(c cloneOptions) cloneOptions {
 		c.keepState = true
@@ -93,6 +93,9 @@ func Plan(ctx context.Context, p *workflow.Plan, options ...Option) *workflow.Pl
 		np.ID = p.ID
 		np.Reason = p.Reason
 		cloneStateAtomic(&np.State, &p.State)
+		if p.RuntimeUpdate.IsSet() {
+			np.RuntimeUpdate.Set(p.RuntimeUpdate.Get())
+		}
 		np.SubmitTime = p.SubmitTime
 	}
 
@@ -172,12 +175,14 @@ func Checks(ctx context.Context, c *workflow.Checks, options ...Option) *workflo
 	opts.callNum++
 
 	clone := &workflow.Checks{
+		Key:     c.Key,
 		Delay:   c.Delay,
 		Actions: make([]*workflow.Action, len(c.Actions)),
 	}
 
 	if opts.keepState {
 		clone.ID = c.ID
+		clone.SetPlanID(c.GetPlanID())
 		cloneStateAtomic(&clone.State, &c.State)
 	}
 
@@ -205,6 +210,7 @@ func Block(ctx context.Context, b *workflow.Block, options ...Option) *workflow.
 	opts.callNum++
 
 	n := &workflow.Block{
+		Key:               b.Key,
 		Name:              b.Name,
 		Descr:             b.Descr,
 		EntranceDelay:     b.EntranceDelay,
@@ -215,6 +221,7 @@ func Block(ctx context.Context, b *workflow.Block, options ...Option) *workflow.
 
 	if opts.keepState {
 		n.ID = b.ID
+		n.SetPlanID(b.GetPlanID())
 		cloneStateAtomic(&n.State, &b.State)
 	}
 
@@ -298,6 +305,7 @@ func Sequence(ctx context.Context, s *workflow.Sequence, options ...Option) *wor
 	opts.callNum++
 
 	ns := &workflow.Sequence{
+		Key:     s.Key,
 		Name:    s.Name,
 		Descr:   s.Descr,
 		Actions: make([]*workflow.Action, len(s.Actions)),
@@ -305,6 +313,7 @@ func Sequence(ctx context.Context, s *workflow.Sequence, options ...Option) *wor
 
 	if opts.keepState {
 		ns.ID = s.ID
+		ns.SetPlanID(s.GetPlanID())
 		cloneStateAtomic(&ns.State, &s.State)
 	}
 
@@ -343,6 +352,7 @@ func DeferredActions(ctx context.Context, da *workflow.DeferredActions, options 
 
 	if opts.keepState {
 		n.ID = da.ID
+		n.SetPlanID(da.GetPlanID())
 		cloneStateAtomic(&n.State, &da.State)
 	}
 
@@ -388,6 +398,7 @@ func DeferBatch(ctx context.Context, b *workflow.DeferBatch, options ...Option) 
 
 	if opts.keepState {
 		n.ID = b.ID
+		n.SetPlanID(b.GetPlanID())
 		cloneStateAtomic(&n.State, &b.State)
 	}
 
@@ -424,6 +435,7 @@ func Action(ctx context.Context, a *workflow.Action, options ...Option) *workflo
 	}
 
 	na := &workflow.Action{
+		Key:     a.Key,
 		Name:    a.Name,
 		Descr:   a.Descr,
 		Plugin:  a.Plugin,
@@ -434,11 +446,11 @@ func Action(ctx context.Context, a *workflow.Action, options ...Option) *workflo
 
 	if opts.keepState {
 		na.ID = a.ID
+		na.SetPlanID(a.GetPlanID())
 		cloneStateAtomic(&na.State, &a.State)
-		// Only materialize Attempts when there is something to copy; Set with an empty slice would
-		// turn an unset AtomicSlice into a materialized one, so the clone would no longer match its source.
-		if attempts := cloneAttempts(a.Attempts.Get()); len(attempts) > 0 {
-			na.Attempts.Set(attempts)
+		// Attempts is set only if the source's is, so the clone matches its source whether or not it ran.
+		if a.Attempts.IsSet() {
+			na.Attempts.Set(cloneAttempts(a.Attempts.Get()))
 		}
 	}
 
@@ -450,16 +462,14 @@ func Action(ctx context.Context, a *workflow.Action, options ...Option) *workflo
 }
 
 // cloneStateAtomic clones the state from src AtomicValue[State] into dst AtomicValue[State].
+// dst is set only if src is, so an unset state stays unset and a zero one stays set. Every field is copied, including
+// the storage ETag, so a clone of a Plan read from storage can still be written back. State holds no references, so
+// the copy Get returns is independent of src.
 func cloneStateAtomic(dst, src *workflow.AtomicValue[workflow.State]) {
-	state := src.Get()
-	if state == (workflow.State{}) {
+	if !src.IsSet() {
 		return
 	}
-	dst.Set(workflow.State{
-		Status: state.Status,
-		Start:  state.Start,
-		End:    state.End,
-	})
+	dst.Set(src.Get())
 }
 
 // cloneAttempts clones a []workflow.Attempt.

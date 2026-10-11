@@ -9,7 +9,9 @@ import (
 	"github.com/element-of-surprise/coercion/plugins"
 	"github.com/element-of-surprise/coercion/workflow/context"
 
+	"github.com/gostdlib/base/concurrency/sync"
 	"github.com/gostdlib/base/retry/exponential"
+	"github.com/gostdlib/base/values/chans"
 )
 
 // Name is the name of the testing plugin.
@@ -22,7 +24,8 @@ type Req struct {
 	Sleep time.Duration `json:",format:iso8601"`
 	// FailValidation is a flag to indicate if the request should fail validation.
 	FailValidation bool
-	// Started is a channel that is closed when the request is started.
+	// Started is a channel that is closed when the request is first started. The same Req may execute more than once
+	// (retries, every ContChecks pass); later executions leave it closed.
 	Started chan struct{} `json:"-"`
 	// PauseUntil is a channel that Execute() will block on until closed.
 	PauseUntil chan struct{} `json:"-"`
@@ -57,6 +60,9 @@ type Plugin struct {
 
 	// at is the current index of the response.
 	at atomic.Int64
+	// started holds each Req.Started channel this Plugin has closed, so a Req that executes again does not close it
+	// twice.
+	started sync.Map
 }
 
 func (h *Plugin) ResetCounts() {
@@ -85,15 +91,24 @@ func (h *Plugin) Execute(ctx context.Context, req any) (any, *plugins.Error) {
 	}
 
 	if r.Started != nil {
-		close(r.Started)
+		if _, loaded := h.started.LoadOrStore(r.Started, struct{}{}); !loaded {
+			close(r.Started)
+		}
 	}
 
-	if n > h.MaxCount.Load() {
-		h.MaxCount.Store(n)
+	// A separate Load and Store could lose a larger count stored between them.
+	for {
+		cur := h.MaxCount.Load()
+		if n <= cur || h.MaxCount.CompareAndSwap(cur, n) {
+			break
+		}
 	}
 
 	if r.PauseUntil != nil {
-		<-r.PauseUntil
+		// PauseUntil is released by closing it, so anything but a close is ctx ending.
+		if _, res := chans.Get(ctx, r.PauseUntil); !res.Closed() {
+			return nil, &plugins.Error{Message: fmt.Sprintf("context done while paused: %v", context.Cause(ctx))}
+		}
 	}
 
 	at := h.at.Add(1) - 1

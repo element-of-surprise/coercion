@@ -9,9 +9,9 @@ import (
 
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore/runtime"
 	"github.com/Azure/azure-sdk-for-go/sdk/data/azcosmos"
-	"github.com/go-json-experiment/json"
 	"github.com/google/uuid"
 	"github.com/gostdlib/base/retry/exponential"
+	"github.com/gostdlib/base/values/chans"
 
 	"github.com/element-of-surprise/coercion/internal/private"
 	"github.com/element-of-surprise/coercion/plugins/registry"
@@ -46,16 +46,6 @@ type reader struct {
 	private.Storage
 }
 
-// sender is a helper that sends value v on channel ch or returns an error because ctx.Done() fires.
-func sender[T any](ctx context.Context, ch chan T, v T) error {
-	select {
-	case <-ctx.Done():
-		return errors.E(ctx, errors.CatInternal, errors.TypeTimeout, context.Cause(ctx))
-	case ch <- v:
-		return nil
-	}
-}
-
 // Exists returns true if the Plan ID exists in the storage.
 func (r reader) Exists(ctx context.Context, id uuid.UUID) (bool, error) {
 	r.mu.RLock()
@@ -73,27 +63,42 @@ func (r reader) Exists(ctx context.Context, id uuid.UUID) (bool, error) {
 	return true, nil
 }
 
-// Read returns a Plan from the storage.
+// Read returns a Plan from the storage. Retries are bounded by ctx: a read changes nothing, so cutting one short is
+// safe.
 func (r reader) Read(ctx context.Context, id uuid.UUID) (*workflow.Plan, error) {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-
 	var plan *workflow.Plan
-	var err error
 	fetchPlan := func(ctx context.Context, rec exponential.Record) error {
-		plan, err = r.fetchPlan(ctx, id)
-		if err != nil {
-			if !isRetriableError(err) {
-				return fmt.Errorf("%w: %w", err, exponential.ErrPermanent)
-			}
-			return err
+		var err error
+		plan, err = r.fetchPlanLocked(ctx, id)
+		switch {
+		case err == nil:
+			return nil
+		// Damaged storage will read the same way on every attempt.
+		case errors.IsStorageInconsistent(err), !isRetriableError(err):
+			return fmt.Errorf("%w: %w", err, errors.ErrPermanent)
 		}
-		return nil
+		return err
 	}
-	if err := backoff.Retry(context.WithoutCancel(ctx), fetchPlan); err != nil {
+	if err := backoff.Retry(ctx, fetchPlan); err != nil {
+		switch {
+		case isNotFound(err):
+			return nil, errors.ErrNotFound(ctx, fmt.Errorf("plan(%s) not found: %w", id, err))
+		case ctx.Err() != nil:
+			return nil, errors.E(ctx, errors.CatInternal, errors.TypeTimeout, fmt.Errorf("read of plan(%s) was cancelled: %w", id, err))
+		}
 		return nil, errors.E(ctx, errors.CatInternal, errors.TypeStorageGet, fmt.Errorf("failed to fetch plan: %w", err))
 	}
 	return plan, nil
+}
+
+// fetchPlanLocked is fetchPlan under the read lock, so a writer cannot change the plan's documents during one attempt.
+// Read takes the lock per attempt, not across its backoff waits, so a slow or failing read does not stall writers
+// (and, behind a waiting writer, every other reader) for the whole retry window.
+func (r reader) fetchPlanLocked(ctx context.Context, id uuid.UUID) (*workflow.Plan, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	return r.fetchPlan(ctx, id)
 }
 
 const searchKeyStr = "planSearch"
@@ -103,7 +108,7 @@ var searchKey = azcosmos.NewPartitionKeyString(searchKeyStr)
 // Search returns a list of Plan IDs that match the filter.
 func (r reader) Search(ctx context.Context, filters storage.Filters) (chan storage.Stream[storage.ListResult], error) {
 	if err := filters.Validate(); err != nil {
-		return nil, fmt.Errorf("invalid filter: %w", err)
+		return nil, errors.E(ctx, errors.CatUser, errors.TypeParameter, fmt.Errorf("invalid filter: %w: %w", err, errors.ErrPermanent))
 	}
 
 	q, parameters := r.buildSearchQuery(filters)
@@ -112,34 +117,7 @@ func (r reader) Search(ctx context.Context, filters storage.Filters) (chan stora
 	defer r.mu.RUnlock()
 
 	pager := r.client.NewQueryItemsPager(q, searchKey, &azcosmos.QueryOptions{QueryParameters: parameters})
-	results := make(chan storage.Stream[storage.ListResult], 1)
-
-	context.Pool(ctx).Submit(
-		ctx,
-		func() {
-			defer close(results)
-			for pager.More() {
-				res, err := pager.NextPage(ctx)
-				if err != nil {
-					err := errors.E(ctx, errors.CatInternal, errors.TypeStorageGet, fmt.Errorf("problem listing plans: %w", err))
-					sender[storage.Stream[storage.ListResult]](ctx, results, storage.Stream[storage.ListResult]{Err: err})
-					return
-				}
-				for _, item := range res.Items {
-					result, err := r.listResultsFunc(item)
-					if err != nil {
-						err := errors.E(ctx, errors.CatInternal, errors.TypeStorageGet, fmt.Errorf("problem listing items in plans: %w", err))
-						sender[storage.Stream[storage.ListResult]](ctx, results, storage.Stream[storage.ListResult]{Err: err})
-						return
-					}
-					if err := sender[storage.Stream[storage.ListResult]](ctx, results, storage.Stream[storage.ListResult]{Result: result}); err != nil {
-						return
-					}
-				}
-			}
-		},
-	)
-	return results, nil
+	return r.stream(ctx, pager, "search"), nil
 }
 
 func (r reader) buildSearchQuery(filters storage.Filters) (string, []azcosmos.QueryParameter) {
@@ -218,39 +196,78 @@ func (r reader) List(ctx context.Context, limit int) (chan storage.Stream[storag
 	defer r.mu.RUnlock()
 
 	pager := r.client.NewQueryItemsPager(q, searchKey, &azcosmos.QueryOptions{QueryParameters: parameters})
-	results := make(chan storage.Stream[storage.ListResult], 1)
+	return r.stream(ctx, pager, "list"), nil
+}
 
-	context.Pool(ctx).Submit(
+type listStream = chan storage.Stream[storage.ListResult]
+
+// stream returns a channel that receives every ListResult from pager and is then closed. If ctx ends before the
+// stream is complete, or a page or item cannot be read, the last item carries an error, so a caller can tell a
+// truncated stream from a finished one. This holds even if ctx is done before the stream starts.
+func (r reader) stream(ctx context.Context, pager *runtime.Pager[azcosmos.QueryItemsResponse], operation string) listStream {
+	results := make(listStream, 1)
+	// The producer parks until the caller reads or ctx ends, so it runs on the default pool rather than taking a
+	// slot from a Limited pool the caller's ctx may carry.
+	ok := context.Pool(ctx).Default().Submit(
 		ctx,
 		func() {
 			defer close(results)
 			for pager.More() {
 				res, err := pager.NextPage(ctx)
 				if err != nil {
-					sender[storage.Stream[storage.ListResult]](ctx, results, storage.Stream[storage.ListResult]{Err: fmt.Errorf("problem listing plans: %w", err)})
+					switch {
+					case ctx.Err() != nil:
+						// Cancelled while reading the page: classify it as the cancellation, not a storage failure.
+						err = errors.E(ctx, errors.CatInternal, errors.TypeTimeout, fmt.Errorf("%s was cancelled: %w", operation, err))
+					default:
+						err = errors.E(ctx, errors.CatInternal, errors.TypeStorageGet, fmt.Errorf("problem listing plans: %w", err))
+					}
+					sendErr(ctx, results, err)
 					return
 				}
 				for _, item := range res.Items {
 					result, err := r.listResultsFunc(item)
 					if err != nil {
-						sender[storage.Stream[storage.ListResult]](ctx, results, storage.Stream[storage.ListResult]{Err: fmt.Errorf("problem listing items in plans: %w", err)})
+						sendErr(ctx, results, errors.E(ctx, errors.CatInternal, errors.TypeStorageGet, fmt.Errorf("problem listing items in plans: %w", err)))
 						return
 					}
-					if err := sender[storage.Stream[storage.ListResult]](ctx, results, storage.Stream[storage.ListResult]{Result: result}); err != nil {
+					if !chans.Put(ctx, results, storage.Stream[storage.ListResult]{Result: result}) {
+						forceErr(results, errors.E(ctx, errors.CatInternal, errors.TypeTimeout, fmt.Errorf("%s was cancelled: %w", operation, context.Cause(ctx))))
 						return
 					}
 				}
 			}
 		},
 	)
-	return results, nil
+	if !ok {
+		// The producer never ran, so the buffer is empty and this send cannot block.
+		results <- storage.Stream[storage.ListResult]{Err: errors.E(ctx, errors.CatInternal, errors.TypeTimeout, fmt.Errorf("could not start %s: %w", operation, context.Cause(ctx)))}
+		close(results)
+	}
+	return results
+}
+
+// sendErr sends err as the last item of results. If ctx ends before the caller takes it, the error is forced in.
+func sendErr(ctx context.Context, results listStream, err error) {
+	if chans.Put(ctx, results, storage.Stream[storage.ListResult]{Err: err}) {
+		return
+	}
+	forceErr(results, err)
+}
+
+// forceErr puts err into results without waiting for the caller, dropping a buffered result to make room. The
+// producer is the only sender, so once the buffer has room the send cannot block. Dropping a result is fine because
+// the stream is already incomplete and the error tells the caller so.
+func forceErr(results listStream, err error) {
+	chans.TryGet(results)
+	results <- storage.Stream[storage.ListResult]{Err: err}
 }
 
 // listResultsFunc is a helper function to convert a CosmosDB document into a ListResult.
 func (r reader) listResultsFunc(item []byte) (storage.ListResult, error) {
 	var err error
 	var resp searchEntry
-	if err = json.Unmarshal(item, &resp); err != nil {
+	if err = unmarshalDoc(item, &resp); err != nil {
 		return storage.ListResult{}, err
 	}
 

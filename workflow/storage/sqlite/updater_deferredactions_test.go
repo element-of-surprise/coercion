@@ -7,7 +7,6 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/gostdlib/base/concurrency/sync"
-	"github.com/gostdlib/base/context"
 	"zombiezen.com/go/sqlite"
 	"zombiezen.com/go/sqlite/sqlitex"
 
@@ -21,17 +20,19 @@ import (
 // the DeferredActions container and one of its batches, writes the update, and
 // reads the plan back to confirm the state round-tripped.
 func TestUpdateDeferredActions(t *testing.T) {
+	t.Parallel()
+
 	pool, err := freshInMemoryPool(t)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer pool.Close()
 
-	conn, err := pool.Take(context.Background())
+	conn, err := pool.Take(t.Context())
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := commitPlan(context.Background(), conn, plan, nil); err != nil {
+	if err := commitPlan(t.Context(), conn, plan, nil); err != nil {
 		pool.Put(conn)
 		t.Fatalf("TestUpdateDeferredActions: commitPlan: %s", err)
 	}
@@ -41,9 +42,9 @@ func TestUpdateDeferredActions(t *testing.T) {
 	reg.Register(&plugins.CheckPlugin{})
 	reg.Register(&plugins.HelloPlugin{})
 
-	rdr := reader{pool: pool, reg: reg}
+	rdr := reader{mu: &sync.RWMutex{}, pool: pool, reg: reg}
 
-	stored, err := rdr.Read(context.Background(), plan.ID)
+	stored, err := rdr.Read(t.Context(), plan.ID)
 	if err != nil {
 		t.Fatalf("TestUpdateDeferredActions: read failed: %s", err)
 	}
@@ -54,9 +55,7 @@ func TestUpdateDeferredActions(t *testing.T) {
 		t.Fatalf("TestUpdateDeferredActions: stored DeferredActions.DeferredBatches is empty")
 	}
 
-	mu := &sync.Mutex{}
-	daU := deferredActionsUpdater{mu: mu, pool: pool}
-	bU := deferBatchUpdater{mu: mu, pool: pool}
+	u := objectUpdater{mu: &sync.RWMutex{}, pool: pool}
 
 	newDAState := workflow.State{
 		Status: workflow.Failed,
@@ -64,7 +63,7 @@ func TestUpdateDeferredActions(t *testing.T) {
 		End:    time.Unix(200, 0).UTC(),
 	}
 	stored.DeferredActions.State.Set(newDAState)
-	if err := daU.UpdateDeferredActions(context.Background(), stored.DeferredActions); err != nil {
+	if err := u.UpdateDeferredActions(t.Context(), stored.DeferredActions); err != nil {
 		t.Fatalf("TestUpdateDeferredActions: UpdateDeferredActions: %s", err)
 	}
 
@@ -74,11 +73,11 @@ func TestUpdateDeferredActions(t *testing.T) {
 		End:    time.Unix(400, 0).UTC(),
 	}
 	stored.DeferredActions.DeferredBatches[0].State.Set(newBatchState)
-	if err := bU.UpdateDeferBatch(context.Background(), stored.DeferredActions.DeferredBatches[0]); err != nil {
+	if err := u.UpdateDeferBatch(t.Context(), stored.DeferredActions.DeferredBatches[0]); err != nil {
 		t.Fatalf("TestUpdateDeferredActions: UpdateDeferBatch: %s", err)
 	}
 
-	reloaded, err := rdr.Read(context.Background(), plan.ID)
+	reloaded, err := rdr.Read(t.Context(), plan.ID)
 	if err != nil {
 		t.Fatalf("TestUpdateDeferredActions: reload read failed: %s", err)
 	}
@@ -98,9 +97,8 @@ func TestUpdateDeferredActions(t *testing.T) {
 	}
 }
 
-// freshInMemoryPool returns an isolated sqlite pool with schema applied, for
-// tests that don't want to share dbPool (which TestDeletePlan closes). It uses
-// a file under t.TempDir to sidestep in-memory cache-sharing quirks.
+// freshInMemoryPool returns an isolated sqlite pool with schema applied. It uses a file under t.TempDir to sidestep
+// in-memory cache-sharing quirks.
 func freshInMemoryPool(t *testing.T) (*sqlitex.Pool, error) {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), uuid.New().String()+".db")
@@ -114,12 +112,12 @@ func freshInMemoryPool(t *testing.T) (*sqlitex.Pool, error) {
 	if err != nil {
 		return nil, err
 	}
-	conn, err := pool.Take(context.Background())
+	conn, err := pool.Take(t.Context())
 	if err != nil {
 		pool.Close()
 		return nil, err
 	}
-	if err := createTables(context.Background(), conn); err != nil {
+	if err := createTables(t.Context(), conn); err != nil {
 		pool.Put(conn)
 		pool.Close()
 		return nil, err

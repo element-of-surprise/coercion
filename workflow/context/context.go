@@ -4,10 +4,13 @@
 package context
 
 import (
+	"log/slog"
+
 	"github.com/element-of-surprise/coercion/workflow/errors"
 	"github.com/gostdlib/base/concurrency/background"
 	"github.com/gostdlib/base/concurrency/worker"
 	"github.com/gostdlib/base/context"
+	"github.com/gostdlib/base/telemetry/otel/trace/span"
 	"go.opentelemetry.io/otel/metric"
 
 	"github.com/google/uuid"
@@ -29,10 +32,16 @@ type actionIDKey struct{}
 // - worker.Default(), a *worker.Pool.
 // - background.Default(), a *background.Tasks.
 //
-// These can be accessed using the Audit()/Log()/Metrics functions.
+// These can be accessed using the Log(), Meter()/MeterProvider(), Pool() and Tasks() functions.
 func Background() Context {
 	// insert here anything you want attached to your Context object.
 	return context.Background()
+}
+
+// ResetBackground resets the cached background context, so the next call to Background() rebuilds it with the current
+// defaults. base's init.Service() calls it after all defaults have been configured.
+func ResetBackground() {
+	context.ResetBackground()
 }
 
 // Attach attaches the logger and metrics clients to the context.
@@ -50,7 +59,7 @@ func Attach(ctx Context) Context {
 type Logger = context.Logger
 
 // Log returns the logger attached to the context. If no logger is attached, it returns log.Default().
-func Log(ctx Context) context.Logger {
+func Log(ctx Context) Logger {
 	return context.Log(ctx)
 }
 
@@ -60,6 +69,12 @@ func Log(ctx Context) context.Logger {
 func Meter(ctx Context, opts ...metric.MeterOption) metric.Meter {
 	const stackFrame = 3
 	return context.MeterWithStackFrame(ctx, stackFrame, opts...)
+}
+
+// MeterWithStackFrame returns a metric.Meter scoped to the stack frame number sf. It is for packages built on this one
+// that need to name the meter after their caller's frame. Generally, use Meter().
+func MeterWithStackFrame(ctx Context, sf uint, opts ...metric.MeterOption) metric.Meter {
+	return context.MeterWithStackFrame(ctx, sf, opts...)
 }
 
 // MeterProvider returns a metric.MeterProvider attached to the context. If no meter provider is attached,
@@ -73,7 +88,12 @@ func Pool(ctx Context) *worker.Pool {
 	return context.Pool(ctx)
 }
 
-// Tasks returns a background.Tasks attached to the context. If not tasks are attached,
+// SetPool sets a custom pool on the returned Context. Pool() calls using this Context use that Pool.
+func SetPool(ctx Context, p *worker.Pool) Context {
+	return context.SetPool(ctx, p)
+}
+
+// Tasks returns a background.Tasks attached to the context. If no tasks are attached,
 // it returns background.Default().
 func Tasks(ctx Context) *background.Tasks {
 	return context.Tasks(ctx)
@@ -89,6 +109,29 @@ func SetShouldTrace(ctx context.Context, b bool) context.Context {
 // ShouldTrace returns true if the request has had SetShouldTrace called on it.
 func ShouldTrace(ctx context.Context) bool {
 	return context.ShouldTrace(ctx)
+}
+
+// Span returns the current span from the context. If no span is attached, it returns a noop span.
+func Span(ctx Context) span.Span {
+	return context.Span(ctx)
+}
+
+// NewSpan creates a new child span from the span stored in ctx and starts it. If that span is a noop, the child is a
+// noop too. If ctx is nil, it returns the background Context with a noop span. An invalid option is ignored and an
+// error is logged. The span kind is internal unless another kind is passed with WithSpanStartOption(WithSpanKind()).
+func NewSpan(ctx Context, options ...span.Option) (Context, span.Span) {
+	return context.NewSpan(ctx, options...)
+}
+
+// AddAttrs adds slog.Attr attributes to the context, for logging, tracing and errors to add to logs, traces and errors.
+// Duplicate keys are allowed; upper layers apply the last value for a key. If ctx is nil, context.Background() is used.
+func AddAttrs(ctx context.Context, attrs ...slog.Attr) context.Context {
+	return context.AddAttrs(ctx, attrs...)
+}
+
+// Attrs returns the slog.Attr attributes attached to the context. If no attributes are attached, it returns nil.
+func Attrs(ctx context.Context) []slog.Attr {
+	return context.Attrs(ctx)
 }
 
 // PlanID returns planID from a Context.
@@ -125,4 +168,10 @@ func SetActionID(ctx context.Context, id uuid.UUID) context.Context {
 // stack traces to be printed on errors in a specific call.
 func SetEOptions(ctx context.Context, options ...errors.EOption) context.Context {
 	return context.SetEOptions(ctx, options...)
+}
+
+// EOptions returns the error options attached to the context by SetEOptions. If no options are attached, it returns
+// nil. They override local options that set the same thing.
+func EOptions(ctx context.Context) []errors.EOption {
+	return context.EOptions(ctx)
 }

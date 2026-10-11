@@ -19,7 +19,7 @@ func (p reader) fieldToCheck(ctx context.Context, field string, conn *sqlite.Con
 	if strID == "" {
 		return nil, nil
 	}
-	id, err := uuid.Parse(strID)
+	id, err := fieldToID(ctx, field, stmt)
 	if err != nil {
 		return nil, fmt.Errorf("couldn't convert ID to UUID: %w", err)
 	}
@@ -56,7 +56,7 @@ func (p reader) fetchChecksByID(ctx context.Context, conn *sqlite.Conn, id uuid.
 		return nil, fmt.Errorf("couldn't fetch checks by ids: %w", err)
 	}
 	if check == nil {
-		return nil, fmt.Errorf("couldn't find checks by id(%s)", id)
+		return nil, errMissingRow(ctx, "Checks", id)
 	}
 	return check, nil
 }
@@ -66,12 +66,12 @@ func (p reader) checksRowToChecks(ctx context.Context, conn *sqlite.Conn, stmt *
 	var err error
 	c := &workflow.Checks{}
 
-	c.ID, err = uuid.Parse(stmt.GetText("id"))
+	c.ID, err = fieldToID(ctx, "id", stmt)
 	if err != nil {
 		return nil, fmt.Errorf("checksRowToChecks: couldn't convert ID to UUID: %w", err)
 	}
 
-	planID, err := uuid.Parse(stmt.GetText("plan_id"))
+	planID, err := fieldToID(ctx, "plan_id", stmt)
 	if err != nil {
 		return nil, fmt.Errorf("couldn't parse action id: %w", err)
 	}
@@ -79,7 +79,7 @@ func (p reader) checksRowToChecks(ctx context.Context, conn *sqlite.Conn, stmt *
 
 	k := stmt.GetText("key")
 	if k != "" {
-		c.Key, err = uuid.Parse(k)
+		c.Key, err = fieldToID(ctx, "key", stmt)
 		if err != nil {
 			return nil, fmt.Errorf("couldn't parse check key: %w", err)
 		}

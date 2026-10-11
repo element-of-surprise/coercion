@@ -1,894 +1,318 @@
 package azblob
 
 import (
-	"fmt"
+	"sync/atomic"
 	"testing"
-	"time"
 
-	"github.com/element-of-surprise/coercion/plugins/registry"
 	"github.com/element-of-surprise/coercion/workflow"
-	"github.com/element-of-surprise/coercion/workflow/context"
-	"github.com/element-of-surprise/coercion/workflow/storage"
+	"github.com/element-of-surprise/coercion/workflow/errors"
 	"github.com/element-of-surprise/coercion/workflow/storage/azblob/internal/blobops"
-	"github.com/element-of-surprise/coercion/workflow/storage/azblob/internal/planlocks"
-	testPlugins "github.com/element-of-surprise/coercion/workflow/storage/sqlite/testing/plugins"
-	"github.com/go-json-experiment/json"
-	"github.com/google/uuid"
-	"github.com/gostdlib/base/concurrency/sync"
 )
 
-// setupRecoveryTest creates a test environment with fake client and recovery struct
-func setupRecoveryTest(t *testing.T) (*blobops.Fake, recovery) {
+// opCounts counts the fake blob operations a test cares about.
+type opCounts struct {
+	lists    atomic.Int32
+	metadata atomic.Int32
+	gets     atomic.Int32
+}
+
+// count installs counting hooks on f. The hooks never fail an operation, except that listErr (if set) is returned
+// from every list call.
+func (c *opCounts) count(f *blobops.Fake, listErr error) {
+	f.NextListPageErr = func(string) error {
+		c.lists.Add(1)
+		return listErr
+	}
+	f.GetMetadataErr = func(string, string) error {
+		c.metadata.Add(1)
+		return nil
+	}
+	f.GetBlobErr = func(string, string) error {
+		c.gets.Add(1)
+		return nil
+	}
+}
+
+// finishWithTornObject writes plan's final status the way the incident did: the entry lands, the object upload fails.
+func finishWithTornObject(t *testing.T, v *Vault, f *blobops.Fake, plan *workflow.Plan, status workflow.Status) {
 	t.Helper()
 
-	ctx := context.Background()
-	fakeClient := blobops.NewFake()
-	prefix := "test"
-
-	// Create plugin registry
-	reg := registry.New()
-	reg.Register(&testPlugins.HelloPlugin{})
-
-	// Create reader
-	r := reader{
-		mu:            planlocks.New(ctx),
-		readFlight:    &sync.Flight[string, *workflow.Plan]{},
-		existsFlight:  &sync.Flight[string, bool]{},
-		prefix:        prefix,
-		client:        fakeClient,
-		reg:           reg,
-		retentionDays: 14,
+	f.UploadBlobErr = func(_, blobName string) error {
+		if blobName == planObjectBlobName(plan.ID) {
+			return errFakeUpload
+		}
+		return nil
 	}
-
-	// Create uploader
-	u := &uploader{
-		mu:          planlocks.New(ctx),
-		client:      fakeClient,
-		prefix:      prefix,
-		planObjPool: context.Pool(ctx).Limited(ctx, "", 5),
-		blockPool:   context.Pool(ctx).Limited(ctx, "", 10),
-		leafObjPool: context.Pool(ctx).Limited(ctx, "", 20),
+	setStatus(plan, status)
+	if err := v.UpdatePlan(t.Context(), plan); err == nil {
+		t.Fatalf("finishWithTornObject: UpdatePlan: got err == nil, want the object upload to fail")
 	}
-
-	// Create recovery
-	rec := recovery{
-		reader:   r,
-		uploader: u,
-	}
-
-	return fakeClient, rec
+	f.UploadBlobErr = nil
 }
 
-// createTestPlan creates a plan with various sub-objects for testing
-func createTestPlan(running bool) *workflow.Plan {
-	planID := workflow.NewV7()
-
-	status := workflow.NotStarted
-	if running {
-		status = workflow.Running
-	}
-
-	preCheckAction := &workflow.Action{
-		ID:      workflow.NewV7(),
-		Name:    "pre-check action",
-		Descr:   "pre-check action desc",
-		Plugin:  testPlugins.HelloPluginName,
-		Timeout: 30 * time.Second,
-		Req:     testPlugins.HelloReq{Say: "hello"},
-	}
-	preCheckAction.State.Set(workflow.State{Status: workflow.NotStarted})
-
-	preChecks := &workflow.Checks{
-		ID:      workflow.NewV7(),
-		Actions: []*workflow.Action{preCheckAction},
-	}
-	preChecks.State.Set(workflow.State{Status: workflow.NotStarted})
-
-	seqAction := &workflow.Action{
-		ID:      workflow.NewV7(),
-		Name:    "sequence action",
-		Descr:   "sequence action desc",
-		Plugin:  testPlugins.HelloPluginName,
-		Timeout: 30 * time.Second,
-		Req:     testPlugins.HelloReq{Say: "sequence"},
-	}
-	seqAction.State.Set(workflow.State{Status: workflow.NotStarted})
-
-	seq := &workflow.Sequence{
-		ID:      workflow.NewV7(),
-		Name:    "Test Sequence",
-		Descr:   "Test Sequence Description",
-		Actions: []*workflow.Action{seqAction},
-	}
-	seq.State.Set(workflow.State{Status: workflow.NotStarted})
-
-	block := &workflow.Block{
-		ID:        workflow.NewV7(),
-		Name:      "Test Block",
-		Descr:     "Test Block Description",
-		Sequences: []*workflow.Sequence{seq},
-	}
-	block.State.Set(workflow.State{Status: workflow.NotStarted})
-
-	plan := &workflow.Plan{
-		ID:         planID,
-		Name:       "Test Plan",
-		Descr:      "Test Plan Description",
-		SubmitTime: time.Now().UTC(),
-		PreChecks:  preChecks,
-		Blocks:     []*workflow.Block{block},
-	}
-	plan.State.Set(workflow.State{Status: status})
-
-	return plan
-}
-
-// uploadPlanToFake uploads a plan and its metadata to the fake client.
-func uploadPlanToFake(ctx context.Context, t *testing.T, fakeClient *blobops.Fake, prefix string, plan *workflow.Plan) {
+// leaveCompleted stores plan as Completed.
+func leaveCompleted(t *testing.T, v *Vault, f *blobops.Fake, plan *workflow.Plan) (restore func()) {
 	t.Helper()
 
-	containerName := containerForPlan(prefix, plan.ID)
-
-	// Create container
-	if err := fakeClient.EnsureContainer(ctx, containerName); err != nil {
-		t.Fatalf("failed to create container: %v", err)
+	setStatus(plan, workflow.Completed)
+	if err := v.UpdatePlan(t.Context(), plan); err != nil {
+		t.Fatalf("leaveCompleted: UpdatePlan(Completed): %s", err)
 	}
-
-	// Upload plan entry blob with metadata
-	md, err := planToMetadata(ctx, plan)
-	if err != nil {
-		t.Fatalf("failed to create metadata: %v", err)
-	}
-	md[mdPlanType] = toPtr(ptEntry)
-
-	planEntry, err := planToPlanEntry(plan)
-	if err != nil {
-		t.Fatalf("failed to create plan entry: %v", err)
-	}
-
-	planEntryData, err := json.Marshal(planEntry)
-	if err != nil {
-		t.Fatalf("failed to marshal plan entry: %v", err)
-	}
-
-	entryBlobName := planEntryBlobName(plan.ID)
-	if err := fakeClient.UploadBlob(ctx, containerName, entryBlobName, md, planEntryData); err != nil {
-		t.Fatalf("failed to upload plan entry: %v", err)
-	}
-
-	// Upload plan object blob with metadata
-	md[mdPlanType] = toPtr(ptObject)
-	planData, err := json.Marshal(plan)
-	if err != nil {
-		t.Fatalf("failed to marshal plan: %v", err)
-	}
-
-	objectBlobName := planObjectBlobName(plan.ID)
-	if err := fakeClient.UploadBlob(ctx, containerName, objectBlobName, md, planData); err != nil {
-		t.Fatalf("failed to upload plan object: %v", err)
-	}
+	return nil
 }
 
-func TestRecoveryBlobExists(t *testing.T) {
-	t.Parallel()
+// leaveTornCompletion stores plan's completion in its entry but not its object.
+func leaveTornCompletion(t *testing.T, v *Vault, f *blobops.Fake, plan *workflow.Plan) (restore func()) {
+	t.Helper()
 
-	tests := []struct {
-		name          string
-		setupBlob     bool
-		wantErr       bool
-		expectedExist bool
-	}{
-		{
-			name:          "Success: blob exists",
-			setupBlob:     true,
-			wantErr:       false,
-			expectedExist: true,
-		},
-		{
-			name:          "Success: blob does not exist",
-			setupBlob:     false,
-			wantErr:       false,
-			expectedExist: false,
-		},
-	}
-
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			ctx := context.Background()
-			fakeClient, rec := setupRecoveryTest(t)
-
-			containerName := "test-container"
-			blobName := "test-blob"
-
-			if err := fakeClient.CreateContainer(ctx, containerName); err != nil {
-				t.Fatalf("TestRecoveryBlobExists: failed to create container: %v", err)
-			}
-
-			if test.setupBlob {
-				if err := fakeClient.UploadBlob(ctx, containerName, blobName, nil, []byte("test data")); err != nil {
-					t.Fatalf("TestRecoveryBlobExists: failed to upload blob: %v", err)
-				}
-			}
-
-			exists, err := rec.blobExists(ctx, containerName, blobName)
-
-			switch {
-			case err == nil && test.wantErr:
-				t.Errorf("TestRecoveryBlobExists(%s): got err == nil, want err != nil", test.name)
-				return
-			case err != nil && !test.wantErr:
-				t.Errorf("TestRecoveryBlobExists(%s): got err == %s, want err == nil", test.name, err)
-				return
-			case err != nil:
-				return
-			}
-
-			if exists != test.expectedExist {
-				t.Errorf("TestRecoveryBlobExists(%s): got exists == %v, want exists == %v", test.name, exists, test.expectedExist)
-			}
-		})
-	}
+	finishWithTornObject(t, v, f, plan, workflow.Completed)
+	return nil
 }
 
-func TestRecoverPlanOrphanedEntry(t *testing.T) {
-	t.Parallel()
+// leaveTornCompletionRunningChild stores plan's action as Running, then plan's completion in its entry but not its
+// object.
+func leaveTornCompletionRunningChild(t *testing.T, v *Vault, f *blobops.Fake, plan *workflow.Plan) (restore func()) {
+	t.Helper()
 
-	ctx := context.Background()
-	fakeClient, rec := setupRecoveryTest(t)
+	action := plan.Blocks[0].Sequences[0].Actions[0]
+	action.State.Set(workflow.State{Status: workflow.Running})
+	if err := v.UpdateAction(t.Context(), action); err != nil {
+		t.Fatalf("leaveTornCompletionRunningChild: UpdateAction(Running): %s", err)
+	}
+	finishWithTornObject(t, v, f, plan, workflow.Completed)
+	return nil
+}
 
-	plan := createTestPlan(false)
+// leaveNoObject deletes plan's object blob, as a create that never wrote it leaves it.
+func leaveNoObject(t *testing.T, v *Vault, f *blobops.Fake, plan *workflow.Plan) (restore func()) {
+	t.Helper()
+
+	if err := f.DeleteBlob(t.Context(), containerForPlan("test", plan.ID), planObjectBlobName(plan.ID)); err != nil {
+		t.Fatalf("leaveNoObject: deleting object: %s", err)
+	}
+	return nil
+}
+
+// leaveNoEntry deletes plan's entry blob, as a delete that removed the entry first leaves it.
+func leaveNoEntry(t *testing.T, v *Vault, f *blobops.Fake, plan *workflow.Plan) (restore func()) {
+	t.Helper()
+
+	if err := f.DeleteBlob(t.Context(), containerForPlan("test", plan.ID), planEntryBlobName(plan.ID)); err != nil {
+		t.Fatalf("leaveNoEntry: deleting entry: %s", err)
+	}
+	return nil
+}
+
+// leaveUnreadableObjectMeta rewrites plan's object blob with metadata that does not parse.
+func leaveUnreadableObjectMeta(t *testing.T, v *Vault, f *blobops.Fake, plan *workflow.Plan) (restore func()) {
+	t.Helper()
+
+	ctx := t.Context()
 	containerName := containerForPlan("test", plan.ID)
-
-	if err := fakeClient.EnsureContainer(ctx, containerName); err != nil {
-		t.Fatalf("TestRecoverPlanOrphanedEntry: failed to create container: %v", err)
-	}
-
-	// Upload ONLY the entry blob (simulating a failed creation where object blob wasn't written)
-	md, err := planToMetadata(ctx, plan)
+	objectName := planObjectBlobName(plan.ID)
+	data, err := f.GetBlob(ctx, containerName, objectName)
 	if err != nil {
-		t.Fatalf("TestRecoverPlanOrphanedEntry: failed to create metadata: %v", err)
+		t.Fatalf("leaveUnreadableObjectMeta: reading object: %s", err)
 	}
-	md[mdPlanType] = toPtr(ptEntry)
+	md := map[string]*string{mdPlanType: toPtr(ptObject), mdKeyPlanID: toPtr(plan.ID.String()), mdKeyState: toPtr("not json")}
+	if err := f.UploadBlob(ctx, containerName, objectName, md, data); err != nil {
+		t.Fatalf("leaveUnreadableObjectMeta: corrupting object metadata: %s", err)
+	}
+	return nil
+}
 
-	planEntry, err := planToPlanEntry(plan)
+// leaveObjectAppears deletes plan's object blob and returns a restore that writes it back, as a create that finishes
+// after recovery's scan does.
+func leaveObjectAppears(t *testing.T, v *Vault, f *blobops.Fake, plan *workflow.Plan) (restore func()) {
+	t.Helper()
+
+	ctx := t.Context()
+	containerName := containerForPlan("test", plan.ID)
+	objectName := planObjectBlobName(plan.ID)
+	md, err := f.GetMetadata(ctx, containerName, objectName)
 	if err != nil {
-		t.Fatalf("TestRecoverPlanOrphanedEntry: failed to create plan entry: %v", err)
+		t.Fatalf("leaveObjectAppears: reading object metadata: %s", err)
 	}
-
-	planEntryData, err := json.Marshal(planEntry)
+	data, err := f.GetBlob(ctx, containerName, objectName)
 	if err != nil {
-		t.Fatalf("TestRecoverPlanOrphanedEntry: failed to marshal plan entry: %v", err)
+		t.Fatalf("leaveObjectAppears: reading object: %s", err)
 	}
-
-	entryBlobName := planEntryBlobName(plan.ID)
-	if err := fakeClient.UploadBlob(ctx, containerName, entryBlobName, md, planEntryData); err != nil {
-		t.Fatalf("TestRecoverPlanOrphanedEntry: failed to upload plan entry: %v", err)
+	if err := f.DeleteBlob(ctx, containerName, objectName); err != nil {
+		t.Fatalf("leaveObjectAppears: deleting object: %s", err)
 	}
-
-	if !fakeClient.BlobExists(containerName, entryBlobName) {
-		t.Fatalf("TestRecoverPlanOrphanedEntry: entry blob should exist before recovery")
-	}
-
-	err = rec.recoverPlan(ctx, containerName, plan.ID)
-	if err != nil {
-		t.Fatalf("TestRecoverPlanOrphanedEntry: got err == %s, want err == nil", err)
-	}
-
-	if fakeClient.BlobExists(containerName, entryBlobName) {
-		t.Errorf("TestRecoverPlanOrphanedEntry: orphaned entry blob should have been deleted")
+	return func() {
+		if err := f.UploadBlob(ctx, containerName, objectName, md, data); err != nil {
+			t.Errorf("leaveObjectAppears: restoring object: %s", err)
+		}
 	}
 }
 
-func TestRecoverPlan(t *testing.T) {
+func TestRecovery(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		name            string
-		planRunning     bool
-		missingBlobs    []string
-		wantErr         bool
-		expectRecovered []string
+		name string
+		// leave changes how the plan is stored before Recovery runs, starting from a Running plan. nil leaves it
+		// Running. A restore it returns runs the first time recovery looks up the plan's object, after the scan.
+		leave func(t *testing.T, v *Vault, f *blobops.Fake, plan *workflow.Plan) (restore func())
+		// listFails makes every container listing fail.
+		listFails bool
+
+		wantRunning bool
+		wantEntry   bool
+		// wantNoPlanRequests means recovery must need nothing for the plan beyond the listing.
+		wantNoPlanRequests bool
+		// wantObjectStatus is the object's stored status afterwards. It is not checked if skipObjectStatus is set or
+		// the object does not exist.
+		wantObjectStatus workflow.Status
+		skipObjectStatus bool
+		wantErr          bool
 	}{
 		{
-			name:            "Success: plan running, no recovery",
-			planRunning:     true,
-			missingBlobs:    []string{},
-			wantErr:         false,
-			expectRecovered: []string{},
+			name:               "Success: a running plan is handed to startup recovery and left alone",
+			wantRunning:        true,
+			wantEntry:          true,
+			wantNoPlanRequests: true,
+			wantObjectStatus:   workflow.Running,
 		},
 		{
-			name:            "Success: plan not running, all blobs exist",
-			planRunning:     false,
-			missingBlobs:    []string{},
-			wantErr:         false,
-			expectRecovered: []string{},
+			name:               "Success: a completed plan is left alone",
+			leave:              leaveCompleted,
+			wantEntry:          true,
+			wantNoPlanRequests: true,
+			wantObjectStatus:   workflow.Completed,
 		},
 		{
-			name:            "Success: plan not running, missing block blob",
-			planRunning:     false,
-			missingBlobs:    []string{"block"},
-			wantErr:         false,
-			expectRecovered: []string{"block"},
+			name:             "Success: a completion whose object upload failed has its object repaired from the entry",
+			leave:            leaveTornCompletion,
+			wantEntry:        true,
+			wantObjectStatus: workflow.Completed,
 		},
 		{
-			name:            "Success: plan not running, missing sequence blob",
-			planRunning:     false,
-			missingBlobs:    []string{"sequence"},
-			wantErr:         false,
-			expectRecovered: []string{"sequence"},
+			name:  "Success: a create that never wrote its object has its entry deleted",
+			leave: leaveNoObject,
 		},
 		{
-			name:            "Success: plan not running, missing checks blob",
-			planRunning:     false,
-			missingBlobs:    []string{"checks"},
-			wantErr:         false,
-			expectRecovered: []string{"checks"},
+			name:             "Success: an object left by a partial delete is ignored and not treated as running",
+			leave:            leaveNoEntry,
+			wantObjectStatus: workflow.Running,
 		},
 		{
-			name:            "Success: plan not running, missing action blob",
-			planRunning:     false,
-			missingBlobs:    []string{"action"},
-			wantErr:         false,
-			expectRecovered: []string{"action"},
+			// Regression: repair used to save a Completed plan over an action still stored as Running, after which the
+			// entry and object agreed and nothing ever flagged it again. The tear must be left for reads to rebuild.
+			name:             "Success: a torn completion whose action is still Running is not repaired",
+			leave:            leaveTornCompletionRunningChild,
+			wantEntry:        true,
+			wantObjectStatus: workflow.Running,
 		},
 		{
-			name:            "Success: plan not running, multiple missing blobs",
-			planRunning:     false,
-			missingBlobs:    []string{"block", "sequence", "checks", "action"},
-			wantErr:         false,
-			expectRecovered: []string{"block", "sequence", "checks", "action"},
+			// Regression: the scan skipped a blob whose metadata did not parse, so an object with bad metadata looked
+			// missing and recovery deleted the plan's valid entry, hiding the plan.
+			name:             "Success: an object blob with unreadable metadata does not get its entry deleted",
+			leave:            leaveUnreadableObjectMeta,
+			wantRunning:      true,
+			wantEntry:        true,
+			skipObjectStatus: true,
+		},
+		{
+			// Regression: the orphan delete trusted the scan, so a create that wrote its object after the scan lost its
+			// entry. The object is written back just before recovery checks for it.
+			name:             "Success: an entry whose object appears after the scan is not deleted",
+			leave:            leaveObjectAppears,
+			wantEntry:        true,
+			wantObjectStatus: workflow.Running,
+		},
+		{
+			name:      "Error: a failed container listing fails recovery",
+			listFails: true,
+			wantErr:   true,
 		},
 	}
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			ctx := context.Background()
-			fakeClient, rec := setupRecoveryTest(t)
+			t.Parallel()
 
-			plan := createTestPlan(test.planRunning)
-
-			uploadPlanToFake(ctx, t, fakeClient, "test", plan)
-
+			ctx := t.Context()
+			v, fake := newFakeVault(t)
+			plan := newRunningPlan(t, v)
 			containerName := containerForPlan("test", plan.ID)
-
-			u := &uploader{
-				mu:          planlocks.New(ctx),
-				client:      fakeClient,
-				prefix:      "test",
-				planObjPool: context.Pool(ctx).Limited(ctx, "", 5),
-				blockPool:   context.Pool(ctx).Limited(ctx, "", 5),
-				leafObjPool: context.Pool(ctx).Limited(ctx, "", 20),
+			var restore func()
+			if test.leave != nil {
+				restore = test.leave(t, v, fake, plan)
 			}
 
-			if err := u.uploadSubObjects(ctx, containerName, plan); err != nil {
-				t.Fatalf("TestRecoverPlan: failed to upload sub-objects: %v", err)
+			var listErr error
+			if test.listFails {
+				listErr = errors.New("list failed")
 			}
-
-			// Delete the blobs we want to be missing
-			for _, blobType := range test.missingBlobs {
-				var blobName string
-				switch blobType {
-				case "block":
-					blobName = blockBlobName(plan.ID, plan.Blocks[0].ID)
-				case "sequence":
-					blobName = sequenceBlobName(plan.ID, plan.Blocks[0].Sequences[0].ID)
-				case "checks":
-					blobName = checksBlobName(plan.ID, plan.PreChecks.ID)
-				case "action":
-					if plan.PreChecks != nil && len(plan.PreChecks.Actions) > 0 {
-						blobName = actionBlobName(plan.ID, plan.PreChecks.Actions[0].ID)
+			var ops opCounts
+			ops.count(fake, listErr)
+			if restore != nil {
+				// Write the object back the first time recovery looks it up, after the scan has run.
+				counted := fake.GetMetadataErr
+				fake.GetMetadataErr = func(c, b string) error {
+					if b == planObjectBlobName(plan.ID) && restore != nil {
+						r := restore
+						restore = nil
+						r()
 					}
-				}
-				if blobName != "" {
-					if err := fakeClient.DeleteBlob(ctx, containerName, blobName); err != nil {
-						t.Fatalf("TestRecoverPlan: failed to delete blob %s: %v", blobName, err)
-					}
+					return counted(c, b)
 				}
 			}
 
-			err := rec.recoverPlan(ctx, containerName, plan.ID)
-
+			err := v.Recovery(ctx)
 			switch {
 			case err == nil && test.wantErr:
-				t.Errorf("TestRecoverPlan(%s): got err == nil, want err != nil", test.name)
+				t.Errorf("TestRecovery(%s): got err == nil, want err != nil", test.name)
 				return
 			case err != nil && !test.wantErr:
-				t.Errorf("TestRecoverPlan(%s): got err == %s, want err == nil", test.name, err)
+				t.Errorf("TestRecovery(%s): got err == %s, want err == nil", test.name, err)
 				return
 			case err != nil:
+				if _, ok := v.RecoveredRunning(); ok {
+					t.Errorf("TestRecovery(%s): a failed Recovery must not hand over running plans", test.name)
+				}
 				return
 			}
 
-			for _, blobType := range test.expectRecovered {
-				var blobName string
-				switch blobType {
-				case "block":
-					blobName = blockBlobName(plan.ID, plan.Blocks[0].ID)
-				case "sequence":
-					blobName = sequenceBlobName(plan.ID, plan.Blocks[0].Sequences[0].ID)
-				case "checks":
-					blobName = checksBlobName(plan.ID, plan.PreChecks.ID)
-				case "action":
-					if plan.PreChecks != nil && len(plan.PreChecks.Actions) > 0 {
-						blobName = actionBlobName(plan.ID, plan.PreChecks.Actions[0].ID)
-					}
-				}
-
-				if blobName != "" {
-					exists := fakeClient.BlobExists(containerName, blobName)
-					if !exists {
-						t.Errorf("TestRecoverPlan(%s): expected blob %s to be recovered, but it doesn't exist", test.name, blobName)
-					}
-				}
+			// Each container in the retention window is listed exactly once.
+			if got, want := int(ops.lists.Load()), len(searchContainerNames("test", 14)); got != want {
+				t.Errorf("TestRecovery(%s): got %d container listings, want %d", test.name, got, want)
 			}
-		})
-	}
-}
-
-func TestRecoverPlansInContainer(t *testing.T) {
-	t.Parallel()
-
-	tests := []struct {
-		name            string
-		numPlans        int
-		plansRunning    []bool
-		recoverPlanErrs map[int]error
-		wantErr         bool
-	}{
-		{
-			name:     "Success: empty container",
-			numPlans: 0,
-			wantErr:  false,
-		},
-		{
-			name:         "Success: single plan recovered",
-			numPlans:     1,
-			plansRunning: []bool{false},
-			wantErr:      false,
-		},
-		{
-			name:         "Success: multiple plans recovered",
-			numPlans:     3,
-			plansRunning: []bool{false, false, false},
-			wantErr:      false,
-		},
-		{
-			name:         "Success: mix of running and non-running plans",
-			numPlans:     2,
-			plansRunning: []bool{false, true},
-			wantErr:      false,
-		},
-		{
-			name:         "Error: recoverPlan fails for one plan",
-			numPlans:     2,
-			plansRunning: []bool{false, false},
-			recoverPlanErrs: map[int]error{
-				0: fmt.Errorf("test recovery error"),
-			},
-			wantErr: true,
-		},
-	}
-
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			ctx := context.Background()
-			fakeClient, rec := setupRecoveryTest(t)
-
-			containerName := "test-container"
-
-			// Create container in fake client
-			if err := fakeClient.CreateContainer(ctx, containerName); err != nil {
-				t.Fatalf("TestRecoverPlansInContainer: failed to create container: %v", err)
-			}
-
-			plans := make([]*workflow.Plan, test.numPlans)
-			listResults := make([]storage.ListResult, test.numPlans)
-
-			for i := 0; i < test.numPlans; i++ {
-				running := false
-				if i < len(test.plansRunning) {
-					running = test.plansRunning[i]
-				}
-				plan := createTestPlan(running)
-				plans[i] = plan
-
-				listResults[i] = storage.ListResult{
-					ID:         plan.ID,
-					Name:       plan.Name,
-					Descr:      plan.Descr,
-					SubmitTime: plan.SubmitTime,
-					State:      plan.State.Get(),
+			// A consistent plan costs nothing beyond the listing.
+			if test.wantNoPlanRequests {
+				if n := ops.metadata.Load() + ops.gets.Load(); n != 0 {
+					t.Errorf("TestRecovery(%s): got %d per-plan requests for a consistent plan, want 0", test.name, n)
 				}
 			}
 
-			rec.reader.testListPlansInContainer = func(ctx context.Context, containerName string) ([]storage.ListResult, error) {
-				return listResults, nil
+			results, ok := v.RecoveredRunning()
+			if !ok {
+				t.Errorf("TestRecovery(%s): RecoveredRunning() got ok == false, want true after Recovery", test.name)
 			}
-
-			recoveredPlans := sync.ShardedMap[uuid.UUID, bool]{}
-			rec.testRecoverPlan = func(ctx context.Context, containerName string, planID uuid.UUID) error {
-				// Find the plan index
-				for i, plan := range plans {
-					if plan.ID == planID {
-						if err, ok := test.recoverPlanErrs[i]; ok {
-							return err
-						}
-						recoveredPlans.Set(planID, true)
-						return nil
-					}
+			gotRunning := false
+			for _, lr := range results {
+				if lr.ID == plan.ID {
+					gotRunning = true
 				}
-				return fmt.Errorf("unknown plan ID: %s", planID)
+			}
+			if gotRunning != test.wantRunning {
+				t.Errorf("TestRecovery(%s): got plan handed over as running == %v, want %v", test.name, gotRunning, test.wantRunning)
+			}
+			if _, ok := v.RecoveredRunning(); ok {
+				t.Errorf("TestRecovery(%s): second RecoveredRunning() got ok == true, want false", test.name)
 			}
 
-			err := rec.recoverPlansInContainer(ctx, containerName)
-
-			switch {
-			case err == nil && test.wantErr:
-				t.Errorf("TestRecoverPlansInContainer(%s): got err == nil, want err != nil", test.name)
-				return
-			case err != nil && !test.wantErr:
-				t.Errorf("TestRecoverPlansInContainer(%s): got err == %s, want err == nil", test.name, err)
-				return
-			case err != nil:
+			fake.GetMetadataErr, fake.GetBlobErr = nil, nil
+			if got := fake.BlobExists(containerName, planEntryBlobName(plan.ID)); got != test.wantEntry {
+				t.Errorf("TestRecovery(%s): got entry exists == %v, want %v", test.name, got, test.wantEntry)
+			}
+			if !fake.BlobExists(containerName, planObjectBlobName(plan.ID)) || test.skipObjectStatus {
 				return
 			}
-
-			// Verify all plans were attempted to be recovered
-			for i, plan := range plans {
-				if _, recovered := recoveredPlans.Get(plan.ID); !recovered {
-					t.Errorf("TestRecoverPlansInContainer(%s): plan %d (ID: %s) was not recovered", test.name, i, plan.ID)
-				}
-			}
-		})
-	}
-}
-
-func TestEnsureActionBlob(t *testing.T) {
-	t.Parallel()
-
-	tests := []struct {
-		name       string
-		setupBlob  bool
-		wantErr    bool
-		wantExists bool
-	}{
-		{
-			name:       "Success: action blob exists",
-			setupBlob:  true,
-			wantErr:    false,
-			wantExists: true,
-		},
-		{
-			name:       "Success: action blob missing, create it",
-			setupBlob:  false,
-			wantErr:    false,
-			wantExists: true,
-		},
-	}
-
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			ctx := context.Background()
-			fakeClient, rec := setupRecoveryTest(t)
-
-			// Create test plan
-			plan := createTestPlan(false)
-			action := plan.PreChecks.Actions[0]
-
-			containerName := containerForPlan("test", plan.ID)
-			if err := fakeClient.CreateContainer(ctx, containerName); err != nil {
-				t.Fatalf("TestEnsureActionBlob: failed to create container: %v", err)
-			}
-
-			if test.setupBlob {
-				// Upload the action blob
-				u := &uploader{
-					mu:          planlocks.New(ctx),
-					client:      fakeClient,
-					prefix:      "test",
-					planObjPool: context.Pool(ctx).Limited(ctx, "", 5),
-					blockPool:   context.Pool(ctx).Limited(ctx, "", 5),
-					leafObjPool: context.Pool(ctx).Limited(ctx, "", 20),
-				}
-				if err := u.uploadActionBlob(ctx, containerName, plan.ID, action, 0); err != nil {
-					t.Fatalf("TestEnsureActionBlob: failed to upload action blob: %v", err)
-				}
-			}
-
-			c := creator{
-				prefix:   "test",
-				endpoint: "https://test.blob.core.windows.net",
-				reader:   rec.reader,
-			}
-
-			err := rec.ensureActionBlob(ctx, c, containerName, plan.ID, action, 0)
-
-			switch {
-			case err == nil && test.wantErr:
-				t.Errorf("TestEnsureActionBlob(%s): got err == nil, want err != nil", test.name)
-				return
-			case err != nil && !test.wantErr:
-				t.Errorf("TestEnsureActionBlob(%s): got err == %s, want err == nil", test.name, err)
-				return
-			case err != nil:
-				return
-			}
-
-			// Verify blob exists
-			actionBlobName := actionBlobName(plan.ID, action.ID)
-			exists := fakeClient.BlobExists(containerName, actionBlobName)
-			if exists != test.wantExists {
-				t.Errorf("TestEnsureActionBlob(%s): got exists == %v, want exists == %v", test.name, exists, test.wantExists)
-			}
-		})
-	}
-}
-
-func TestEnsureChecksBlob(t *testing.T) {
-	t.Parallel()
-
-	tests := []struct {
-		name       string
-		setupBlob  bool
-		wantErr    bool
-		wantExists bool
-	}{
-		{
-			name:       "Success: checks blob exists",
-			setupBlob:  true,
-			wantErr:    false,
-			wantExists: true,
-		},
-		{
-			name:       "Success: checks blob missing, create it",
-			setupBlob:  false,
-			wantErr:    false,
-			wantExists: true,
-		},
-	}
-
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			ctx := context.Background()
-			fakeClient, rec := setupRecoveryTest(t)
-
-			// Create test plan
-			plan := createTestPlan(false)
-			checks := plan.PreChecks
-
-			containerName := containerForPlan("test", plan.ID)
-			if err := fakeClient.CreateContainer(ctx, containerName); err != nil {
-				t.Fatalf("TestEnsureChecksBlob: failed to create container: %v", err)
-			}
-
-			if test.setupBlob {
-				// Upload the checks blob and its actions
-				u := &uploader{
-					mu:          planlocks.New(ctx),
-					client:      fakeClient,
-					prefix:      "test",
-					planObjPool: context.Pool(ctx).Limited(ctx, "", 5),
-					blockPool:   context.Pool(ctx).Limited(ctx, "", 5),
-					leafObjPool: context.Pool(ctx).Limited(ctx, "", 20),
-				}
-				if err := u.uploadChecksBlob(ctx, containerName, plan.ID, checks); err != nil {
-					t.Fatalf("TestEnsureChecksBlob: failed to upload checks blob: %v", err)
-				}
-			}
-
-			c := creator{
-				prefix:   "test",
-				endpoint: "https://test.blob.core.windows.net",
-				reader:   rec.reader,
-			}
-
-			err := rec.ensureChecksBlob(ctx, c, containerName, plan.ID, checks)
-
-			switch {
-			case err == nil && test.wantErr:
-				t.Errorf("TestEnsureChecksBlob(%s): got err == nil, want err != nil", test.name)
-				return
-			case err != nil && !test.wantErr:
-				t.Errorf("TestEnsureChecksBlob(%s): got err == %s, want err == nil", test.name, err)
-				return
-			case err != nil:
-				return
-			}
-
-			// Verify checks blob exists
-			checksBlobName := checksBlobName(plan.ID, checks.ID)
-			exists := fakeClient.BlobExists(containerName, checksBlobName)
-			if exists != test.wantExists {
-				t.Errorf("TestEnsureChecksBlob(%s): got checks blob exists == %v, want exists == %v", test.name, exists, test.wantExists)
-			}
-
-			// Verify action blobs exist
-			for _, action := range checks.Actions {
-				actionBlobName := actionBlobName(plan.ID, action.ID)
-				exists := fakeClient.BlobExists(containerName, actionBlobName)
-				if exists != test.wantExists {
-					t.Errorf("TestEnsureChecksBlob(%s): got action blob exists == %v, want exists == %v", test.name, exists, test.wantExists)
-				}
-			}
-		})
-	}
-}
-
-func TestEnsureSequenceBlob(t *testing.T) {
-	t.Parallel()
-
-	tests := []struct {
-		name       string
-		setupBlob  bool
-		wantErr    bool
-		wantExists bool
-	}{
-		{
-			name:       "Success: sequence blob exists",
-			setupBlob:  true,
-			wantErr:    false,
-			wantExists: true,
-		},
-		{
-			name:       "Success: sequence blob missing, create it",
-			setupBlob:  false,
-			wantErr:    false,
-			wantExists: true,
-		},
-	}
-
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			ctx := context.Background()
-			fakeClient, rec := setupRecoveryTest(t)
-
-			// Create test plan
-			plan := createTestPlan(false)
-			seq := plan.Blocks[0].Sequences[0]
-
-			containerName := containerForPlan("test", plan.ID)
-			if err := fakeClient.CreateContainer(ctx, containerName); err != nil {
-				t.Fatalf("TestEnsureSequenceBlob: failed to create container: %v", err)
-			}
-
-			if test.setupBlob {
-				// Upload the sequence blob and its actions
-				u := &uploader{
-					mu:          planlocks.New(ctx),
-					client:      fakeClient,
-					prefix:      "test",
-					planObjPool: context.Pool(ctx).Limited(ctx, "", 5),
-					blockPool:   context.Pool(ctx).Limited(ctx, "", 5),
-					leafObjPool: context.Pool(ctx).Limited(ctx, "", 20),
-				}
-				if err := u.uploadSequenceBlob(ctx, containerName, plan.ID, seq, 0); err != nil {
-					t.Fatalf("TestEnsureSequenceBlob: failed to upload sequence blob: %v", err)
-				}
-			}
-
-			c := creator{
-				prefix:   "test",
-				endpoint: "https://test.blob.core.windows.net",
-				reader:   rec.reader,
-			}
-
-			err := rec.ensureSequenceBlob(ctx, c, containerName, plan.ID, seq, 0)
-
-			switch {
-			case err == nil && test.wantErr:
-				t.Errorf("TestEnsureSequenceBlob(%s): got err == nil, want err != nil", test.name)
-				return
-			case err != nil && !test.wantErr:
-				t.Errorf("TestEnsureSequenceBlob(%s): got err == %s, want err == nil", test.name, err)
-				return
-			case err != nil:
-				return
-			}
-
-			// Verify sequence blob exists
-			seqBlobName := sequenceBlobName(plan.ID, seq.ID)
-			exists := fakeClient.BlobExists(containerName, seqBlobName)
-			if exists != test.wantExists {
-				t.Errorf("TestEnsureSequenceBlob(%s): got sequence blob exists == %v, want exists == %v", test.name, exists, test.wantExists)
-			}
-
-			// Verify action blobs exist
-			for _, action := range seq.Actions {
-				actionBlobName := actionBlobName(plan.ID, action.ID)
-				exists := fakeClient.BlobExists(containerName, actionBlobName)
-				if exists != test.wantExists {
-					t.Errorf("TestEnsureSequenceBlob(%s): got action blob exists == %v, want exists == %v", test.name, exists, test.wantExists)
-				}
-			}
-		})
-	}
-}
-
-func TestEnsureBlockBlob(t *testing.T) {
-	t.Parallel()
-
-	tests := []struct {
-		name       string
-		setupBlob  bool
-		wantErr    bool
-		wantExists bool
-	}{
-		{
-			name:       "Success: block blob exists",
-			setupBlob:  true,
-			wantErr:    false,
-			wantExists: true,
-		},
-		{
-			name:       "Success: block blob missing, create it",
-			setupBlob:  false,
-			wantErr:    false,
-			wantExists: true,
-		},
-	}
-
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			ctx := context.Background()
-			fakeClient, rec := setupRecoveryTest(t)
-
-			// Create test plan
-			plan := createTestPlan(false)
-			block := plan.Blocks[0]
-
-			containerName := containerForPlan("test", plan.ID)
-			if err := fakeClient.CreateContainer(ctx, containerName); err != nil {
-				t.Fatalf("TestEnsureBlockBlob: failed to create container: %v", err)
-			}
-
-			if test.setupBlob {
-				// Upload the block blob and its sub-objects
-				u := &uploader{
-					mu:          planlocks.New(ctx),
-					client:      fakeClient,
-					prefix:      "test",
-					planObjPool: context.Pool(ctx).Limited(ctx, "", 5),
-					blockPool:   context.Pool(ctx).Limited(ctx, "", 5),
-					leafObjPool: context.Pool(ctx).Limited(ctx, "", 20),
-				}
-				if err := u.uploadBlockBlob(ctx, containerName, plan.ID, block, 0); err != nil {
-					t.Fatalf("TestEnsureBlockBlob: failed to upload block blob: %v", err)
-				}
-			}
-
-			c := creator{
-				prefix:   "test",
-				endpoint: "https://test.blob.core.windows.net",
-				reader:   rec.reader,
-			}
-
-			err := rec.ensureBlockBlob(ctx, c, containerName, plan.ID, block, 0)
-
-			switch {
-			case err == nil && test.wantErr:
-				t.Errorf("TestEnsureBlockBlob(%s): got err == nil, want err != nil", test.name)
-				return
-			case err != nil && !test.wantErr:
-				t.Errorf("TestEnsureBlockBlob(%s): got err == %s, want err == nil", test.name, err)
-				return
-			case err != nil:
-				return
-			}
-
-			// Verify block blob exists
-			blockBlobName := blockBlobName(plan.ID, block.ID)
-			exists := fakeClient.BlobExists(containerName, blockBlobName)
-			if exists != test.wantExists {
-				t.Errorf("TestEnsureBlockBlob(%s): got block blob exists == %v, want exists == %v", test.name, exists, test.wantExists)
-			}
-
-			// Verify sequence blobs exist
-			for _, seq := range block.Sequences {
-				seqBlobName := sequenceBlobName(plan.ID, seq.ID)
-				exists := fakeClient.BlobExists(containerName, seqBlobName)
-				if exists != test.wantExists {
-					t.Errorf("TestEnsureBlockBlob(%s): got sequence blob exists == %v, want exists == %v", test.name, exists, test.wantExists)
-				}
+			if got := blobState(t, fake, containerName, planObjectBlobName(plan.ID)); got != test.wantObjectStatus {
+				t.Errorf("TestRecovery(%s): got object status %v, want %v", test.name, got, test.wantObjectStatus)
 			}
 		})
 	}

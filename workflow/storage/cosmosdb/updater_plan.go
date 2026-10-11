@@ -40,6 +40,8 @@ func (u planUpdater) UpdatePlan(ctx context.Context, p *workflow.Plan) error {
 	patch.AppendReplace("/stateStart", p.State.Get().Start)
 	patch.AppendReplace("/stateEnd", p.State.Get().End)
 	patch.AppendReplace("/submitTime", p.SubmitTime)
+	// Set, not Replace: a Replace fails on a plan document written before it had runtimeUpdate.
+	patch.AppendSet("/runtimeUpdate", p.RuntimeUpdate.Get())
 
 	itemOpt := itemOptions(u.defaultIOpts)
 	var ifMatchEtag *azcore.ETag = nil

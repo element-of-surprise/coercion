@@ -6,6 +6,7 @@ import (
 	"github.com/gostdlib/base/context"
 
 	"github.com/element-of-surprise/coercion/workflow"
+	"github.com/element-of-surprise/coercion/workflow/errors"
 
 	"github.com/google/uuid"
 	"zombiezen.com/go/sqlite"
@@ -49,7 +50,7 @@ func commitDeferredActions(ctx context.Context, conn *sqlite.Conn, planID uuid.U
 	stmt.SetInt64("$state_start", da.State.Get().Start.UnixNano())
 	stmt.SetInt64("$state_end", da.State.Get().End.UnixNano())
 
-	sStmt, err := stmt.Prepare(conn)
+	sStmt, err := stmt.Prepare(ctx, conn, errors.TypeStorageCreate)
 	if err != nil {
 		return fmt.Errorf("commitDeferredActions: %w", err)
 	}
@@ -113,7 +114,7 @@ func commitDeferBatch(ctx context.Context, conn *sqlite.Conn, planID, daID uuid.
 	stmt.SetInt64("$state_start", batch.State.Get().Start.UnixNano())
 	stmt.SetInt64("$state_end", batch.State.Get().End.UnixNano())
 
-	sStmt, err := stmt.Prepare(conn)
+	sStmt, err := stmt.Prepare(ctx, conn, errors.TypeStorageCreate)
 	if err != nil {
 		return fmt.Errorf("commitDeferBatch: %w", err)
 	}
