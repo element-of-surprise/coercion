@@ -11,6 +11,38 @@ import (
 	"github.com/element-of-surprise/coercion/workflow/errors"
 )
 
+func TestGroupID(t *testing.T) {
+	t.Parallel()
+
+	id, err := uuid.NewV7()
+	if err != nil {
+		t.Fatalf("TestGroupID: uuid.NewV7: %s", err)
+	}
+
+	tests := []struct {
+		name string
+		ctx  Context
+		want uuid.UUID
+	}{
+		{
+			name: "Success: returns the group ID set by SetGroupID",
+			ctx:  SetGroupID(t.Context(), id),
+			want: id,
+		},
+		{
+			name: "Success: returns uuid.Nil when no group ID is set",
+			ctx:  t.Context(),
+			want: uuid.Nil,
+		},
+	}
+
+	for _, test := range tests {
+		if got := GroupID(test.ctx); got != test.want {
+			t.Errorf("TestGroupID(%s): got %s, want %s", test.name, got, test.want)
+		}
+	}
+}
+
 func TestPlanID(t *testing.T) {
 	t.Parallel()
 

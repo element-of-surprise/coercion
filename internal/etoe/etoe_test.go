@@ -56,8 +56,9 @@ var (
 
 // These are captured in the TestEtoE and used to test recovery scenarios.
 var (
-	capture = &sqlite.CaptureStmts{}
-	etoeID  uuid.UUID
+	capture     = &sqlite.CaptureStmts{}
+	etoeID      uuid.UUID
+	etoeGroupID = workflow.NewV7()
 )
 
 type cloner struct {
@@ -179,6 +180,12 @@ func TestEtoE(t *testing.T) {
 				Name:   "check",
 				Descr:  "check",
 				Plugin: "check",
+				Req:    testplugin.Req{Arg: "groupid"},
+			},
+			{
+				Name:   "check",
+				Descr:  "check",
+				Plugin: "check",
 				Req:    testplugin.Req{Sleep: 1 * time.Second},
 			},
 		},
@@ -191,12 +198,13 @@ func TestEtoE(t *testing.T) {
 		Actions: []*workflow.Action{
 			{Name: "action0", Descr: "action", Plugin: testplugin.Name, Req: testplugin.Req{Sleep: 1 * time.Second}},
 			{Name: "action1", Descr: "action", Plugin: testplugin.Name, Req: testplugin.Req{Arg: "planid"}},
+			{Name: "action2", Descr: "action", Plugin: testplugin.Name, Req: testplugin.Req{Arg: "groupid"}},
 		},
 	}
 
 	cloner := &cloner{}
 
-	build, err := builder.New("end to end test", "tests that things work etoe in a basic way")
+	build, err := builder.New("end to end test", "tests that things work etoe in a basic way", builder.WithGroupID(etoeGroupID))
 	if err != nil {
 		panic(err)
 	}
@@ -273,24 +281,14 @@ func TestEtoE(t *testing.T) {
 	if result.State.Get().Status != workflow.Completed {
 		t.Fatalf("TestEtoE: workflow did not complete successfully(%s)", result.State.Get().Status)
 	}
-	plugResp := result.PreChecks.Actions[0].Attempts.Get()[0].Resp.(plugins.Resp)
-	if plugResp.Arg == "" {
-		t.Fatalf("TestEtoE: planID not found")
-	}
-	_, err = uuid.Parse(plugResp.Arg)
-	if err != nil {
-		t.Fatalf("TestEtoE: planID not a valid UUID")
+	if err := testCheckIDs(result.PreChecks, id, etoeGroupID); err != nil {
+		t.Fatalf("TestEtoE(PreChecks): %v", err)
 	}
 	if result.DeferredChecks.State.Get().Status != workflow.Completed {
 		t.Fatalf("TestEtoE: deferred checks did not complete successfully(%s)", result.DeferredChecks.State.Get().Status)
 	}
-	plugResp = result.DeferredChecks.Actions[0].Attempts.Get()[0].Resp.(plugins.Resp)
-	if plugResp.Arg == "" {
-		t.Fatalf("TestEtoE: planID not found")
-	}
-	_, err = uuid.Parse(plugResp.Arg)
-	if err != nil {
-		t.Fatalf("TestEtoE: planID not a valid UUID")
+	if err := testCheckIDs(result.DeferredChecks, id, etoeGroupID); err != nil {
+		t.Fatalf("TestEtoE(DeferredChecks): %v", err)
 	}
 
 	if result.DeferredActions == nil {
@@ -316,25 +314,25 @@ func TestEtoE(t *testing.T) {
 		if block.PreChecks.State.Get().Status != workflow.Completed {
 			t.Fatalf("TestEtoE: block pre checks did not complete successfully(%s)", block.PreChecks.State.Get().Status)
 		}
-		if err := testPlugResp(block.PreChecks.Actions[0], "actionID"); err != nil {
+		if err := testCheckIDs(block.PreChecks, id, etoeGroupID); err != nil {
 			t.Fatalf("TestEtoE(block PreChecks): %v", err)
 		}
 		if block.PostChecks.State.Get().Status != workflow.Completed {
 			t.Fatalf("TestEtoE: block post checks did not complete successfully(%s)", block.PostChecks.State.Get().Status)
 		}
-		if err := testPlugResp(block.PostChecks.Actions[0], "actionID"); err != nil {
+		if err := testCheckIDs(block.PostChecks, id, etoeGroupID); err != nil {
 			t.Fatalf("TestEtoE(block PostChecks): %v", err)
 		}
 		if block.ContChecks.State.Get().Status != workflow.Completed {
 			t.Fatalf("TestEtoE: block cont checks did not complete successfully(%s)", block.ContChecks.State.Get().Status)
 		}
-		if err := testPlugResp(block.ContChecks.Actions[0], "actionID"); err != nil {
+		if err := testCheckIDs(block.ContChecks, id, etoeGroupID); err != nil {
 			t.Fatalf("TestEtoE(block ContChecks): %v", err)
 		}
 		if block.DeferredChecks.State.Get().Status != workflow.Completed {
 			t.Fatalf("TestEtoE: block deferred checks did not complete successfully(%s)", block.DeferredChecks.State.Get().Status)
 		}
-		if err := testPlugResp(block.DeferredChecks.Actions[0], "actionID"); err != nil {
+		if err := testCheckIDs(block.DeferredChecks, id, etoeGroupID); err != nil {
 			t.Fatalf("TestEtoE(block DeferredChecks): %v", err)
 		}
 
@@ -342,21 +340,44 @@ func TestEtoE(t *testing.T) {
 			if seq.State.Get().Status != workflow.Completed {
 				t.Fatalf("TestEtoE: sequence did not complete successfully(%s)", seq.State.Get().Status)
 			}
-			if err := testPlugResp(seq.Actions[1], "actionID"); err != nil {
-				t.Fatalf("TestEtoE(sequence): %v", err)
+			if err := testPlugResp(seq.Actions[1], id); err != nil {
+				t.Fatalf("TestEtoE(sequence plan ID): %v", err)
+			}
+			if err := testPlugResp(seq.Actions[2], etoeGroupID); err != nil {
+				t.Fatalf("TestEtoE(sequence group ID): %v", err)
 			}
 		}
 	}
 }
 
-func testPlugResp(action *workflow.Action, want string) error {
-	plugResp := action.Attempts.Get()[0].Resp.(plugins.Resp)
-	if plugResp.Arg == "" {
-		return fmt.Errorf("%q was not found in the response", want)
+// testPlugResp checks that the last attempt of an action given a "planid", "groupid" or "actionid" Arg reported want.
+func testPlugResp(action *workflow.Action, want uuid.UUID) error {
+	attempts := action.Attempts.Get()
+	if len(attempts) == 0 {
+		return fmt.Errorf("action(%s) has no attempts", action.Name)
 	}
-	_, err := uuid.Parse(plugResp.Arg)
+	plugResp, ok := attempts[len(attempts)-1].Resp.(plugins.Resp)
+	if !ok {
+		return fmt.Errorf("action(%s) last attempt has no plugins.Resp", action.Name)
+	}
+	got, err := uuid.Parse(plugResp.Arg)
 	if err != nil {
 		return fmt.Errorf("%q was not a valid UUID", plugResp.Arg)
+	}
+	if got != want {
+		return fmt.Errorf("action(%s) got ID %s, want %s", action.Name, got, want)
+	}
+	return nil
+}
+
+// testCheckIDs checks the IDs reported by checks whose first action has the "planid" Arg and whose second has the
+// "groupid" Arg.
+func testCheckIDs(checks *workflow.Checks, planID, groupID uuid.UUID) error {
+	if err := testPlugResp(checks.Actions[0], planID); err != nil {
+		return fmt.Errorf("plan ID: %w", err)
+	}
+	if err := testPlugResp(checks.Actions[1], groupID); err != nil {
+		return fmt.Errorf("group ID: %w", err)
 	}
 	return nil
 }
@@ -378,6 +399,7 @@ func TestBypassPlan(t *testing.T) {
 	reg.Register(plugCheck)
 	reg.Register(plugAction)
 
+	// The Plan has no GroupID, as many do not, so the bypass checks must report uuid.Nil as the group ID.
 	bypassChecks := &workflow.Checks{
 		Delay: 0,
 		Actions: []*workflow.Action{
@@ -385,13 +407,13 @@ func TestBypassPlan(t *testing.T) {
 				Name:   "check",
 				Descr:  "bypasscheck",
 				Plugin: "check",
-				Req:    testplugin.Req{Sleep: 1 * time.Second},
+				Req:    testplugin.Req{Sleep: 1 * time.Second, Arg: "planid"},
 			},
 			{
 				Name:   "check",
 				Descr:  "bypasscheck",
 				Plugin: "check",
-				Req:    testplugin.Req{Sleep: 1 * time.Second},
+				Req:    testplugin.Req{Sleep: 1 * time.Second, Arg: "groupid"},
 			},
 		},
 	}
@@ -489,6 +511,9 @@ func TestBypassPlan(t *testing.T) {
 
 	if result.Data.State.Get().Status != workflow.Completed {
 		t.Fatalf("TestBypassPlan: expected workflow to complete")
+	}
+	if err := testCheckIDs(result.Data.BypassChecks, id, uuid.Nil); err != nil {
+		t.Fatalf("TestBypassPlan(BypassChecks): %v", err)
 	}
 	if result.Data.PreChecks.State.Get().Status != workflow.NotStarted {
 		t.Fatalf("TestBypassPlan: expected Prechecks in NotStarted, got %s", result.Data.PreChecks.State.Get().Status)

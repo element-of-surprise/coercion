@@ -25,6 +25,9 @@ func (s *States) Recovery(req statemachine.Request[Data]) statemachine.Request[D
 
 	plan := req.Data.Plan
 	req.Data.recovered = true
+	// Set before anything else, so the writes below and every state Recovery can go to, End included, have the IDs.
+	req.Ctx = context.SetPlanID(req.Ctx, plan.ID)
+	req.Ctx = context.SetGroupID(req.Ctx, plan.GroupID)
 
 	wasRunning := plan.State.Get().Status == workflow.Running
 	before := changes.Record(plan)
@@ -79,7 +82,6 @@ func (s *States) Recovery(req statemachine.Request[Data]) statemachine.Request[D
 	}
 	// Okay, we are in the running state. Let's setup to run.
 
-	req.Ctx = context.SetPlanID(req.Ctx, req.Data.Plan.ID)
 	req = s.startHeartbeat(req)
 
 	if cut.block != nil {

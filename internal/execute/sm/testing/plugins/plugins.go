@@ -118,13 +118,13 @@ func (h *Plugin) Execute(ctx context.Context, req any) (any, *plugins.Error) {
 		if r.Arg == "error" {
 			return nil, &plugins.Error{Message: "error"}
 		}
-		if strings.ToLower(r.Arg) == "actionid" {
-			id := context.ActionID(ctx).String()
-			return Resp{Arg: id}, nil
-		}
-		if strings.ToLower(r.Arg) == "planid" {
-			id := context.PlanID(ctx).String()
-			return Resp{Arg: id}, nil
+		switch strings.ToLower(r.Arg) {
+		case "actionid":
+			return Resp{Arg: context.ActionID(ctx).String()}, nil
+		case "planid":
+			return Resp{Arg: context.PlanID(ctx).String()}, nil
+		case "groupid":
+			return Resp{Arg: context.GroupID(ctx).String()}, nil
 		}
 		return Resp{Arg: "ok"}, nil
 	}
