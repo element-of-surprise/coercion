@@ -77,13 +77,22 @@ func Meter(ctx Context, opts ...metric.MeterOption) metric.Meter {
 // MeterWithStackFrame returns a metric.Meter scoped to the stack frame number sf. It is for packages built on this one
 // that need to name the meter after their caller's frame. Generally, use Meter().
 func MeterWithStackFrame(ctx Context, sf uint, opts ...metric.MeterOption) metric.Meter {
-	return context.MeterWithStackFrame(ctx, sf, opts...)
+	// sf is relative to this function, so add 1 to skip this wrapper's frame.
+	return context.MeterWithStackFrame(ctx, sf+1, opts...)
 }
 
 // MeterProvider returns a metric.MeterProvider attached to the context. If no meter provider is attached,
 // it returns metrics.Default(). This may be a noop provider.
 func MeterProvider(ctx Context) metric.MeterProvider {
 	return context.MeterProvider(ctx)
+}
+
+// SetMeterProvider sets a custom meter provider on the returned Context. MeterProvider(), Meter() and
+// MeterWithStackFrame() calls using this Context use that provider instead of metrics.Default(). This is mostly
+// useful in tests that want to capture metrics with a reader-backed provider without mutating the process-global
+// default that every other goroutine reads. It panics if p is nil.
+func SetMeterProvider(ctx Context, p metric.MeterProvider) Context {
+	return context.SetMeterProvider(ctx, p)
 }
 
 // Pool returns the worker pool attached to the context. If no pool is attached, it returns worker.Default().
