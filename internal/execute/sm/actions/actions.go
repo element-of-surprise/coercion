@@ -245,7 +245,6 @@ type plugResp struct {
 func run(ctx context.Context, plugin plugins.Plugin, req any) plugResp {
 	rv := result.New[plugResp]()
 	ok := context.Pool(ctx).Default().Submit(
-		// ctx here is the plugin Timeout I think
 		ctx,
 		func() {
 			resp := plugResp{}
