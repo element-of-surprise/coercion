@@ -140,6 +140,7 @@ func (s *States) Start(req statemachine.Request[Data]) statemachine.Request[Data
 	plan := req.Data.Plan
 
 	req.Ctx = context.SetPlanID(req.Ctx, req.Data.Plan.ID)
+	req.Ctx = context.SetGroupID(req.Ctx, req.Data.Plan.GroupID)
 
 	for _, b := range req.Data.Plan.Blocks {
 		req.Data.blocks = append(req.Data.blocks, block{block: b, contCheckResult: make(chan error, 1)})

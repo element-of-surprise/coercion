@@ -19,6 +19,9 @@ import (
 // planIDKey is a key for the planID in context.Value .
 type planIDKey struct{}
 
+// groupIDKey is a key for the groupID in context.Value .
+type groupIDKey struct{}
+
 // actionIDKey is a key for the actionID in context.Value .
 type actionIDKey struct{}
 
@@ -147,6 +150,21 @@ func PlanID(ctx context.Context) uuid.UUID {
 // SetPlanID sets the planID for context.
 func SetPlanID(ctx context.Context, id uuid.UUID) context.Context {
 	return context.WithValue(ctx, planIDKey{}, id)
+}
+
+// GroupID returns groupID from a Context.
+func GroupID(ctx context.Context) uuid.UUID {
+	id, ok := ctx.Value(groupIDKey{}).(uuid.UUID)
+	if ok {
+		return id
+	}
+
+	return uuid.Nil
+}
+
+// SetGroupID sets the groupID for context.
+func SetGroupID(ctx context.Context, id uuid.UUID) context.Context {
+	return context.WithValue(ctx, groupIDKey{}, id)
 }
 
 // ActionID returns actionID from a Context.

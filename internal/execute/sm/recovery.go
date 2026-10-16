@@ -80,6 +80,7 @@ func (s *States) Recovery(req statemachine.Request[Data]) statemachine.Request[D
 	// Okay, we are in the running state. Let's setup to run.
 
 	req.Ctx = context.SetPlanID(req.Ctx, req.Data.Plan.ID)
+	req.Ctx = context.SetGroupID(req.Ctx, req.Data.Plan.GroupID)
 	req = s.startHeartbeat(req)
 
 	if cut.block != nil {

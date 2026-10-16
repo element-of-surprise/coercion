@@ -24,6 +24,19 @@ func TestPlanID(t *testing.T) {
 	}
 }
 
+func TestGroupID(t *testing.T) {
+	t.Parallel()
+
+	want, err := uuid.NewV7()
+	if err != nil {
+		t.Fatalf("TestGroupID: uuid.NewV7: %s", err)
+	}
+
+	if got := GroupID(SetGroupID(t.Context(), want)); got != want {
+		t.Errorf("TestGroupID: got %s, want %s", got, want)
+	}
+}
+
 func TestActionID(t *testing.T) {
 	t.Parallel()
 
