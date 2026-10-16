@@ -9,14 +9,15 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/gostdlib/base/concurrency/sync"
-	"github.com/gostdlib/base/context"
 	"github.com/kylelemons/godebug/pretty"
 
 	"github.com/element-of-surprise/coercion/internal/execute/sm/testing/plugins"
 	"github.com/element-of-surprise/coercion/plugins/registry"
 	"github.com/element-of-surprise/coercion/workflow"
 	"github.com/element-of-surprise/coercion/workflow/builder"
+	"github.com/element-of-surprise/coercion/workflow/context"
 	"github.com/element-of-surprise/coercion/workflow/storage"
 	"github.com/element-of-surprise/coercion/workflow/storage/noop"
 	"github.com/element-of-surprise/coercion/workflow/utils/clone"
@@ -27,45 +28,70 @@ import (
 func TestPlanStart(t *testing.T) {
 	t.Parallel()
 
-	plan := &workflow.Plan{
-		Blocks: []*workflow.Block{
-			{},
-			{},
+	tests := []struct {
+		name    string
+		groupID uuid.UUID
+	}{
+		{
+			name:    "Success: a plan with a group ID starts with its plan and group IDs in the Context",
+			groupID: workflow.NewV7(),
+		},
+		{
+			// Many callers never set a GroupID, so a plan without one must start the same way.
+			name: "Success: a plan without a group ID starts with its plan ID and uuid.Nil as the group ID in the Context",
 		},
 	}
-	plan.State.Set(workflow.State{})
 
-	req := statemachine.Request[Data]{
-		Ctx: t.Context(),
-		Data: Data{
-			Plan: plan,
-		},
-	}
+	for _, test := range tests {
+		plan := &workflow.Plan{
+			ID:      workflow.NewV7(),
+			GroupID: test.groupID,
+			Blocks: []*workflow.Block{
+				{},
+				{},
+			},
+		}
+		plan.State.Set(workflow.State{})
 
-	vault := &fakeUpdater{}
-	states := States{
-		store: vault,
-	}
+		req := statemachine.Request[Data]{
+			Ctx: t.Context(),
+			Data: Data{
+				Plan: plan,
+			},
+		}
 
-	req = states.Start(req)
-	if len(req.Data.blocks) != 2 {
-		t.Errorf("TestPlanStart: req.blocks: expected 2 to be created, got %d", len(req.Data.blocks))
-	}
-	if req.Data.contCheckResult == nil {
-		t.Errorf("TestPlanStart: req.Data.contCheckResult == nil, expect != nil")
-	}
-	if req.Data.Plan.State.Get().Status != workflow.Running {
-		t.Errorf("TestPlanStart: Plan.State.Status is %s, want %s", req.Data.Plan.State.Get().Status, workflow.Running)
-	}
-	if req.Data.Plan.State.Get().Start.IsZero() {
-		t.Errorf("TestPlanStart: Plan.State.Start did not get set")
-	}
+		vault := &fakeUpdater{}
+		states := States{
+			store: vault,
+		}
 
-	if vault.calls.Load() != 1 {
-		t.Errorf("TestPlanStart: storage.Create() did not get called")
-	}
-	if methodName(req.Next) != methodName(states.PlanBypassChecks) {
-		t.Errorf("TestPlanStart: expected req.Next == %s, got %s", methodName(req.Next), methodName(states.PlanBypassChecks))
+		req = states.Start(req)
+		// Plugins and logs read the IDs from the Context every later state passes down.
+		if got := context.PlanID(req.Ctx); got != plan.ID {
+			t.Errorf("TestPlanStart(%s): got plan ID %s in the Context, want %s", test.name, got, plan.ID)
+		}
+		if got := context.GroupID(req.Ctx); got != test.groupID {
+			t.Errorf("TestPlanStart(%s): got group ID %s in the Context, want %s", test.name, got, test.groupID)
+		}
+		if len(req.Data.blocks) != 2 {
+			t.Errorf("TestPlanStart(%s): req.blocks: expected 2 to be created, got %d", test.name, len(req.Data.blocks))
+		}
+		if req.Data.contCheckResult == nil {
+			t.Errorf("TestPlanStart(%s): req.Data.contCheckResult == nil, expect != nil", test.name)
+		}
+		if req.Data.Plan.State.Get().Status != workflow.Running {
+			t.Errorf("TestPlanStart(%s): Plan.State.Status is %s, want %s", test.name, req.Data.Plan.State.Get().Status, workflow.Running)
+		}
+		if req.Data.Plan.State.Get().Start.IsZero() {
+			t.Errorf("TestPlanStart(%s): Plan.State.Start did not get set", test.name)
+		}
+
+		if vault.calls.Load() != 1 {
+			t.Errorf("TestPlanStart(%s): storage.Create() did not get called", test.name)
+		}
+		if methodName(req.Next) != methodName(states.PlanBypassChecks) {
+			t.Errorf("TestPlanStart(%s): expected req.Next == %s, got %s", test.name, methodName(req.Next), methodName(states.PlanBypassChecks))
+		}
 	}
 }
 

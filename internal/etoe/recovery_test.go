@@ -30,14 +30,12 @@ import (
 	"testing"
 
 	workstream "github.com/element-of-surprise/coercion"
-	"github.com/element-of-surprise/coercion/internal/execute/sm/testing/plugins"
 	testplugin "github.com/element-of-surprise/coercion/internal/execute/sm/testing/plugins"
 	"github.com/element-of-surprise/coercion/plugins/registry"
 	"github.com/element-of-surprise/coercion/workflow"
 	"github.com/element-of-surprise/coercion/workflow/context"
 	"github.com/element-of-surprise/coercion/workflow/errors"
 	"github.com/element-of-surprise/coercion/workflow/storage/sqlite"
-	"github.com/google/uuid"
 )
 
 // SEE recoveryTestStage for a way to do a single stage.
@@ -208,28 +206,16 @@ func recoveryTestStage(ctx context.Context, stage int, reg *registry.Register, c
 		tr.Err = fmt.Errorf("workflow did not complete successfully(%s)", result.State.Get().Status)
 		return
 	}
-	plugResp := result.PreChecks.Actions[0].Attempts.Get()[0].Resp.(plugins.Resp)
-	if plugResp.Arg == "" {
-		tr.Err = fmt.Errorf("planID not found")
-		return
-	}
-	_, err = uuid.Parse(plugResp.Arg)
-	if err != nil {
-		tr.Err = fmt.Errorf("planID not a valid UUID")
+	if err := testCheckIDs(result.PreChecks, etoeID, etoeGroupID); err != nil {
+		tr.Err = fmt.Errorf("PreChecks: %v", err)
 		return
 	}
 	if result.DeferredChecks.State.Get().Status != workflow.Completed {
 		tr.Err = fmt.Errorf("deferred checks did not complete successfully(%s)", result.DeferredChecks.State.Get().Status)
 		return
 	}
-	plugResp = result.DeferredChecks.Actions[0].Attempts.Get()[0].Resp.(plugins.Resp)
-	if plugResp.Arg == "" {
-		tr.Err = fmt.Errorf("planID not found")
-		return
-	}
-	_, err = uuid.Parse(plugResp.Arg)
-	if err != nil {
-		tr.Err = fmt.Errorf("planID not a valid UUID")
+	if err := testCheckIDs(result.DeferredChecks, etoeID, etoeGroupID); err != nil {
+		tr.Err = fmt.Errorf("DeferredChecks: %v", err)
 		return
 	}
 
@@ -262,7 +248,7 @@ func recoveryTestStage(ctx context.Context, stage int, reg *registry.Register, c
 			tr.Err = fmt.Errorf("block pre checks did not complete successfully(%s)", block.PreChecks.State.Get().Status)
 			return
 		}
-		if err := testPlugResp(block.PreChecks.Actions[0], "actionID"); err != nil {
+		if err := testCheckIDs(block.PreChecks, etoeID, etoeGroupID); err != nil {
 			tr.Err = fmt.Errorf("block PreChecks: %v", err)
 			return
 		}
@@ -270,14 +256,14 @@ func recoveryTestStage(ctx context.Context, stage int, reg *registry.Register, c
 			tr.Err = fmt.Errorf("block post checks did not complete successfully(%s)", block.PostChecks.State.Get().Status)
 			return
 		}
-		if err := testPlugResp(block.PostChecks.Actions[0], "actionID"); err != nil {
+		if err := testCheckIDs(block.PostChecks, etoeID, etoeGroupID); err != nil {
 			tr.Err = fmt.Errorf("block PostChecks: %v", err)
 			return
 		}
 		if block.ContChecks.State.Get().Status != workflow.Completed {
 			tr.Err = fmt.Errorf("block cont checks did not complete successfully(%s)", block.ContChecks.State.Get().Status)
 		}
-		if err := testPlugResp(block.ContChecks.Actions[0], "actionID"); err != nil {
+		if err := testCheckIDs(block.ContChecks, etoeID, etoeGroupID); err != nil {
 			tr.Err = fmt.Errorf("block ContChecks: %v", err)
 			return
 		}
@@ -285,7 +271,7 @@ func recoveryTestStage(ctx context.Context, stage int, reg *registry.Register, c
 			tr.Err = fmt.Errorf("block deferred checks did not complete successfully(%s)", block.DeferredChecks.State.Get().Status)
 			return
 		}
-		if err := testPlugResp(block.DeferredChecks.Actions[0], "actionID"); err != nil {
+		if err := testCheckIDs(block.DeferredChecks, etoeID, etoeGroupID); err != nil {
 			tr.Err = fmt.Errorf("block DeferredChecks: %v", err)
 			return
 		}
@@ -295,8 +281,12 @@ func recoveryTestStage(ctx context.Context, stage int, reg *registry.Register, c
 				tr.Err = fmt.Errorf("sequence did not complete successfully(%s)(%s)", seq.ID, seq.State.Get().Status)
 				return
 			}
-			if err := testPlugResp(seq.Actions[1], "actionID"); err != nil {
-				tr.Err = fmt.Errorf("sequence: %v", err)
+			if err := testPlugResp(seq.Actions[1], etoeID); err != nil {
+				tr.Err = fmt.Errorf("sequence plan ID: %v", err)
+				return
+			}
+			if err := testPlugResp(seq.Actions[2], etoeGroupID); err != nil {
+				tr.Err = fmt.Errorf("sequence group ID: %v", err)
 				return
 			}
 		}

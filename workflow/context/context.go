@@ -16,6 +16,9 @@ import (
 	"github.com/google/uuid"
 )
 
+// groupIDKey is a key for the groupID in context.Value .
+type groupIDKey struct{}
+
 // planIDKey is a key for the planID in context.Value .
 type planIDKey struct{}
 
@@ -132,6 +135,21 @@ func AddAttrs(ctx context.Context, attrs ...slog.Attr) context.Context {
 // Attrs returns the slog.Attr attributes attached to the context. If no attributes are attached, it returns nil.
 func Attrs(ctx context.Context) []slog.Attr {
 	return context.Attrs(ctx)
+}
+
+// GroupID returns groupID from a Context.
+func GroupID(ctx context.Context) uuid.UUID {
+	id, ok := ctx.Value(groupIDKey{}).(uuid.UUID)
+	if ok {
+		return id
+	}
+
+	return uuid.Nil
+}
+
+// SetGroupID sets the groupID for context.
+func SetGroupID(ctx context.Context, id uuid.UUID) context.Context {
+	return context.WithValue(ctx, groupIDKey{}, id)
 }
 
 // PlanID returns planID from a Context.

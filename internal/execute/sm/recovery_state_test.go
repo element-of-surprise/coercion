@@ -57,7 +57,7 @@ func interruptedBypassPlan() *workflow.Plan {
 	action.Attempts.Set([]workflow.Attempt{{Start: start, End: time.Now()}})
 	bypass := &workflow.Checks{ID: workflow.NewV7(), Actions: []*workflow.Action{action}}
 	bypass.State.Set(workflow.State{Status: workflow.Running, Start: start})
-	plan := &workflow.Plan{ID: workflow.NewV7(), BypassChecks: bypass}
+	plan := &workflow.Plan{ID: workflow.NewV7(), GroupID: workflow.NewV7(), BypassChecks: bypass}
 	plan.State.Set(workflow.State{Status: workflow.Running, Start: start})
 	return plan
 }
@@ -83,7 +83,7 @@ func TestRecovery(t *testing.T) {
 	t.Parallel()
 
 	runningPlan := func() *workflow.Plan {
-		plan := &workflow.Plan{ID: workflow.NewV7()}
+		plan := &workflow.Plan{ID: workflow.NewV7(), GroupID: workflow.NewV7()}
 		plan.State.Set(workflow.State{Status: workflow.Running})
 		return plan
 	}
@@ -112,6 +112,18 @@ func TestRecovery(t *testing.T) {
 			name:       "Success: objects Recovery settles are written after their descendants, and the Plan last",
 			plan:       interruptedBypassPlan,
 			wantWrites: []string{"action:Completed", "checks:Completed", "plan:Running"},
+			wantNext:   true,
+		},
+		{
+			// Many callers never set a GroupID, so a plan without one must recover the same way, with uuid.Nil as the
+			// group ID in the Context.
+			name: "Success: a Running plan without a group ID is written as still Running and goes to End",
+			plan: func() *workflow.Plan {
+				plan := &workflow.Plan{ID: workflow.NewV7()}
+				plan.State.Set(workflow.State{Status: workflow.Running})
+				return plan
+			},
+			wantWrites: []string{"plan:Running"},
 			wantNext:   true,
 		},
 		{
@@ -147,6 +159,14 @@ func TestRecovery(t *testing.T) {
 		}
 		if diff := pretty.Compare(test.wantWrites, writes); diff != "" {
 			t.Errorf("TestRecovery(%s): writes -want +got:\n%s", test.name, diff)
+		}
+		// Regression: Recovery set the plan ID only on the path that resumes running and never set the group ID, so
+		// the writes it makes and End, which it goes to when nothing is left to run, had neither in their Context.
+		if got := context.PlanID(req.Ctx); got != plan.ID {
+			t.Errorf("TestRecovery(%s): got plan ID %s in the Context, want %s", test.name, got, plan.ID)
+		}
+		if got := context.GroupID(req.Ctx); got != plan.GroupID {
+			t.Errorf("TestRecovery(%s): got group ID %s in the Context, want %s", test.name, got, plan.GroupID)
 		}
 		switch {
 		case req.Err == nil && test.wantErr:

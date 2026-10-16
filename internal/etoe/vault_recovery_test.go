@@ -59,6 +59,7 @@ func TestStorageRecovery(t *testing.T) {
 		t.Fatalf("Failed to create plan: %v", err)
 	}
 
+	groupID := plan.GroupID
 	planID, err := ws.Submit(ctx, plan)
 	if err != nil {
 		t.Fatalf("Failed to submit plan: %v", err)
@@ -163,6 +164,10 @@ func TestStorageRecovery(t *testing.T) {
 	if result.State.Get().Status != workflow.Completed {
 		t.Fatalf("Expected recovered plan to complete, got status: %s", result.State.Get().Status)
 	}
+	// The PostChecks run after the restart, so they show recovery put the plan and group IDs in the Context.
+	if err := testCheckIDs(result.PostChecks, planID, groupID); err != nil {
+		t.Errorf("TestStorageRecovery(PostChecks): %v", err)
+	}
 	// Additional validation: Check that some actions were actually executed
 	if len(result.Blocks) == 0 {
 		t.Fatal("Expected plan to have blocks")
@@ -171,6 +176,9 @@ func TestStorageRecovery(t *testing.T) {
 	for _, block := range result.Blocks {
 		if block.State.Get().Status != workflow.Completed {
 			t.Errorf("Block %s did not complete, status: %s", block.ID, block.State.Get().Status)
+		}
+		if err := testCheckIDs(block.PostChecks, planID, groupID); err != nil {
+			t.Errorf("TestStorageRecovery(block PostChecks): %v", err)
 		}
 		for _, seq := range block.Sequences {
 			if seq.State.Get().Status != workflow.Completed {
@@ -209,6 +217,12 @@ func createLongRunningPlan() (*workflow.Plan, error) {
 				Plugin: "check",
 				Req:    testplugin.Req{Arg: "planid"},
 			},
+			{
+				Name:   "check",
+				Descr:  "Quick check action",
+				Plugin: "check",
+				Req:    testplugin.Req{Arg: "groupid"},
+			},
 		},
 	}
 
@@ -243,7 +257,7 @@ func createLongRunningPlan() (*workflow.Plan, error) {
 	}
 
 	// Build the plan
-	build, err := builder.New("blob-recovery-test", "Test plan for blob storage recovery functionality")
+	build, err := builder.New("blob-recovery-test", "Test plan for blob storage recovery functionality", builder.WithGroupID(workflow.NewV7()))
 	if err != nil {
 		return nil, fmt.Errorf("failed to create builder: %w", err)
 	}
