@@ -124,6 +124,8 @@ func init() {
 	if err != nil {
 		panic(err)
 	}
+	// Storage keeps BypassIfBypassed as it is; it does not check the Keys refer to earlier Blocks.
+	plan.Blocks[0].BypassIfBypassed = []uuid.UUID{mustUUID(), mustUUID()}
 
 	for item := range walk.Plan(plan) {
 		setter := item.Value.(setters)

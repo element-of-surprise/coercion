@@ -45,6 +45,8 @@ type column struct {
 var addedColumns = []column{
 	// runtime_update holds Plan.RuntimeUpdate, the heartbeat startup recovery ages a running Plan out by.
 	{table: "plans", name: "runtime_update", def: "INTEGER NOT NULL DEFAULT 0"},
+	// bypassifbypassed holds Block.BypassIfBypassed as a JSON list of Keys. NULL when there are none.
+	{table: "blocks", name: "bypassifbypassed", def: "BLOB"},
 }
 
 var blocksSchema = `
@@ -57,6 +59,7 @@ CREATE Table If Not Exists blocks (
     pos INTEGER NOT NULL,
     entrancedelay INTEGER NOT NULL,
     exitdelay INTEGER NOT NULL,
+    bypassifbypassed BLOB,
     bypasschecks TEXT,
     prechecks TEXT,
     postchecks TEXT,

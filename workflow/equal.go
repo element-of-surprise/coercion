@@ -3,6 +3,7 @@ package workflow
 import (
 	"bytes"
 	"reflect"
+	"slices"
 
 	"github.com/element-of-surprise/coercion/plugins"
 )
@@ -137,6 +138,9 @@ func (b *Block) Equal(other *Block) bool {
 		return false
 	}
 	if b.ExitDelay != other.ExitDelay {
+		return false
+	}
+	if !slices.Equal(b.BypassIfBypassed, other.BypassIfBypassed) {
 		return false
 	}
 	if !checksEqual(b.BypassChecks, other.BypassChecks) {

@@ -48,6 +48,7 @@ func (p reader) docToBlock(ctx context.Context, response *azcosmos.ItemResponse)
 		Descr:             resp.Descr,
 		EntranceDelay:     resp.EntranceDelay,
 		ExitDelay:         resp.ExitDelay,
+		BypassIfBypassed:  resp.BypassIfBypassed,
 		Concurrency:       resp.Concurrency,
 		ToleratedFailures: resp.ToleratedFailures,
 	}

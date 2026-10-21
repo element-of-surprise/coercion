@@ -31,6 +31,30 @@ CREATE Table plans (
 	reason INTEGER
 );`
 
+// blocksBeforeBypassIfBypassed is the blocks table as databases created before the bypassifbypassed column have it.
+const blocksBeforeBypassIfBypassed = `
+CREATE Table blocks (
+	id TEXT PRIMARY KEY,
+	key TEXT,
+	plan_id BLOB NOT NULL,
+	name TEXT NOT NULL,
+	descr TEXT NOT NULL,
+	pos INTEGER NOT NULL,
+	entrancedelay INTEGER NOT NULL,
+	exitdelay INTEGER NOT NULL,
+	bypasschecks TEXT,
+	prechecks TEXT,
+	postchecks TEXT,
+	contchecks TEXT,
+	deferredchecks TEXT,
+	sequences BLOB NOT NULL,
+	concurrency INTEGER NOT NULL,
+	toleratedfailures INTEGER NOT NULL,
+	state_status INTEGER NOT NULL,
+	state_start INTEGER NOT NULL,
+	state_end INTEGER NOT NULL
+);`
+
 // oldPlanID is the Plan row written into a database before it has the runtime_update column.
 const oldPlanID = "0191d3a4-0000-7000-8000-000000000001"
 
@@ -65,6 +89,13 @@ func TestCreateTables(t *testing.T) {
 			wantOldRow: true,
 		},
 		{
+			name: "Success: a database created before bypassifbypassed gets the column.",
+			setup: func(t *testing.T, conn *sqlite.Conn) error {
+				execSQL(t, conn, blocksBeforeBypassIfBypassed)
+				return nil
+			},
+		},
+		{
 			name: "Success: a database that already has the column is left as it is.",
 			setup: func(t *testing.T, conn *sqlite.Conn) error {
 				return createTables(t.Context(), conn)
@@ -89,12 +120,18 @@ func TestCreateTables(t *testing.T) {
 			continue
 		}
 
-		has, err := hasColumn(conn, "plans", "runtime_update")
-		if err != nil {
-			t.Fatalf("TestCreateTables(%s): hasColumn: %s", test.name, err)
+		missing := false
+		for _, c := range addedColumns {
+			has, err := hasColumn(conn, c.table, c.name)
+			if err != nil {
+				t.Fatalf("TestCreateTables(%s): hasColumn: %s", test.name, err)
+			}
+			if !has {
+				t.Errorf("TestCreateTables(%s): %s has no %s column, want it", test.name, c.table, c.name)
+				missing = true
+			}
 		}
-		if !has {
-			t.Errorf("TestCreateTables(%s): plans has no runtime_update column, want it", test.name)
+		if missing {
 			continue
 		}
 

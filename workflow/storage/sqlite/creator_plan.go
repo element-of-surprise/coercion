@@ -194,6 +194,7 @@ const insertBlock = `
 		pos,
 		entrancedelay,
 		exitdelay,
+		bypassifbypassed,
 		bypasschecks,
 		prechecks,
 		postchecks,
@@ -205,7 +206,7 @@ const insertBlock = `
 		state_status,
 		state_start,
 		state_end
-	) VALUES ($id, $key, $plan_id, $name, $descr, $pos, $entrancedelay, $exitdelay, $bypasschecks, $prechecks, $postchecks, $contchecks, $deferredchecks,
+	) VALUES ($id, $key, $plan_id, $name, $descr, $pos, $entrancedelay, $exitdelay, $bypassifbypassed, $bypasschecks, $prechecks, $postchecks, $contchecks, $deferredchecks,
 	$sequences, $concurrency, $toleratedfailures,$state_status, $state_start, $state_end)`
 
 func commitBlock(ctx context.Context, conn *sqlite.Conn, planID uuid.UUID, pos int, block *workflow.Block, capture *CaptureStmts) error {
@@ -231,6 +232,13 @@ func commitBlock(ctx context.Context, conn *sqlite.Conn, planID uuid.UUID, pos i
 	stmt.SetInt64("$pos", int64(pos))
 	stmt.SetInt64("$entrancedelay", int64(block.EntranceDelay))
 	stmt.SetInt64("$exitdelay", int64(block.ExitDelay))
+	if len(block.BypassIfBypassed) > 0 {
+		b, err := json.Marshal(block.BypassIfBypassed)
+		if err != nil {
+			return fmt.Errorf("commitBlock(bypassifbypassed): %w", err)
+		}
+		stmt.SetBytes("$bypassifbypassed", b)
+	}
 	if block.BypassChecks != nil {
 		stmt.SetText("$bypasschecks", block.BypassChecks.ID.String())
 	}

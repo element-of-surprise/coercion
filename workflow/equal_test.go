@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/element-of-surprise/coercion/plugins"
+	"github.com/google/uuid"
 )
 
 func TestStateEqual(t *testing.T) {
@@ -774,6 +775,18 @@ func TestBlockEqual(t *testing.T) {
 				Sequences: []*Sequence{
 					{ID: id1, Name: "seq2"},
 				},
+			},
+			want: false,
+		},
+		{
+			name: "Success: different BypassIfBypassed",
+			b1: &Block{
+				ID:               id1,
+				BypassIfBypassed: []uuid.UUID{id1},
+			},
+			b2: &Block{
+				ID:               id1,
+				BypassIfBypassed: []uuid.UUID{id2},
 			},
 			want: false,
 		},

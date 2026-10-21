@@ -52,6 +52,7 @@ type blocksEntry struct {
 	Pos               int                 `json:"pos,omitempty"`
 	EntranceDelay     time.Duration       `json:"entranceDelay,omitempty,format:iso8601"`
 	ExitDelay         time.Duration       `json:"exitDelay,omitempty,format:iso8601"`
+	BypassIfBypassed  []uuid.UUID         `json:"bypassIfBypassed,omitempty"`
 	BypassChecks      uuid.UUID           `json:"bypassChecks,omitempty"`
 	PreChecks         uuid.UUID           `json:"preChecks,omitempty"`
 	PostChecks        uuid.UUID           `json:"postChecks,omitempty"`
