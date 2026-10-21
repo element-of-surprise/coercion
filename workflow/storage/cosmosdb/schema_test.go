@@ -57,6 +57,7 @@ func TestMarshalBlocksEntry(t *testing.T) {
 		Pos:               1,
 		EntranceDelay:     5 * time.Second,
 		ExitDelay:         10 * time.Second,
+		BypassIfBypassed:  []uuid.UUID{mustUUID()},
 		BypassChecks:      mustUUID(),
 		PreChecks:         mustUUID(),
 		PostChecks:        mustUUID(),

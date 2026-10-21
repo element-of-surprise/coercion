@@ -438,6 +438,26 @@ for item := range walk.Plan(ctx, plan) {
 If you want to check for conditions that should cause a `Plan` or `Block` to automatically complete without running anything, you can use `BypassChecks`.
 Failure in `BypassChecks` will not cause a failure, but will cause the `Plan` or `Block` to run.
 
+A `Block` can also be bypassed because an earlier `Block` was. `Block.BypassIfBypassed` holds the `Key`s of earlier
+`Block`s (a `Plan` that lists any other `Key` fails validation); if any of them was bypassed, this `Block` is bypassed when it is reached, without waiting out its `EntranceDelay`
+or running its `BypassChecks`. A `Block` bypassed this way counts as bypassed for later `Block`s that list it, so this chains.
+`Block.Bypassed()` reports whether a `Block` was bypassed.
+
+```go
+build.AddBlock(builder.BlockArgs{Name: "reimage", Descr: "reimage", Key: reimageKey, Concurrency: 1})
+build.AddChecks(builder.BypassChecks, nodeHealthy).Up()
+...
+// If the node was healthy before the reimage, it does not wait 5 minutes to find that out again.
+build.AddBlock(
+	builder.BlockArgs{
+		Name: "redeploy", Descr: "redeploy", Concurrency: 1,
+		EntranceDelay: 5 * time.Minute, BypassIfBypassed: []uuid.UUID{reimageKey},
+	},
+)
+build.AddChecks(builder.BypassChecks, nodeHealthy).Up()
+...
+```
+
 ### Cloning a Plan
 
 The `clone` package in `workflow/utils/clone` provides methods to clone a `Plan` object. By default, this will attempt to remove

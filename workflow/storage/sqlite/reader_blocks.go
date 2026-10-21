@@ -7,6 +7,7 @@ import (
 	"github.com/gostdlib/base/context"
 
 	"github.com/element-of-surprise/coercion/workflow"
+	"github.com/go-json-experiment/json"
 	"github.com/google/uuid"
 	"zombiezen.com/go/sqlite"
 	"zombiezen.com/go/sqlite/sqlitex"
@@ -92,6 +93,11 @@ func (p reader) blockRowToBlock(ctx context.Context, conn *sqlite.Conn, stmt *sq
 	b.Descr = stmt.GetText("descr")
 	b.EntranceDelay = time.Duration(stmt.GetInt64("entrancedelay"))
 	b.ExitDelay = time.Duration(stmt.GetInt64("exitdelay"))
+	if buf := fieldToBytes("bypassifbypassed", stmt); buf != nil {
+		if err := json.Unmarshal(buf, &b.BypassIfBypassed); err != nil {
+			return nil, fmt.Errorf("couldn't read block bypassifbypassed: %w", err)
+		}
+	}
 	state, err := fieldToState(stmt)
 	if err != nil {
 		return nil, fmt.Errorf("blockRowToBlock: %w", err)

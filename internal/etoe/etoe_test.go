@@ -717,6 +717,121 @@ func TestBypassBlock(t *testing.T) {
 	}
 }
 
+// TestBypassIfBypassed tests that a Block listing a bypassed Block in BypassIfBypassed is bypassed without waiting
+// out its EntranceDelay, that this chains, and that a Block listing a Block that ran still runs.
+func TestBypassIfBypassed(t *testing.T) {
+	flag.Parse()
+	if err := validateFlags(); err != nil {
+		t.Fatalf("TestBypassIfBypassed: failed to validate flags: %v", err)
+	}
+	initGlobals()
+
+	// The bypassed Blocks have an hour long EntranceDelay, so waiting one out times the Plan out.
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+
+	keys := []uuid.UUID{workflow.NewV7(), workflow.NewV7(), workflow.NewV7(), workflow.NewV7(), workflow.NewV7()}
+
+	seq := func(name string) *workflow.Sequence {
+		return &workflow.Sequence{
+			Name:    name,
+			Descr:   name,
+			Actions: []*workflow.Action{{Name: name, Descr: name, Plugin: testplugin.Name, Req: testplugin.Req{}}},
+		}
+	}
+	checks := func(name string) *workflow.Checks {
+		return &workflow.Checks{Actions: []*workflow.Action{{Name: name, Descr: name, Plugin: "check", Req: testplugin.Req{}}}}
+	}
+
+	build, err := builder.New("bypass if bypassed", "tests BypassIfBypassed")
+	if err != nil {
+		t.Fatalf("TestBypassIfBypassed: builder.New: %v", err)
+	}
+
+	// block0 is bypassed by its BypassChecks.
+	build.AddBlock(builder.BlockArgs{Name: "block0", Descr: "block0", Key: keys[0], Concurrency: 1})
+	build.AddChecks(builder.BypassChecks, checks("bypass0")).Up()
+	build.AddSequence(seq("seq0")).Up().Up()
+
+	// block1 is bypassed because block0 was.
+	build.AddBlock(builder.BlockArgs{
+		Name: "block1", Descr: "block1", Key: keys[1], Concurrency: 1,
+		EntranceDelay: time.Hour, BypassIfBypassed: []uuid.UUID{keys[0]},
+	})
+	build.AddChecks(builder.PreChecks, checks("pre1")).Up()
+	build.AddSequence(seq("seq1")).Up().Up()
+
+	// block2 is bypassed because block1 was.
+	build.AddBlock(builder.BlockArgs{
+		Name: "block2", Descr: "block2", Key: keys[2], Concurrency: 1,
+		EntranceDelay: time.Hour, BypassIfBypassed: []uuid.UUID{keys[1]},
+	})
+	build.AddSequence(seq("seq2")).Up().Up()
+
+	// block3 runs.
+	build.AddBlock(builder.BlockArgs{Name: "block3", Descr: "block3", Key: keys[3], Concurrency: 1})
+	build.AddSequence(seq("seq3")).Up().Up()
+
+	// block4 runs, as block3 ran.
+	build.AddBlock(builder.BlockArgs{
+		Name: "block4", Descr: "block4", Key: keys[4], Concurrency: 1,
+		BypassIfBypassed: []uuid.UUID{keys[3]},
+	})
+	build.AddChecks(builder.PreChecks, checks("pre4")).Up()
+	build.AddSequence(seq("seq4")).Up().Up()
+
+	plan, err := build.Plan()
+	if err != nil {
+		t.Fatalf("TestBypassIfBypassed: build.Plan: %v", err)
+	}
+
+	result := runPlan(t, ctx, plan)
+
+	if got := result.State.Get().Status; got != workflow.Completed {
+		t.Fatalf("TestBypassIfBypassed: got plan status %v, want %v", got, workflow.Completed)
+	}
+
+	tests := []struct {
+		name string
+		// wantSeq is the Status every Sequence in the Block must have.
+		wantSeq workflow.Status
+		// wantPre is the Status the Block's PreChecks must have, if it has any.
+		wantPre workflow.Status
+	}{
+		{name: "block0", wantSeq: workflow.NotStarted},
+		{name: "block1", wantSeq: workflow.NotStarted, wantPre: workflow.NotStarted},
+		{name: "block2", wantSeq: workflow.NotStarted},
+		{name: "block3", wantSeq: workflow.Completed},
+		{name: "block4", wantSeq: workflow.Completed, wantPre: workflow.Completed},
+	}
+	if len(result.Blocks) != len(tests) {
+		t.Fatalf("TestBypassIfBypassed: got %d Blocks, want %d", len(result.Blocks), len(tests))
+	}
+	for i, test := range tests {
+		b := result.Blocks[i]
+		if b.Name != test.name {
+			t.Errorf("TestBypassIfBypassed(%s): Block %d is %s", test.name, i, b.Name)
+			continue
+		}
+		if got := b.State.Get().Status; got != workflow.Completed {
+			t.Errorf("TestBypassIfBypassed(%s): got Block status %v, want %v", test.name, got, workflow.Completed)
+		}
+		if got, want := b.Bypassed(), test.wantSeq == workflow.NotStarted; got != want {
+			t.Errorf("TestBypassIfBypassed(%s): got Bypassed() %v, want %v", test.name, got, want)
+		}
+		for _, s := range b.Sequences {
+			if got := s.State.Get().Status; got != test.wantSeq {
+				t.Errorf("TestBypassIfBypassed(%s): got Sequence %s status %v, want %v", test.name, s.Name, got, test.wantSeq)
+			}
+		}
+		if b.PreChecks != nil {
+			if got := b.PreChecks.State.Get().Status; got != test.wantPre {
+				t.Errorf("TestBypassIfBypassed(%s): got PreChecks status %v, want %v", test.name, got, test.wantPre)
+			}
+		}
+	}
+}
+
 func validateFlags() error {
 	switch *vaultType {
 	case "sqlite":

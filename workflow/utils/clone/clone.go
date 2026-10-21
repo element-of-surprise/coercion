@@ -3,6 +3,7 @@ package clone
 
 import (
 	"reflect"
+	"slices"
 	"strings"
 
 	"github.com/gostdlib/base/context"
@@ -11,6 +12,7 @@ import (
 	"github.com/element-of-surprise/coercion/workflow"
 
 	"github.com/brunoga/deep"
+	"github.com/google/uuid"
 )
 
 type cloneOptions struct {
@@ -122,13 +124,35 @@ func Plan(ctx context.Context, p *workflow.Plan, options ...Option) *workflow.Pl
 	}
 
 	np.Blocks = make([]*workflow.Block, 0, len(p.Blocks))
+	// bypassed holds the Keys of Blocks removed as bypassed. A Block that lists one of them would be bypassed too.
+	bypassed := map[uuid.UUID]bool{}
 	for _, b := range p.Blocks {
+		if opts.removeCompleted && (wasBypassed(b) || slices.ContainsFunc(b.BypassIfBypassed, func(k uuid.UUID) bool { return bypassed[k] })) {
+			if b.Key != uuid.Nil {
+				bypassed[b.Key] = true
+			}
+			continue
+		}
 		nb := Block(ctx, b, withOptions(opts))
 		// This happens if the Block has completed.
 		if nb == nil {
 			continue
 		}
 		np.Blocks = append(np.Blocks, nb)
+	}
+
+	if opts.removeCompleted {
+		// A removed Block's Key is no longer in the Plan, so the Blocks that list it cannot.
+		kept := make(map[uuid.UUID]bool, len(np.Blocks))
+		for _, nb := range np.Blocks {
+			nb.BypassIfBypassed = slices.DeleteFunc(nb.BypassIfBypassed, func(k uuid.UUID) bool { return !kept[k] })
+			if len(nb.BypassIfBypassed) == 0 {
+				nb.BypassIfBypassed = nil
+			}
+			if nb.Key != uuid.Nil {
+				kept[nb.Key] = true
+			}
+		}
 	}
 
 	if opts.removeCompleted {
@@ -197,6 +221,12 @@ func Checks(ctx context.Context, c *workflow.Checks, options ...Option) *workflo
 	return clone
 }
 
+// wasBypassed reports whether b was bypassed. Besides Block.Bypassed(), this holds for a Block whose BypassChecks
+// passed but whose own state was not written before the Plan stopped, as Block() removes that Block too.
+func wasBypassed(b *workflow.Block) bool {
+	return b.Bypassed() || (b.BypassChecks != nil && b.BypassChecks.State.Get().Status == workflow.Completed)
+}
+
 // Block clones a Block. This includes all sub-objects.
 func Block(ctx context.Context, b *workflow.Block, options ...Option) *workflow.Block {
 	if b == nil {
@@ -217,6 +247,11 @@ func Block(ctx context.Context, b *workflow.Block, options ...Option) *workflow.
 		ExitDelay:         b.ExitDelay,
 		Concurrency:       b.Concurrency,
 		ToleratedFailures: b.ToleratedFailures,
+		BypassIfBypassed:  slices.Clone(b.BypassIfBypassed),
+	}
+
+	if opts.removeCompleted && b.Bypassed() {
+		return nil
 	}
 
 	if opts.keepState {

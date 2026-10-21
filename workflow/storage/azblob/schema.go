@@ -218,6 +218,7 @@ type blocksEntry struct {
 	Pos               int                 `json:"pos"`
 	EntranceDelay     time.Duration       `json:"entranceDelay,omitempty,format:iso8601"`
 	ExitDelay         time.Duration       `json:"exitDelay,omitempty,format:iso8601"`
+	BypassIfBypassed  []uuid.UUID         `json:"bypassIfBypassed,omitempty"`
 	BypassChecks      uuid.UUID           `json:"bypassChecks,omitempty"`
 	PreChecks         uuid.UUID           `json:"preChecks,omitempty"`
 	PostChecks        uuid.UUID           `json:"postChecks,omitempty"`
@@ -354,6 +355,7 @@ func blockToEntry(b *workflow.Block, pos int) (blocksEntry, error) {
 		Pos:               pos,
 		EntranceDelay:     b.EntranceDelay,
 		ExitDelay:         b.ExitDelay,
+		BypassIfBypassed:  b.BypassIfBypassed,
 		Concurrency:       b.Concurrency,
 		ToleratedFailures: b.ToleratedFailures,
 		StateStatus:       workflow.NotStarted,
@@ -399,6 +401,7 @@ func entryToBlock(entry blocksEntry) (*workflow.Block, error) {
 		Descr:             entry.Descr,
 		EntranceDelay:     entry.EntranceDelay,
 		ExitDelay:         entry.ExitDelay,
+		BypassIfBypassed:  entry.BypassIfBypassed,
 		Concurrency:       entry.Concurrency,
 		ToleratedFailures: entry.ToleratedFailures,
 	}

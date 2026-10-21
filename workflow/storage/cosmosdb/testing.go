@@ -157,6 +157,8 @@ func NewTestPlan() *workflow.Plan {
 	if err != nil {
 		panic(err)
 	}
+	// Storage keeps BypassIfBypassed as it is; it does not check the Keys refer to earlier Blocks.
+	plan.Blocks[0].BypassIfBypassed = []uuid.UUID{mustUUID(), mustUUID()}
 
 	plan.SubmitTime = time.Now().UTC()
 	for item := range walk.Plan(plan) {

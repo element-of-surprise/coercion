@@ -4,6 +4,7 @@ package sm
 import (
 	"fmt"
 	"reflect"
+	"slices"
 	"sync/atomic"
 	"time"
 
@@ -15,6 +16,7 @@ import (
 	"github.com/element-of-surprise/coercion/workflow/storage"
 	"github.com/element-of-surprise/coercion/workflow/utils/walk"
 
+	"github.com/google/uuid"
 	"github.com/gostdlib/base/concurrency/sync"
 	"github.com/gostdlib/base/statemachine"
 	"github.com/gostdlib/base/telemetry/log"
@@ -363,6 +365,27 @@ func (s *States) ExecuteBlock(req statemachine.Request[Data]) statemachine.Reque
 	}()
 
 	if skipBlock(h) {
+		if len(req.Data.blocks) == 1 {
+			req.Data.blocks = nil
+		} else {
+			req.Data.blocks = req.Data.blocks[1:]
+		}
+		req.Next = s.ExecuteBlock
+		return req
+	}
+
+	// A Block that an earlier bypassed Block bypasses is Completed at once, before its EntranceDelay. As with a
+	// BypassChecks bypass, nothing else in it runs. The earlier Blocks are finished, so recovery decides the same.
+	if bypassedBy(req.Data.Plan, h.block) {
+		now := s.now()
+		state := h.block.State.Get()
+		state.Status = workflow.Completed
+		state.Start = now
+		state.End = now
+		h.block.State.Set(state)
+		if h.contCheckResult != nil {
+			close(h.contCheckResult)
+		}
 		if len(req.Data.blocks) == 1 {
 			req.Data.blocks = nil
 		} else {
@@ -1054,6 +1077,19 @@ func (s *States) writeEverything(ctx context.Context, plan *workflow.Plan) {
 	if err := s.store.UpdatePlan(ctx, plan); err != nil {
 		log.Fatalf("failed to write Plan: %v", err)
 	}
+}
+
+// bypassedBy reports whether a Block that b lists in BypassIfBypassed was bypassed.
+func bypassedBy(plan *workflow.Plan, b *workflow.Block) bool {
+	if len(b.BypassIfBypassed) == 0 || plan == nil {
+		return false
+	}
+	for _, other := range plan.Blocks {
+		if other.Key != uuid.Nil && slices.Contains(b.BypassIfBypassed, other.Key) && other.Bypassed() {
+			return true
+		}
+	}
+	return false
 }
 
 // runBypasses runs all gates in the Plan. If any gate fails, the Plan proceeds. If there

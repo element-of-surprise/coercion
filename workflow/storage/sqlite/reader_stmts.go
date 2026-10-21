@@ -41,6 +41,7 @@ SELECT
 	pos,
 	entrancedelay,
 	exitdelay,
+	bypassifbypassed,
 	bypasschecks,
 	prechecks,
 	postchecks,

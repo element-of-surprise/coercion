@@ -49,6 +49,7 @@ package builder
 import (
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -314,12 +315,25 @@ func (b *BuildPlan) AddChecks(cType ChecksType, check *workflow.Checks) *BuildPl
 
 // BlockArgs are arguments for AddBlock that define a Block in the Plan.
 type BlockArgs struct {
-	Key                      uuid.UUID
-	Name                     string
-	Descr                    string
-	EntranceDelay, ExitDelay time.Duration
-	Concurrency              int
-	ToleratedFailures        int
+	// Key is a unique identifier within the Plan that you can use to reference the Block, such as in another
+	// Block's BypassIfBypassed. Optional. See workflow.Block.Key.
+	Key uuid.UUID
+	// Name is the name of the Block. Required.
+	Name string
+	// Descr is a description of the Block. Required.
+	Descr string
+	// EntranceDelay is the amount of time to wait before the Block starts. This defaults to 0.
+	EntranceDelay time.Duration
+	// ExitDelay is the amount of time to wait after the Block has completed. This defaults to 0.
+	ExitDelay time.Duration
+	// Concurrency is the number of Sequences that are executed in parallel. This defaults to 1.
+	Concurrency int
+	// ToleratedFailures is the number of Sequences that are allowed to fail before the Block fails. This defaults
+	// to 0. If set to -1, all Sequences are allowed to fail.
+	ToleratedFailures int
+	// BypassIfBypassed holds the Keys of earlier Blocks that bypass this Block when they are bypassed.
+	// See workflow.Block.BypassIfBypassed.
+	BypassIfBypassed []uuid.UUID
 }
 
 // AddBlock adds a Block to the current workflow Plan. If at any other level of the plan hierarchy,
@@ -352,6 +366,7 @@ func (b *BuildPlan) AddBlock(args BlockArgs) *BuildPlan {
 			ExitDelay:         args.ExitDelay,
 			Concurrency:       args.Concurrency,
 			ToleratedFailures: args.ToleratedFailures,
+			BypassIfBypassed:  slices.Clone(args.BypassIfBypassed),
 		}
 		t.Blocks = append(t.Blocks, block)
 		b.chain = append(b.chain, block)

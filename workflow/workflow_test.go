@@ -9,6 +9,7 @@ import (
 
 	"github.com/element-of-surprise/coercion/plugins"
 	"github.com/element-of-surprise/coercion/plugins/registry"
+	"github.com/google/uuid"
 	"github.com/gostdlib/base/retry/exponential"
 
 	"github.com/kylelemons/godebug/pretty"
@@ -145,6 +146,15 @@ func TestPlanValidate(t *testing.T) {
 			},
 			validators: expectVals,
 		},
+		{
+			name: "Error: a Block's BypassIfBypassed lists a Key no earlier Block has",
+			plan: func() *Plan {
+				p := goodPlan()
+				p.Blocks = []*Block{{BypassIfBypassed: []uuid.UUID{NewV7()}}}
+				return p
+			},
+			err: true,
+		},
 	}
 	for _, test := range tests {
 		ctx := context.Background()
@@ -164,6 +174,89 @@ func TestPlanValidate(t *testing.T) {
 
 		if diff := pretty.Compare(test.validators, gotValidators); diff != "" {
 			t.Errorf("TestPlanValidate(%s): returned validators: -want/+got:\n%s", test.name, diff)
+		}
+	}
+}
+
+func TestValidateBypassIfBypassed(t *testing.T) {
+	t.Parallel()
+
+	a, b, c := NewV7(), NewV7(), NewV7()
+
+	tests := []struct {
+		name   string
+		blocks []*Block
+		err    bool
+	}{
+		{
+			name: "Success: lists earlier Blocks",
+			blocks: []*Block{
+				{Name: "a", Key: a},
+				{Name: "b", Key: b, BypassIfBypassed: []uuid.UUID{a}},
+				{Name: "c", BypassIfBypassed: []uuid.UUID{b, a}},
+			},
+		},
+		{
+			name:   "Error: nil Key",
+			blocks: []*Block{{Name: "a", Key: a}, {Name: "b", BypassIfBypassed: []uuid.UUID{uuid.Nil}}},
+			err:    true,
+		},
+		{
+			name:   "Error: its own Key",
+			blocks: []*Block{{Name: "a", Key: a, BypassIfBypassed: []uuid.UUID{a}}},
+			err:    true,
+		},
+		{
+			name:   "Error: a later Block's Key",
+			blocks: []*Block{{Name: "a", Key: a, BypassIfBypassed: []uuid.UUID{b}}, {Name: "b", Key: b}},
+			err:    true,
+		},
+		{
+			name:   "Error: a Key no Block has",
+			blocks: []*Block{{Name: "a", Key: a}, {Name: "b", BypassIfBypassed: []uuid.UUID{c}}},
+			err:    true,
+		},
+		{
+			name:   "Error: a Key listed twice",
+			blocks: []*Block{{Name: "a", Key: a}, {Name: "b", BypassIfBypassed: []uuid.UUID{a, a}}},
+			err:    true,
+		},
+	}
+
+	for _, test := range tests {
+		err := validateBypassIfBypassed(test.blocks)
+		if test.err != (err != nil) {
+			t.Errorf("TestValidateBypassIfBypassed(%s): got err == %v, want err == %v", test.name, err, test.err)
+		}
+	}
+}
+
+func TestBlockBypassed(t *testing.T) {
+	t.Parallel()
+
+	block := func(status Status, seqStatus Status) *Block {
+		seq := &Sequence{}
+		seq.State.Set(State{Status: seqStatus})
+		b := &Block{Sequences: []*Sequence{seq}}
+		b.State.Set(State{Status: status})
+		return b
+	}
+
+	tests := []struct {
+		name  string
+		block *Block
+		want  bool
+	}{
+		{name: "nil Block", block: nil},
+		{name: "Completed without starting a Sequence", block: block(Completed, NotStarted), want: true},
+		{name: "Completed after running its Sequences", block: block(Completed, Completed)},
+		{name: "Not started", block: block(NotStarted, NotStarted)},
+		{name: "Failed", block: block(Failed, NotStarted)},
+	}
+
+	for _, test := range tests {
+		if got := test.block.Bypassed(); got != test.want {
+			t.Errorf("TestBlockBypassed(%s): got %v, want %v", test.name, got, test.want)
 		}
 	}
 }

@@ -34,6 +34,7 @@ func TestPlan(t *testing.T) {
 		checksKey      = uuid.New()
 		batchKey       = uuid.New()
 		batchActionKey = uuid.New()
+		listedKey      = uuid.New()
 	)
 
 	action := &workflow.Action{
@@ -53,11 +54,12 @@ func TestPlan(t *testing.T) {
 	seq.State.Set(workflow.State{Status: workflow.Completed, Start: start, End: start, ETag: "seq"})
 
 	block := &workflow.Block{
-		ID:        id,
-		Key:       blockKey,
-		Name:      "block1",
-		Descr:     "descr",
-		Sequences: []*workflow.Sequence{seq},
+		ID:               id,
+		Key:              blockKey,
+		Name:             "block1",
+		Descr:            "descr",
+		BypassIfBypassed: []uuid.UUID{listedKey},
+		Sequences:        []*workflow.Sequence{seq},
 	}
 	block.State.Set(workflow.State{Status: workflow.Completed, Start: start, End: start, ETag: "block"})
 
@@ -154,10 +156,11 @@ func TestPlan(t *testing.T) {
 			},
 			Blocks: []*workflow.Block{
 				{
-					ID:    wantID,
-					Key:   blockKey,
-					Name:  "block1",
-					Descr: "descr",
+					ID:               wantID,
+					Key:              blockKey,
+					Name:             "block1",
+					Descr:            "descr",
+					BypassIfBypassed: []uuid.UUID{listedKey},
 					Sequences: []*workflow.Sequence{
 						{
 							ID:      wantID,
@@ -248,6 +251,77 @@ func TestPlan(t *testing.T) {
 		if got, want := got.RuntimeUpdate.Get(), test.wantRuntimeUpdate; !got.Equal(want) {
 			t.Errorf("TestPlan(%s): got RuntimeUpdate %v, want %v", test.name, got, want)
 		}
+	}
+}
+
+func TestPlanRemoveCompletedBypassIfBypassed(t *testing.T) {
+	t.Parallel()
+
+	ranKey, bypassedKey, cutKey, pendingKey := workflow.NewV7(), workflow.NewV7(), workflow.NewV7(), workflow.NewV7()
+
+	// block is a Block in status whose one Sequence and Action are in seqStatus.
+	block := func(name string, key uuid.UUID, status, seqStatus workflow.Status, listed ...uuid.UUID) *workflow.Block {
+		action := &workflow.Action{Name: name}
+		action.State.Set(workflow.State{Status: seqStatus})
+		seq := &workflow.Sequence{Name: name, Actions: []*workflow.Action{action}}
+		seq.State.Set(workflow.State{Status: seqStatus})
+		b := &workflow.Block{Name: name, Key: key, BypassIfBypassed: listed, Sequences: []*workflow.Sequence{seq}}
+		b.State.Set(workflow.State{Status: status})
+		return b
+	}
+
+	// ran is a Block that ran to completion, which the clone removes.
+	ranSeq := &workflow.Sequence{Name: "ran"}
+	ranSeq.State.Set(workflow.State{Status: workflow.Completed})
+	ranPre := &workflow.Checks{}
+	ranPre.State.Set(workflow.State{Status: workflow.Completed})
+	ran := &workflow.Block{Name: "ran", Key: ranKey, PreChecks: ranPre, Sequences: []*workflow.Sequence{ranSeq}}
+	ran.State.Set(workflow.State{Status: workflow.Completed})
+
+	// cut passed its BypassChecks, but the Plan stopped before the Block was written Completed.
+	cut := block("cut", cutKey, workflow.Running, workflow.NotStarted)
+	cut.BypassChecks = &workflow.Checks{}
+	cut.BypassChecks.State.Set(workflow.State{Status: workflow.Completed})
+
+	plan := &workflow.Plan{
+		Name:  "plan",
+		Descr: "plan",
+		Blocks: []*workflow.Block{
+			ran,
+			cut,
+			block("lists the cut block", uuid.Nil, workflow.NotStarted, workflow.NotStarted, cutKey),
+			block("bypassed", bypassedKey, workflow.Completed, workflow.NotStarted),
+			// The Plan stopped before this Block, which would have been bypassed.
+			block("lists the bypassed block", uuid.Nil, workflow.NotStarted, workflow.NotStarted, bypassedKey),
+			block("pending", pendingKey, workflow.NotStarted, workflow.NotStarted),
+			block("lists the pending block", uuid.Nil, workflow.NotStarted, workflow.NotStarted, pendingKey),
+			// The Block that ran is no longer in the Plan, so the clone drops its Key from this list.
+			block("lists the ran and pending blocks", uuid.Nil, workflow.NotStarted, workflow.NotStarted, ranKey, pendingKey),
+			block("lists only the ran block", uuid.Nil, workflow.NotStarted, workflow.NotStarted, ranKey),
+		},
+	}
+
+	got := Plan(t.Context(), plan, WithRemoveCompletedSequences())
+	if got == nil {
+		t.Fatalf("TestPlanRemoveCompletedBypassIfBypassed: got nil Plan, want the Blocks left to run")
+	}
+
+	type entry struct {
+		Name             string
+		BypassIfBypassed []uuid.UUID
+	}
+	want := []entry{
+		{Name: "pending"},
+		{Name: "lists the pending block", BypassIfBypassed: []uuid.UUID{pendingKey}},
+		{Name: "lists the ran and pending blocks", BypassIfBypassed: []uuid.UUID{pendingKey}},
+		{Name: "lists only the ran block"},
+	}
+	var gotEntries []entry
+	for _, b := range got.Blocks {
+		gotEntries = append(gotEntries, entry{Name: b.Name, BypassIfBypassed: b.BypassIfBypassed})
+	}
+	if diff := pretty.Compare(want, gotEntries); diff != "" {
+		t.Errorf("TestPlanRemoveCompletedBypassIfBypassed: -want/+got:\n%s", diff)
 	}
 }
 

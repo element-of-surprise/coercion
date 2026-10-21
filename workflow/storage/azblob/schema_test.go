@@ -1,6 +1,7 @@
 package azblob
 
 import (
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -126,6 +127,7 @@ func TestBlockToEntry(t *testing.T) {
 
 	blockID := workflow.NewV7()
 	planID := workflow.NewV7()
+	listedKey := workflow.NewV7()
 
 	tests := []struct {
 		name    string
@@ -137,10 +139,11 @@ func TestBlockToEntry(t *testing.T) {
 			name: "Success: basic block",
 			block: func() *workflow.Block {
 				b := &workflow.Block{
-					ID:        blockID,
-					Name:      "Test Block",
-					Descr:     "Test Description",
-					Sequences: []*workflow.Sequence{},
+					ID:               blockID,
+					Name:             "Test Block",
+					Descr:            "Test Description",
+					BypassIfBypassed: []uuid.UUID{listedKey},
+					Sequences:        []*workflow.Sequence{},
 				}
 				b.State.Set(workflow.State{Status: workflow.NotStarted})
 				b.SetPlanID(planID)
@@ -192,6 +195,9 @@ func TestBlockToEntry(t *testing.T) {
 			if got.Pos != test.pos {
 				t.Errorf("TestBlockToEntry(%s): Pos got %d, want %d", test.name, got.Pos, test.pos)
 			}
+			if !slices.Equal(got.BypassIfBypassed, test.block.BypassIfBypassed) {
+				t.Errorf("TestBlockToEntry(%s): BypassIfBypassed got %v, want %v", test.name, got.BypassIfBypassed, test.block.BypassIfBypassed)
+			}
 		})
 	}
 }
@@ -201,6 +207,7 @@ func TestEntryToBlock(t *testing.T) {
 
 	blockID := workflow.NewV7()
 	planID := workflow.NewV7()
+	listedKey := workflow.NewV7()
 
 	tests := []struct {
 		name  string
@@ -209,13 +216,14 @@ func TestEntryToBlock(t *testing.T) {
 		{
 			name: "Success: basic entry",
 			entry: blocksEntry{
-				Type:        workflow.OTBlock,
-				ID:          blockID,
-				PlanID:      planID,
-				Name:        "Test Block",
-				Descr:       "Test Description",
-				Pos:         0,
-				StateStatus: workflow.NotStarted,
+				Type:             workflow.OTBlock,
+				ID:               blockID,
+				PlanID:           planID,
+				Name:             "Test Block",
+				Descr:            "Test Description",
+				Pos:              0,
+				BypassIfBypassed: []uuid.UUID{listedKey},
+				StateStatus:      workflow.NotStarted,
 			},
 		},
 	}
@@ -235,6 +243,9 @@ func TestEntryToBlock(t *testing.T) {
 			}
 			if got.GetPlanID() != test.entry.PlanID {
 				t.Errorf("TestEntryToBlock(%s): PlanID got %v, want %v", test.name, got.GetPlanID(), test.entry.PlanID)
+			}
+			if !slices.Equal(got.BypassIfBypassed, test.entry.BypassIfBypassed) {
+				t.Errorf("TestEntryToBlock(%s): BypassIfBypassed got %v, want %v", test.name, got.BypassIfBypassed, test.entry.BypassIfBypassed)
 			}
 		})
 	}

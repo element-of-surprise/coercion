@@ -368,9 +368,26 @@ func TestExecuteBlocks(t *testing.T) {
 
 	states := &States{} // Used to get the method name of a state for wantNextState
 
+	listedKey := workflow.NewV7()
+	// listed is a block with Key listedKey in the given state that left its sequence in seqStatus.
+	listed := func(status, seqStatus workflow.Status) *workflow.Block {
+		seq := newSequenceWithStateAndActionsRecov(&workflow.State{Status: seqStatus}, nil)
+		b := newBlockWithStateSeqsChecks(&workflow.State{Status: status}, []*workflow.Sequence{seq}, nil, nil, nil, nil)
+		b.Key = listedKey
+		return b
+	}
+	// lister is a new block that lists listedKey in BypassIfBypassed. Its EntranceDelay outlasts the test's context.
+	lister := func() *workflow.Block {
+		seq := newSequenceWithStateAndActionsRecov(&workflow.State{}, nil)
+		b := newBlockWithStateSeqsChecks(&workflow.State{}, []*workflow.Sequence{seq}, nil, nil, nil, nil)
+		b.BypassIfBypassed = []uuid.UUID{listedKey}
+		return b
+	}
+
 	tests := []struct {
 		name          string
 		block         block
+		plan          func(b *workflow.Block) *workflow.Plan
 		recovered     bool
 		wantErr       bool
 		wantStatus    workflow.Status
@@ -379,6 +396,25 @@ func TestExecuteBlocks(t *testing.T) {
 		{
 			name:          "Success: with no more blocks the Plan moves to PlanPostChecks",
 			wantNextState: states.PlanPostChecks,
+		},
+		{
+			name:  "Success: a block that lists a bypassed block is Completed without waiting out its EntranceDelay",
+			block: block{block: lister()},
+			plan: func(b *workflow.Block) *workflow.Plan {
+				b.EntranceDelay = time.Hour
+				return &workflow.Plan{Blocks: []*workflow.Block{listed(workflow.Completed, workflow.NotStarted), b}}
+			},
+			wantStatus:    workflow.Completed,
+			wantNextState: states.ExecuteBlock,
+		},
+		{
+			name:  "Success: a block that lists a block that ran goes on to BlockBypassChecks",
+			block: block{block: lister()},
+			plan: func(b *workflow.Block) *workflow.Plan {
+				return &workflow.Plan{Blocks: []*workflow.Block{listed(workflow.Completed, workflow.Completed), b}}
+			},
+			wantStatus:    workflow.Running,
+			wantNextState: states.BlockBypassChecks,
 		},
 		{
 			name: "Success: a new block is marked Running and moves to BlockBypassChecks",
@@ -417,23 +453,31 @@ func TestExecuteBlocks(t *testing.T) {
 		if test.block.block != nil {
 			blocks = append(blocks, test.block)
 		}
+		var plan *workflow.Plan
+		if test.plan != nil {
+			plan = test.plan(test.block.block)
+		}
+		// A block that waits out a long EntranceDelay is Stopped when this ends, rather than hanging the test.
+		ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
 		req := statemachine.Request[Data]{
-			Ctx: t.Context(),
+			Ctx: ctx,
 			Data: Data{
+				Plan:      plan,
 				blocks:    blocks,
 				recovered: test.recovered,
 			},
 		}
 		req = states.ExecuteBlock(req)
+		cancel()
 		if test.wantErr != (req.Data.err != nil) {
 			t.Errorf("TestExecuteBlocks(%s): got err == %v, want err == %v", test.name, req.Data.err, test.wantErr)
 		}
 		if methodName(req.Next) != methodName(test.wantNextState) {
 			t.Errorf("TestExecuteBlocks(%s): got next state = %v, want %v", test.name, methodName(req.Next), methodName(test.wantNextState))
 		}
-		if len(req.Data.blocks) != 0 {
-			if req.Data.blocks[0].block.State.Get().Status != test.wantStatus {
-				t.Errorf("TestExecuteBlocks(%s): got block state = %v, want %v", test.name, req.Data.blocks[0].block.State.Get().Status, test.wantStatus)
+		if test.block.block != nil {
+			if got := test.block.block.State.Get().Status; got != test.wantStatus {
+				t.Errorf("TestExecuteBlocks(%s): got block state = %v, want %v", test.name, got, test.wantStatus)
 			}
 		}
 	}

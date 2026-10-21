@@ -291,12 +291,41 @@ func (p *Plan) validate(ctx context.Context) ([]validator, error) {
 		return nil, errors.New("submit time should not be set by the user")
 	}
 
+	if err := validateBypassIfBypassed(p.Blocks); err != nil {
+		return nil, err
+	}
+
 	vals := []validator{p.BypassChecks, p.PreChecks, p.ContChecks, p.PostChecks, p.DeferredChecks, p.DeferredActions}
 	for _, b := range p.Blocks {
 		vals = append(vals, b)
 	}
 
 	return vals, nil
+}
+
+// validateBypassIfBypassed checks that each Block's BypassIfBypassed lists, without repeats, only the Keys of earlier
+// Blocks. Those Blocks have finished by the time a Block is reached, and a Block cannot depend on itself.
+func validateBypassIfBypassed(blocks []*Block) error {
+	earlier := make(map[uuid.UUID]bool, len(blocks))
+	for _, b := range blocks {
+		if b == nil {
+			continue
+		}
+		seen := make(map[uuid.UUID]bool, len(b.BypassIfBypassed))
+		for _, k := range b.BypassIfBypassed {
+			if seen[k] {
+				return fmt.Errorf("Block(%s): BypassIfBypassed lists Key %s more than once", b.Name, k)
+			}
+			seen[k] = true
+			if k == uuid.Nil || !earlier[k] {
+				return fmt.Errorf("Block(%s): BypassIfBypassed Key %s is not the Key of an earlier Block", b.Name, k)
+			}
+		}
+		if b.Key != uuid.Nil {
+			earlier[b.Key] = true
+		}
+	}
+	return nil
 }
 
 // Checks represents a set of actions that are executed before the workflow starts.
@@ -419,6 +448,10 @@ type Block struct {
 	// ExitDelay is the amount of time to wait after the block has completed. This defaults to 0.
 	ExitDelay time.Duration `json:",format:iso8601"`
 
+	// BypassIfBypassed holds the Keys of earlier Blocks in the Plan. If any of them was bypassed, this Block is
+	// bypassed as soon as it is reached, without waiting out its EntranceDelay or running its BypassChecks. A Block
+	// bypassed this way counts as bypassed for the Blocks that list it. Optional.
+	BypassIfBypassed []uuid.UUID `json:",omitempty"`
 	// BypassChecks are actions that if they succeed will cause the block to be skipped.
 	// If any gate fails, the workflow will be executed. Optional.
 	BypassChecks *Checks
@@ -432,7 +465,7 @@ type Block struct {
 	PostChecks *Checks
 	// DeferredChecks are actions that are executed after the workflow has completed.
 	// This is executed regardless of Block success or failure. However, if the
-	// Block is bypassed via BypassChecks, this will not run.
+	// Block is bypassed, this will not run.
 	// Useful for logging and similar operations. Optional.
 	DeferredChecks *Checks
 
@@ -484,6 +517,20 @@ func (b *Block) GetState() State {
 // SetState is a setter for the State settings.
 func (b *Block) SetState(state State) {
 	b.State.Set(state)
+}
+
+// Bypassed reports whether the Block was bypassed by its BypassChecks or by BypassIfBypassed. A bypassed Block
+// is Completed without any of its Sequences having started; a Block that runs starts all of them.
+func (b *Block) Bypassed() bool {
+	if b == nil || b.State.Get().Status != Completed {
+		return false
+	}
+	for _, seq := range b.Sequences {
+		if seq.State.Get().Status != NotStarted {
+			return false
+		}
+	}
+	return true
 }
 
 // Type implements the Object.Type().
